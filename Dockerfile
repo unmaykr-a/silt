@@ -15,7 +15,7 @@ COPY web/ ./
 RUN npm run build
 
 # Backend: also the native builder, with Go cross-compiling to the target.
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 WORKDIR /s
 COPY go.mod go.sum ./
 RUN go mod download
@@ -29,5 +29,5 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /silt /silt
-EXPOSE 8080
+EXPOSE 8375
 ENTRYPOINT ["/silt"]

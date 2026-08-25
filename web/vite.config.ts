@@ -34,8 +34,8 @@ export default defineConfig({
     // `npm run dev` proxies to a locally running `silt` so the UI and API
     // share an origin, exactly as they do in the built binary.
     proxy: {
-      "/api": "http://localhost:8080",
-      "/healthz": "http://localhost:8080",
+      "/api": "http://localhost:8375",
+      "/healthz": "http://localhost:8375",
     },
   },
 });
