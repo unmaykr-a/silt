@@ -61,6 +61,7 @@ type Service struct {
 	Privileged    bool              `json:"privileged,omitempty"`
 	CapAdd        []string          `json:"cap_add,omitempty"`
 	CapDrop       []string          `json:"cap_drop,omitempty"`
+	DependsOn     []string          `json:"depends_on,omitempty"`
 	Healthcheck   []string          `json:"healthcheck,omitempty"`
 	MemoryLimit   int64             `json:"memory_limit,omitempty"`
 	NanoCPUs      int64             `json:"nano_cpus,omitempty"`
@@ -150,6 +151,7 @@ func Build(p docker.Project, inputs []ServiceInput, r *redact.Redactor) (Observa
 			Privileged:    cfg.Privileged,
 			CapAdd:        cfg.CapAdd,
 			CapDrop:       cfg.CapDrop,
+			DependsOn:     cfg.DependsOn,
 			Healthcheck:   r.Strings(cfg.Healthcheck),
 			MemoryLimit:   cfg.MemoryLimit,
 			NanoCPUs:      cfg.NanoCPUs,

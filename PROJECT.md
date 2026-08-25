@@ -663,8 +663,21 @@ For a redacted key the `before`/`after` carry the HMAC placeholders, so the UI c
 `labels`, `depends_on`, `service_added`, `service_removed`, `state`, `other`.
 
 **Severity heuristic:** `image_id`, `image_digest`, `volumes`, `service_removed` → high;
-`env`, `ports`, `networks`, `command`, `entrypoint`, `healthcheck` → medium;
-`labels`, `resources`, `image_ref` → low.
+`env`, `ports`, `networks`, `command`, `entrypoint`, `healthcheck`, `depends_on`,
+`service_added` → medium; `labels`, `resources`, `image_ref`, `restart_policy`,
+`state` → low. Gaining `privileged` is high regardless of its kind: it is a
+security-relevant change, not a footnote.
+
+**Set fields compare as sets, ordered fields as wholes.** `ports`, `networks`,
+`depends_on` and the capability lists carry no meaning in their order, so a
+reorder is not a change — which is what normalisation bought and the diff must
+not undo. `command`, `entrypoint` and `healthcheck` are order-sensitive and
+compare as a single joined value.
+
+**Mounts key on their container-side target**, not on the whole mount as an
+opaque set member. A bind whose host source changed is one fact — "the /config
+mount moved" — and set semantics would report it as an unrelated removal plus
+addition, losing the before/after pairing that makes it legible.
 
 ### Ingest webhook
 
