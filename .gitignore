@@ -1,0 +1,21 @@
+# Build output
+/silt
+/dist/
+
+# Frontend build output. The directory itself is tracked via
+# internal/web/dist/.gitkeep so that //go:embed compiles on a clean checkout;
+# only the generated files are ignored. See PROJECT.md Section 12.
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+/web/node_modules/
+/web/dist/
+
+# Local data
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# Editors
+.DS_Store
+*.swp

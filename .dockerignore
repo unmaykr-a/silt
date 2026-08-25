@@ -1,0 +1,11 @@
+.git
+.github
+web/node_modules
+web/dist
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+data/
+silt
