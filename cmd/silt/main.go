@@ -17,6 +17,8 @@ import (
 	"github.com/unmaykr-a/silt/internal/collect"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/docker"
+	"github.com/unmaykr-a/silt/internal/redact"
+	"github.com/unmaykr-a/silt/internal/store"
 	"github.com/unmaykr-a/silt/internal/web"
 )
 
@@ -53,9 +55,50 @@ func run() error {
 	}
 	defer func() { _ = dc.Close() }()
 
+	db, err := store.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	log.Info("database ready", "path", cfg.DBPath)
+
+	// Generated on first boot and never logged or exposed. Without it the
+	// stored value digests would be reversible for any low-entropy secret.
+	redactionKey, err := db.RedactionKey(ctx)
+	if err != nil {
+		return err
+	}
+	redactor := redact.New(redactionKey, cfg.KeepKeys)
+
+	snapshotter := &collect.Snapshotter{
+		Client:   dc,
+		Store:    db,
+		Redactor: redactor,
+		Log:      log,
+		HostName: cfg.HostName,
+		Endpoint: cfg.DockerHost,
+	}
+
+	retainer := &store.Retainer{
+		Store: db,
+		Policy: store.RetentionPolicy{
+			Changed:   config.Days(cfg.RetentionDays),
+			Unchanged: config.Days(cfg.UnchangedRetentionDays),
+			Events:    config.Days(cfg.EventRetentionDays),
+		},
+		Interval: cfg.RetentionInterval,
+		Vacuum:   cfg.VacuumInterval,
+		Log:      log,
+	}
+
 	// The collector retries forever, so an engine that is down at startup is
 	// not fatal: Silt keeps serving and reconnects when the engine returns.
-	collector := &collect.Collector{Client: dc, Log: log}
+	collector := &collect.Collector{
+		Client:      dc,
+		Log:         log,
+		Snapshotter: snapshotter,
+		Interval:    cfg.SnapshotInterval,
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -63,6 +106,14 @@ func run() error {
 		log.Info("collector starting", "docker_host", cfg.DockerHost)
 		if err := collector.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("collector stopped", "error", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := retainer.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error("retention stopped", "error", err)
 		}
 	}()
 

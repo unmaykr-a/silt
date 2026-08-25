@@ -2,7 +2,9 @@ GO      ?= go
 NPM     ?= npm
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: check build web run test fmt tidy clean docker
+SQLC_VERSION ?= v1.31.1
+
+.PHONY: check build web run test fmt tidy clean docker sqlc
 
 ## check: the gate every milestone must pass
 check:
@@ -26,6 +28,13 @@ run:
 
 test:
 	$(GO) test ./...
+
+race:
+	$(GO) test ./... -race -count=1
+
+## sqlc: regenerate the typed query layer from internal/store/queries
+sqlc:
+	$(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 
 fmt:
 	$(GO) fmt ./...
