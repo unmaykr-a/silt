@@ -452,7 +452,7 @@ implementation; and no API handler or query may assume `host_id = 1`.
 
 | Concern | Choice | Note |
 |---|---|---|
-| Language | **Go 1.24+** | |
+| Language | **Go 1.25+** | Floor set by docker/docker v28, which pulls in OpenTelemetry |
 | HTTP router | `net/http` stdlib | 1.22+ method+path patterns are enough |
 | Docker | `github.com/docker/docker/client` | |
 | Compose parsing | `github.com/compose-spec/compose-go/v2` | the library Compose itself uses |
@@ -798,7 +798,7 @@ COPY web/ ./
 RUN npm run build
 
 # Backend: also native builder, Go cross-compiles to the target
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 WORKDIR /s
 COPY go.mod go.sum ./
 RUN go mod download
@@ -810,7 +810,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /silt /silt
-EXPOSE 8080
+EXPOSE 8375
 ENTRYPOINT ["/silt"]
 ```
 
@@ -861,7 +861,7 @@ miserable, and second granularity collides on `UNIQUE (project_id, taken_at)`.
 | Env var | Default | Purpose |
 |---|---|---|
 | `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint |
-| `SILT_LISTEN_ADDR` | `:8080` | |
+| `SILT_LISTEN_ADDR` | `:8375` | |
 | `SILT_DB_PATH` | `/data/silt.db` | |
 | `SILT_COMPOSE_ROOTS` | *(empty)* | Comma-separated mounted paths to watch |
 | `SILT_SNAPSHOT_INTERVAL` | `5m` | Reconcile cadence |

@@ -10,11 +10,43 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load with no environment set: %v", err)
 	}
-	if c.ListenAddr != ":8080" {
-		t.Errorf("ListenAddr = %q, want \":8080\"", c.ListenAddr)
+	if c.ListenAddr != ":8375" {
+		t.Errorf("ListenAddr = %q, want \":8375\"", c.ListenAddr)
 	}
 	if c.Level() != slog.LevelInfo {
 		t.Errorf("Level() = %v, want info", c.Level())
+	}
+	if c.DockerHost != "tcp://docker-socket-proxy:2375" {
+		t.Errorf("DockerHost = %q, want the socket proxy default", c.DockerHost)
+	}
+}
+
+func TestDockerHostValidation(t *testing.T) {
+	tests := []struct {
+		host    string
+		wantErr bool
+	}{
+		{"tcp://docker-socket-proxy:2375", false},
+		{"tcp://127.0.0.1:2375", false},
+		{"http://proxy:2375", false},
+		{"https://proxy:2376", false},
+		{"unix:///var/run/docker.sock", false},
+		// A bare host:port is the most likely mistake and must not be accepted
+		// silently, since the client would fail far from the cause.
+		{"docker-socket-proxy:2375", true},
+		{"ssh://host", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			t.Setenv("SILT_DOCKER_HOST", tt.host)
+			_, err := Load()
+			if tt.wantErr && err == nil {
+				t.Errorf("Load() accepted %q, want error", tt.host)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Load() rejected %q: %v", tt.host, err)
+			}
+		})
 	}
 }
 
@@ -36,13 +68,13 @@ func TestLoadValidation(t *testing.T) {
 			name:      "log level is case-insensitive and trimmed",
 			env:       map[string]string{"SILT_LOG_LEVEL": "  WARN "},
 			wantLevel: slog.LevelWarn,
-			wantAddr:  ":8080",
+			wantAddr:  ":8375",
 		},
 		{
 			name:      "warning is accepted as an alias for warn",
 			env:       map[string]string{"SILT_LOG_LEVEL": "warning"},
 			wantLevel: slog.LevelWarn,
-			wantAddr:  ":8080",
+			wantAddr:  ":8375",
 		},
 		{
 			name:    "unknown log level is rejected",
@@ -51,7 +83,7 @@ func TestLoadValidation(t *testing.T) {
 		},
 		{
 			name:    "listen address without a port is rejected",
-			env:     map[string]string{"SILT_LISTEN_ADDR": "8080"},
+			env:     map[string]string{"SILT_LISTEN_ADDR": "8375"},
 			wantErr: true,
 		},
 		{
@@ -61,7 +93,7 @@ func TestLoadValidation(t *testing.T) {
 			name:      "empty listen address falls back to the default",
 			env:       map[string]string{"SILT_LISTEN_ADDR": ""},
 			wantLevel: slog.LevelInfo,
-			wantAddr:  ":8080",
+			wantAddr:  ":8375",
 		},
 	}
 
