@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Silt is dark by default with light available (PROJECT.md Section 9), so the
+   dark variant keys off an explicit class rather than the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: dark light;
+}
