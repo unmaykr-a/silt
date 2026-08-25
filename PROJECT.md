@@ -767,8 +767,11 @@ density strip, SSE live updates.
 
 **M6 — Ship.** Notifications via shoutrrr with kind/severity filtering. Forward-auth header
 support plus optional password fallback. README with a copy-pasteable compose file (Silt +
-socket proxy) and three screenshots. AGPL-3.0. GHCR release workflow with buildx, GH Actions
-cache, and `v*` tag triggers. Renovate config.
+socket proxy) and three screenshots. AGPL-3.0. Renovate config.
+
+*The GHCR release workflow landed early, during M1: the example compose file referenced
+an image that had never been published, which made the file unusable on a real host. It
+publishes multi-arch on pushes to `main` and on `v*` tags.*
 *Done when:* someone who has never seen the repo can be running it in under two minutes.
 
 ---

@@ -9,8 +9,25 @@ Docker host, then lets you diff any two points in time — so when something bre
 
 Silt **never writes to the Docker API.** It observes, through a read-only socket proxy.
 
-> **Status: pre-alpha.** Nothing works yet. See [`PROJECT.md`](PROJECT.md) for the full
-> design brief and milestone plan.
+> **Status: pre-alpha, under active construction.** Silt currently discovers your
+> Compose projects and reports coalesced changes to its log; it does not yet store
+> history, diff snapshots, or show you anything beyond a status page. Follow
+> [`PROJECT.md`](PROJECT.md) for the design brief and milestone plan.
+
+## Running it
+
+```bash
+curl -O https://raw.githubusercontent.com/unmaykr-a/silt/main/docker-compose.yml
+docker compose up -d
+```
+
+Then open `http://<host>:8375`.
+
+The socket proxy in that file is not optional decoration. Mounting
+`/var/run/docker.sock:ro` into Silt directly would not be a security boundary:
+read-only applies to the file, not to the API, so anything holding it can still
+create privileged containers. The proxy enforces read-only at the HTTP verb
+level with `POST=0`.
 
 ## What Silt stores
 
