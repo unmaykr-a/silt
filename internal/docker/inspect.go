@@ -42,6 +42,7 @@ type ContainerConfig struct {
 	Privileged    bool              `json:"privileged,omitempty"`
 	CapAdd        []string          `json:"cap_add,omitempty"`
 	CapDrop       []string          `json:"cap_drop,omitempty"`
+	DependsOn     []string          `json:"depends_on,omitempty"`
 	Healthcheck   []string          `json:"healthcheck,omitempty"`
 	MemoryLimit   int64             `json:"memory_limit,omitempty"`
 	NanoCPUs      int64             `json:"nano_cpus,omitempty"`
@@ -157,6 +158,7 @@ func normaliseInspect(raw container.InspectResponse) Inspected {
 		if raw.Config.Healthcheck != nil {
 			out.Config.Healthcheck = append([]string(nil), raw.Config.Healthcheck.Test...)
 		}
+		out.Config.DependsOn = parseDependsOn(raw.Config.Labels[LabelDependsOn])
 	}
 	out.Config.ImageID = raw.Image
 
@@ -220,6 +222,28 @@ func normaliseInspect(raw container.InspectResponse) Inspected {
 			out.Runtime.StartedAt = &ms
 		}
 	}
+	return out
+}
+
+// parseDependsOn reads Compose's depends_on label, which is a comma-separated
+// list of "service:condition:required" triples. Only the service names are
+// interesting for change detection.
+func parseDependsOn(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	var out []string
+	for _, entry := range strings.Split(v, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if i := strings.IndexByte(entry, ':'); i >= 0 {
+			entry = entry[:i]
+		}
+		out = append(out, entry)
+	}
+	sort.Strings(out)
 	return out
 }
 

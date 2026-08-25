@@ -26,6 +26,7 @@ const (
 	LabelWorkingDir  = "com.docker.compose.project.working_dir"
 	LabelConfigFiles = "com.docker.compose.project.config_files"
 	LabelConfigHash  = "com.docker.compose.config-hash"
+	LabelDependsOn   = "com.docker.compose.depends_on"
 )
 
 // Client is a read-only Docker Engine client.
