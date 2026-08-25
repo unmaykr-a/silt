@@ -55,6 +55,12 @@ jobs:
       # earns its runtime here.
       - name: race
         run: go test ./... -race -count=1
+      # Generated query code drifting from the .sql files would fail at
+      # runtime rather than at build time, so check it here.
+      - name: sqlc output is current
+        run: |
+          make sqlc
+          git diff --exit-code internal/store/sqlcgen
       - name: go.mod is tidy
         run: |
           go mod tidy

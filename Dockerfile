@@ -26,8 +26,16 @@ ARG TARGETOS TARGETARCH VERSION=dev
 # cross-compilation needs a C toolchain and this Dockerfile stops working.
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /silt ./cmd/silt
+# Docker initialises an empty named volume from the image's directory at that
+# path, ownership included. Without a /data owned by the runtime user, the
+# volume lands root-owned and Silt — which runs as nonroot on distroless —
+# cannot create its database. There is no shell in the final stage to fix it
+# there, so stage the directory here.
+RUN mkdir -p /staged-data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /silt /silt
+COPY --from=build --chown=nonroot:nonroot /staged-data /data
+VOLUME ["/data"]
 EXPOSE 8375
 ENTRYPOINT ["/silt"]

@@ -242,9 +242,11 @@ CREATE INDEX idx_service_states_service ON service_states(service, snapshot_id D
 
 -- Env keys are indexed separately so "when did SECRET_KEY last change?" is one query.
 -- Values are NEVER stored unless the key is on the keep-list. See Section 7.
+-- Keyed by the content address of the service's inspect blob, not by
+-- snapshot, so an unchanged service stores one set of rows however many times
+-- it is observed. Reached through service_states.inspect_hash.
 CREATE TABLE env_keys (
-  snapshot_id      INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
-  service          TEXT NOT NULL,
+  inspect_hash     TEXT NOT NULL,
   key              TEXT NOT NULL,
   value_hmac       TEXT NOT NULL,          -- first 12 hex of HMAC-SHA256(install_key,
                                            --   value). Comparable only within this
@@ -252,10 +254,10 @@ CREATE TABLE env_keys (
   value_len_bucket TEXT NOT NULL,          -- empty | short | medium | long
   redacted         INTEGER NOT NULL DEFAULT 1,  -- 0 only if the key is on the keep-list
   value            TEXT,                   -- only populated when redacted = 0
-  PRIMARY KEY (snapshot_id, service, key)
+  PRIMARY KEY (inspect_hash, key)
 );
 -- Powers "when did this key last change?" across a project's history.
-CREATE INDEX idx_env_keys_key ON env_keys(key, snapshot_id DESC);
+CREATE INDEX idx_env_keys_key ON env_keys(key);
 
 CREATE TABLE events (
   id         INTEGER PRIMARY KEY,
@@ -304,12 +306,31 @@ drive policy.
 half (`State.*`, `RestartCount`, timestamps) — otherwise the split is defeated at source.
 Enforce this with an explicit allowlist of inspect fields, not a denylist.
 
+### Observations that change nothing
+
+An observation whose fingerprints both match the previous snapshot carries no
+information beyond "still true at T". Inserting a row for it would write a
+`service_states` row per service and an `env_keys` row per variable — for 40
+services with a dozen variables each, roughly 500 rows to record that nothing
+happened. Measured, an idle hour of five-minute snapshots cost ~670 KB that
+way, against a 50 KB budget, because blob dedupe cannot touch relational rows.
+
+So such an observation updates `last_observed_at` and `observation_count` on
+the existing snapshot and inserts nothing. Measured again, an idle hour now
+costs **zero bytes**.
+
+This changes what `config_changed = 0` means. It no longer includes "nothing
+happened" — those rows do not exist. It means "runtime changed but
+configuration did not": a restart, a health transition. Those are exactly the
+rows a crash-looping container produces in bulk, so the short retention tier
+still has the right thing to prune.
+
 ### Retention policy
 
 - Snapshots with `config_changed = 1` are the valuable ones and they're tiny thanks to
   blob dedupe — keep for `SILT_RETENTION_DAYS` (default 365).
-- Snapshots with `config_changed = 0` are proof-of-liveness — prune after
-  `SILT_UNCHANGED_RETENTION_DAYS` (default 7).
+- Snapshots with `config_changed = 0` are runtime-only changes (restarts,
+  health transitions) — prune after `SILT_UNCHANGED_RETENTION_DAYS` (default 7).
 - Events get their own `SILT_EVENT_RETENTION_DAYS` (default 90). Event volume exceeds
   snapshot volume by orders of magnitude; tying them to the 365-day snapshot tier is how
   the database gets to a gigabyte on a Raspberry Pi.
@@ -317,8 +338,10 @@ Enforce this with an explicit allowlist of inspect fields, not a denylist.
   flag. It is the base for the earliest diff the UI can offer; delete it and the oldest
   visible change has nothing to compare against.
 
-Run a GC pass after pruning that deletes unreferenced blobs. "Unreferenced" means
-referenced by neither `snapshots.compose_hash` **nor** `service_states.inspect_hash` —
+Run a GC pass after pruning that deletes unreferenced blobs **and unreferenced
+`env_keys` rows**, which are content-addressed and orphan the same way.
+"Unreferenced" means referenced by neither `snapshots.compose_hash` **nor**
+`service_states.inspect_hash` —
 inspect blobs are the majority of the rows and forgetting them either leaks the whole
 store or deletes it, depending on which way you get it wrong. Do the whole pass in one
 transaction. `VACUUM` on a much longer cadence (`SILT_VACUUM_INTERVAL`, off by default).
@@ -559,8 +582,16 @@ So:
 - Compose top-level `secrets:` and `configs:` — record names and mount targets only,
   never file contents.
 - The same redaction runs over the `docker inspect` subset before it becomes a blob.
-  `Config.Env` is the obvious one; also scrub `Config.Cmd`, `Config.Entrypoint`,
-  `Config.Labels`, and `HostConfig.Binds` (people put tokens in bind paths).
+  `Config.Env` is the obvious one; also scrub `Config.Cmd`, `Config.Entrypoint`
+  and `Config.Labels`.
+- **Bind mount source paths are redacted**; type, target, mode, and named-volume
+  names are kept. A host path can embed a credential and there is no key to judge
+  it by, so the choice was between keeping every path, redacting every path, or an
+  entropy heuristic — and a heuristic that cannot tell `storage-2023-archive-01`
+  from a hex token is a coin flip dressed up as a guarantee. The cost is real: a
+  volumes diff says the source of a bind changed without saying what to. Structural
+  label namespaces (`com.docker.compose.*`, `org.opencontainers.image.*`) are kept,
+  since discovery depends on them and they are definitionally public.
 - Redaction runs before `slog` sees anything. Route all model logging through a helper
   that takes an already-redacted model; make it impossible to log the raw one.
 - **Sentinel test, required in CI.** Feed a project whose every secret-shaped field
@@ -872,6 +903,8 @@ miserable, and second granularity collides on `UNIQUE (project_id, taken_at)`.
 | `SILT_UNCHANGED_RETENTION_DAYS` | `7` | Snapshots with `config_changed = 0` |
 | `SILT_EVENT_RETENTION_DAYS` | `90` | Events — far higher volume than snapshots |
 | `SILT_VACUUM_INTERVAL` | `0` | `0` disables; e.g. `168h` for weekly |
+| `SILT_RETENTION_INTERVAL` | `1h` | How often the retention pass runs |
+| `SILT_HOST_NAME` | `local` | Label for this Docker host in the database |
 | `SILT_KEEP_KEYS` | *(empty)* | Extra env keys kept in cleartext, `*` glob. Adds to the built-in safe list; there is no redact-list |
 | `SILT_NOTIFY_URLS` | *(empty)* | Comma-separated shoutrrr URLs |
 | `SILT_NOTIFY_ON` | `image_id,image_digest,volumes,service_removed` | Change kinds that notify |
@@ -954,7 +987,27 @@ Changed:
 17. **Ingest hardening** — token via header *or* query (not every webhook source can set
     headers), constant-time compare, 64 KiB body cap, rate limit, fail closed when unset.
 18. **SQLite two-pool setup** — one write connection, one read pool, pragmas in the DSN.
-19. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+19. **Measured during M2** — an idle hour of snapshots cost ~670 KB rather than
+    the budgeted 50 KB, because `service_states` and `env_keys` were written per
+    snapshot and blob dedupe cannot touch relational rows. Observations that
+    change nothing now touch the previous snapshot instead of inserting, and
+    `env_keys` are content-addressed by inspect blob. An idle hour now costs
+    zero bytes. `config_changed = 0` correspondingly now means "runtime-only
+    change" rather than "nothing happened".
+20. **Bind mount sources redacted** — the sentinel test caught a secret planted
+    in a bind path flowing through verbatim, because the command-line redactor
+    only handles `KEY=VALUE` shapes. Mounts are now structured so the host
+    source can be redacted while type, target and mode survive.
+21. **`taken_at` made monotonic per project** — millisecond timestamps still
+    collide when two triggers land in the same millisecond, and
+    `UNIQUE (project_id, taken_at)` turned that into a hard failure that lost
+    the observation. Writes now advance past the previous snapshot's timestamp.
+22. **Go floor 1.25 and sqlc's SQLite limits** — `docker/docker` v28 pulls in
+    OpenTelemetry, which requires Go 1.25. sqlc could not infer types for
+    `SUM`/`COALESCE` or disambiguate a self-referencing `DELETE` subquery on
+    SQLite; both needed explicit `CAST`s and aliasing, as the brief's note about
+    rough edges anticipated.
+23. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

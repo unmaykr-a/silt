@@ -1,0 +1,23 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "internal/store/migrations"
+    queries: "internal/store/queries"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/store/sqlcgen"
+        emit_json_tags: false
+        emit_prepared_queries: false
+        emit_interface: false
+        emit_empty_slices: true
+        overrides:
+          # Columns that are nullable in SQLite but always meaningful in Go.
+          - column: "service_states.image_created_at"
+            go_type:
+              type: "int64"
+              pointer: true
+          - column: "service_states.started_at"
+            go_type:
+              type: "int64"
+              pointer: true
