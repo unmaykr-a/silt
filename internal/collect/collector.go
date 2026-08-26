@@ -25,6 +25,10 @@ type Collector struct {
 	// Interval is the reconcile cadence that catches whatever the event
 	// stream missed. Zero disables it.
 	Interval time.Duration
+	// IntervalFn, when set, supersedes Interval and is re-read on every tick.
+	// The reconcile cadence is editable from the settings screen, and a ticker
+	// built once at startup would keep the old one until a restart.
+	IntervalFn func() time.Duration
 }
 
 // Run blocks until ctx is cancelled.
@@ -80,24 +84,31 @@ func (c *Collector) Run(ctx context.Context) error {
 		}
 	}()
 
-	var ticker *time.Ticker
-	tick := make(<-chan time.Time)
-	if c.Interval > 0 && c.Snapshotter != nil {
-		ticker = time.NewTicker(c.Interval)
-		defer ticker.Stop()
-		tick = ticker.C
-	}
 	intervalDone := make(chan struct{})
 	go func() {
 		defer close(intervalDone)
+		current := c.interval()
+		if current <= 0 || c.Snapshotter == nil {
+			<-ctx.Done()
+			return
+		}
+		ticker := time.NewTicker(current)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-tick:
-				if err := c.Snapshotter.SnapshotAll(ctx, TriggerInterval); err != nil && ctx.Err() == nil {
-					log.Error("interval reconcile failed", "error", err)
-				}
+			case <-ticker.C:
+			}
+			if err := c.Snapshotter.SnapshotAll(ctx, TriggerInterval); err != nil && ctx.Err() == nil {
+				log.Error("interval reconcile failed", "error", err)
+			}
+			// Picked up after the pass rather than before, so an edit that
+			// shortens the interval does not also fire an extra reconcile.
+			if next := c.interval(); next > 0 && next != current {
+				log.Info("snapshot interval changed", "from", current, "to", next)
+				current = next
+				ticker.Reset(current)
 			}
 		}
 	}()
@@ -241,4 +252,12 @@ func (c *Collector) reconcile(ctx context.Context, log *slog.Logger) {
 		)
 	}
 	log.Info("reconciled", "projects", len(projects), "services", services)
+}
+
+// interval is the reconcile cadence in force right now.
+func (c *Collector) interval() time.Duration {
+	if c.IntervalFn != nil {
+		return c.IntervalFn()
+	}
+	return c.Interval
 }

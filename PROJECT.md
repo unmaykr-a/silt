@@ -1108,7 +1108,56 @@ Changed:
     lifecycle chatter moved behind a toggle. The layout went full-width with
     the overflow contained rather than scrolling the page sideways.
 
-30. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+30. **Settings are editable, as overrides on top of the environment (post-M6)**
+    — the original brief said the settings screen is read-only, because "a
+    settings screen that wrote to a database Silt does not read from would be a
+    lie". That reasoning was right about the failure mode and wrong about the
+    fix: the answer is to make the process read from it. The environment stays
+    the baseline, `internal/settings` holds a sparse override document on top,
+    and everything that used to cache a configuration value at startup now
+    re-reads it — the collector's ticker, the retention pass, the redactor's
+    keep-list, the notification sender, the ingest token, the log level. The
+    whole merged document is validated before anything is written, so a
+    rejected edit leaves the database and the running process exactly as they
+    were, and a write that fails never becomes effective.
+
+    What stays environment-only is not an oversight: the listen address and
+    database path cannot change without a restart, and authentication, the
+    Docker endpoint and `SILT_COMPOSE_ROOTS` are the boundary protecting the
+    screen itself. A UI that could widen which files Silt reads, or turn off
+    the login in front of it, would be a way in rather than a setting.
+
+    Secrets keep the same promise they always had. The ingest token is
+    write-only and reported as set-or-not. Notification targets are masked to
+    their scheme, and their host only where that host is a server the operator
+    chose rather than an identifier: a shoutrrr URL is the credential for the
+    service it points at, and handing the list back would turn "can read the
+    UI" into "can read the secrets".
+
+31. **A changelog that is data, not prose (post-M6)** — the release history
+    lives in `internal/changelog` as Go values, and `CHANGELOG.md` is generated
+    from it with a test that fails when the two drift. The UI wants it
+    structured — a release, a date, entries grouped by kind — and parsing prose
+    back into that is a guessing game. `/api/version` reports the build stamp
+    (a tag on a release, a commit otherwise) alongside the release number,
+    because `sha-b0681bd` tells nobody which version they are on.
+
+32. **The density strip became an instrument (post-M6)** — it drew the right
+    picture and answered no questions: no hover readout, no way to act on a
+    spike. Now a bucket names its counts on hover, a drag selects a window that
+    the feed below follows, and a double-click or the range buttons take it
+    back. uPlot's own zoom is off (`setScale: false`): the window belongs to
+    the page, not to the chart, because the list underneath has to move with
+    it.
+
+33. **Navigation is a header, not a list (post-M6)** — the previous fix made
+    the project list scale but left Settings at the bottom of it, which on a
+    thirty-project host means scrolling the whole sidebar to reach it. Timeline,
+    Projects and Settings are now top-level destinations in the header; the
+    sidebar is projects and nothing else; and a Projects page lists every stack
+    at once for when the sidebar is a scroll rather than a glance.
+
+34. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

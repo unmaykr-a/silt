@@ -5,6 +5,10 @@
   // Inline project links were fine for a handful of stacks and unusable at
   // thirty: they wrapped over six lines and pushed the content off screen. A
   // filtered list scales, and stays navigable by keyboard.
+  //
+  // Nothing but projects lives here any more. Timeline and Settings are in the
+  // header, because a settings link at the bottom of a thirty-item scroll is a
+  // settings link nobody can find.
   let {
     projects,
     open = $bindable(),
@@ -42,7 +46,7 @@
     <input
       type="search"
       bind:value={filter}
-      placeholder="Filter {projects.length} projects…"
+      placeholder="Filter projects…"
       aria-label="Filter projects"
       class="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
     />
@@ -51,18 +55,16 @@
   <nav class="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
     <a
       use:link
-      href="/"
+      href="/projects"
       onclick={() => (open = false)}
-      class="block rounded-md px-2.5 py-1.5 text-sm {route.name === 'timeline'
+      class="mb-1 flex items-center justify-between rounded-md px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wide
+             {route.name === 'projects'
         ? 'bg-secondary text-secondary-foreground'
-        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+        : 'text-muted-foreground/60 hover:bg-secondary/50 hover:text-foreground'}"
     >
-      Timeline
+      <span>All projects</span>
+      <span class="font-mono tabular-nums">{projects.length}</span>
     </a>
-
-    <p class="mt-4 px-2.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
-      Projects
-    </p>
 
     {#if matches.length === 0}
       <p class="px-2.5 py-2 text-xs text-muted-foreground/70">
@@ -86,15 +88,5 @@
       </ul>
     {/if}
 
-    <a
-      use:link
-      href="/settings"
-      onclick={() => (open = false)}
-      class="mt-4 block rounded-md px-2.5 py-1.5 text-sm {route.name === 'settings'
-        ? 'bg-secondary text-secondary-foreground'
-        : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
-    >
-      Settings
-    </a>
   </nav>
 </aside>

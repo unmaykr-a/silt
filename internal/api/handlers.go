@@ -480,7 +480,7 @@ const maxIngestBody = 64 << 10
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	// Fail closed: an unset token means the endpoint is not configured, not
 	// that it is open.
-	if s.cfg.IngestToken == "" {
+	if s.conf().IngestToken == "" {
 		writeError(w, http.StatusServiceUnavailable, "ingest is not configured; set SILT_INGEST_TOKEN")
 		return
 	}
@@ -541,13 +541,20 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 // Not every webhook source can set custom headers, and a webhook nobody can
 // call is not a feature.
 func (s *Server) ingestAuthorised(r *http.Request) bool {
+	// Read once: the token is editable at runtime, and comparing the header
+	// against one value and the query against another would be a race with a
+	// security answer.
+	token := s.conf().IngestToken
+	if token == "" {
+		return false
+	}
 	if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
-		if constantTimeEqual(strings.TrimPrefix(header, "Bearer "), s.cfg.IngestToken) {
+		if constantTimeEqual(strings.TrimPrefix(header, "Bearer "), token) {
 			return true
 		}
 	}
-	if token := r.URL.Query().Get("token"); token != "" {
-		return constantTimeEqual(token, s.cfg.IngestToken)
+	if query := r.URL.Query().Get("token"); query != "" {
+		return constantTimeEqual(query, token)
 	}
 	return false
 }

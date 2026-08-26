@@ -20,6 +20,10 @@
   let projects = $state<Project[]>([]);
   let showRoutine = $state(false);
   let rangeMs = $state(86_400_000);
+  // A window dragged out on the density strip. It supersedes rangeMs until it
+  // is cleared, which is what makes "drag across the spike, read the feed"
+  // work: the strip and the list below it share one window.
+  let zoom = $state<{ from: number; to: number } | null>(null);
   let projectFilter = $state(0);
   let severityFilter = $state("");
   let error = $state<string | null>(null);
@@ -27,12 +31,12 @@
 
   $effect(() => {
     // Re-runs whenever a filter changes or an SSE event bumps reloadKey.
-    const key = [rangeMs, projectFilter, reloadKey];
+    const key = [rangeMs, projectFilter, reloadKey, zoom];
     void key;
 
     const controller = new AbortController();
-    const to = Date.now();
-    const from = to - rangeMs;
+    const to = zoom ? zoom.to : Date.now();
+    const from = zoom ? zoom.from : to - rangeMs;
 
     Promise.all([
       api.timeline({ from, to, project: projectFilter || undefined }, controller.signal),
@@ -118,6 +122,17 @@
     return out.slice(0, 300);
   });
 
+  // The zoomed window, rendered short: same day means one date, otherwise two.
+  function window_(from: number, to: number): string {
+    const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
+    const a = new Date(from);
+    const b = new Date(to);
+    const end = a.toDateString() === b.toDateString()
+      ? b.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+      : b.toLocaleString(undefined, opts);
+    return `${a.toLocaleString(undefined, opts)} → ${end}`;
+  }
+
   const hiddenRoutine = $derived(
     (timeline?.events ?? []).filter((e) => ROUTINE_TYPES.has(e.type)).length,
   );
@@ -129,13 +144,30 @@
       {#each RANGES as range (range.label)}
         <button
           class="px-3 py-1.5 text-xs transition-colors first:rounded-l-md last:rounded-r-md
-                 {rangeMs === range.ms ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => (rangeMs = range.ms)}
+                 {!zoom && rangeMs === range.ms
+            ? 'bg-secondary text-secondary-foreground'
+            : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => {
+            zoom = null;
+            rangeMs = range.ms;
+          }}
         >
           {range.label}
         </button>
       {/each}
     </div>
+
+    {#if zoom}
+      <button
+        class="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-foreground
+               transition-colors hover:bg-secondary/60"
+        onclick={() => (zoom = null)}
+        title="Back to the selected range"
+      >
+        <span class="font-mono">{window_(zoom.from, zoom.to)}</span>
+        <span class="text-muted-foreground">×</span>
+      </button>
+    {/if}
 
     <select
       bind:value={projectFilter}
@@ -169,7 +201,12 @@
     <p class="rounded border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</p>
   {/if}
 
-  <DensityStrip {timeline} />
+  <DensityStrip
+    {timeline}
+    zoomed={zoom !== null}
+    onZoom={(from, to) => (zoom = { from, to })}
+    onReset={() => (zoom = null)}
+  />
 
   {#if loading && feed.length === 0}
     <p class="text-sm text-muted-foreground">Loading…</p>

@@ -51,10 +51,14 @@ type Snapshotter struct {
 	Endpoint string
 	// Publisher is optional; nil means nothing is broadcast.
 	Publisher Publisher
-	// Notifier is optional; a nil *notify.Sender is a working no-op.
-	Notifier *notify.Sender
+	// Notifier is optional; a nil one is a working no-op.
+	Notifier Notifier
 	// BaseURL is used to build links in notifications.
 	BaseURL string
+	// BaseURLFn, when set, supersedes BaseURL. It is editable on the settings
+	// screen, and a link in a notification is worth getting right without a
+	// restart.
+	BaseURLFn func() string
 	// Files captures compose files from disk. Nil or disabled means Silt
 	// records only what is running, which needs no mounts.
 	Files *compose.FileReader
@@ -211,7 +215,7 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 // snapshot: runtime-only rows sit in between, and diffing against one of those
 // would report the same configuration change again.
 func (s *Snapshotter) notifyChange(ctx context.Context, projectID int64, project string, result store.SnapshotResult) {
-	if s.Notifier == nil {
+	if s.Notifier == nil || !s.Notifier.Enabled() {
 		return
 	}
 
@@ -243,7 +247,7 @@ func (s *Snapshotter) notifyChange(ctx context.Context, projectID int64, project
 		SnapshotID: result.ID,
 		FromID:     previous[0].ID,
 		Changes:    computed.Changes,
-		BaseURL:    s.BaseURL,
+		BaseURL:    s.baseURL(),
 	})
 }
 
@@ -293,4 +297,20 @@ func (s *Snapshotter) logResult(project, trigger string, r store.SnapshotResult)
 	default:
 		s.Log.Debug("no change", "project", project, "snapshot", r.ID, "trigger", trigger)
 	}
+}
+
+// Notifier is what the snapshotter needs from the notification layer.
+type Notifier interface {
+	Notify(ctx context.Context, c notify.Change)
+	// Enabled lets the snapshotter skip loading and diffing two snapshots when
+	// there is nowhere to send the result.
+	Enabled() bool
+}
+
+// baseURL is the link prefix in force right now.
+func (s *Snapshotter) baseURL() string {
+	if s.BaseURLFn != nil {
+		return s.BaseURLFn()
+	}
+	return s.BaseURL
 }

@@ -93,13 +93,17 @@ func Load() (Config, error) {
 	if err := env.Parse(&c); err != nil {
 		return Config{}, fmt.Errorf("parse environment: %w", err)
 	}
-	if err := c.validate(); err != nil {
+	if err := c.Validate(); err != nil {
 		return Config{}, err
 	}
 	return c, nil
 }
 
-func (c *Config) validate() error {
+// Validate checks the configuration and normalises the fields that have a
+// canonical form. It is exported because the settings layer applies database
+// overrides on top of the environment and must re-run the same checks: a value
+// typed into the UI has to clear exactly the bar an environment variable does.
+func (c *Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.ListenAddr); err != nil {
 		return fmt.Errorf("SILT_LISTEN_ADDR %q is not a valid host:port: %w", c.ListenAddr, err)
 	}
@@ -147,6 +151,19 @@ func (c *Config) validate() error {
 			c.UnchangedRetentionDays, c.RetentionDays)
 	}
 	return nil
+}
+
+// Clone returns a deep copy. The slice fields matter: the settings layer
+// builds an effective configuration by copying the environment baseline and
+// overwriting parts of it, and a shared backing array would let one edit reach
+// back into the baseline.
+func (c Config) Clone() Config {
+	out := c
+	out.KeepKeys = append([]string(nil), c.KeepKeys...)
+	out.NotifyURLs = append([]string(nil), c.NotifyURLs...)
+	out.NotifyOn = append([]string(nil), c.NotifyOn...)
+	out.ComposeRoots = append([]string(nil), c.ComposeRoots...)
+	return out
 }
 
 // Days converts a retention setting to a duration. Zero means keep forever.
