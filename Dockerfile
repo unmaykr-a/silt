@@ -12,6 +12,11 @@ WORKDIR /s/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
+# The build generates its TypeScript types from the OpenAPI spec before
+# typechecking, so the spec is an input to this stage even though it lives
+# outside web/. Its path here must match the repo layout for the same reason
+# the working directory does.
+COPY api/ /s/api/
 RUN npm run build
 
 # Backend: also the native builder, with Go cross-compiling to the target.
