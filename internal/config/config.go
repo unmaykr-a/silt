@@ -72,8 +72,46 @@ type Config struct {
 	TrustProxyAuth bool `env:"SILT_TRUST_PROXY_AUTH" envDefault:"false"`
 	// AuthHeader is the forward-auth header name.
 	AuthHeader string `env:"SILT_AUTH_HEADER" envDefault:"X-Remote-User"`
+	// TrustedProxies are the addresses or CIDR ranges whose forward-auth
+	// header is believed.
+	//
+	// Without this the header is believed from any source, and since anyone
+	// who can open a socket can set a header, "authenticated" would mean
+	// "reached the port" — which on a shared Docker network is every other
+	// container on it.
+	TrustedProxies []string `env:"SILT_TRUSTED_PROXIES" envSeparator:","`
 	// PasswordHash is a bcrypt hash for the fallback login.
 	PasswordHash string `env:"SILT_PASSWORD_HASH"`
+
+	// OIDCIssuer enables OpenID Connect login. Empty disables it.
+	OIDCIssuer string `env:"SILT_OIDC_ISSUER"`
+	// OIDCClientID and OIDCClientSecret are the registered client.
+	OIDCClientID     string `env:"SILT_OIDC_CLIENT_ID"`
+	OIDCClientSecret string `env:"SILT_OIDC_CLIENT_SECRET"`
+	// OIDCRedirectURL must match the provider's registration exactly. Empty
+	// derives it from BaseURL.
+	OIDCRedirectURL string `env:"SILT_OIDC_REDIRECT_URL"`
+	// OIDCScopes always includes openid, whether or not it is listed.
+	OIDCScopes []string `env:"SILT_OIDC_SCOPES" envSeparator:"," envDefault:"openid,profile,email"`
+	// OIDCUsernameClaim and OIDCGroupsClaim differ between providers.
+	OIDCUsernameClaim string `env:"SILT_OIDC_USERNAME_CLAIM" envDefault:"preferred_username"`
+	OIDCGroupsClaim   string `env:"SILT_OIDC_GROUPS_CLAIM" envDefault:"groups"`
+	// OIDCAllowedGroups and OIDCAllowedUsers restrict who may sign in. Both
+	// empty admits anyone the provider authenticates.
+	OIDCAllowedGroups []string `env:"SILT_OIDC_ALLOWED_GROUPS" envSeparator:","`
+	OIDCAllowedUsers  []string `env:"SILT_OIDC_ALLOWED_USERS" envSeparator:","`
+
+	// SessionTTL is how long a session lasts regardless of activity.
+	SessionTTL time.Duration `env:"SILT_SESSION_TTL" envDefault:"720h"`
+	// SessionIdleTTL ends an unused session early. Zero disables it.
+	SessionIdleTTL time.Duration `env:"SILT_SESSION_IDLE_TTL" envDefault:"168h"`
+
+	// MetricsPublic leaves /metrics reachable without authentication.
+	//
+	// It is off by default now: the endpoint names every project on the host
+	// and counts its changes, which is not something to hand to anyone who can
+	// reach the port just because Prometheus finds a token inconvenient.
+	MetricsPublic bool `env:"SILT_METRICS_PUBLIC" envDefault:"false"`
 
 	// ComposeRoots are host paths, mounted read-only into Silt, under which
 	// compose files may be read.
@@ -145,6 +183,30 @@ func (c *Config) Validate() error {
 	if c.MaxComposeFileBytes <= 0 {
 		return fmt.Errorf("SILT_MAX_COMPOSE_FILE_BYTES must be positive, got %d", c.MaxComposeFileBytes)
 	}
+	if c.SessionTTL < time.Minute {
+		return fmt.Errorf("SILT_SESSION_TTL %v is too short; use at least 1m", c.SessionTTL)
+	}
+	if c.SessionIdleTTL < 0 {
+		return fmt.Errorf("SILT_SESSION_IDLE_TTL must not be negative, got %v", c.SessionIdleTTL)
+	}
+	if c.OIDCIssuer != "" {
+		u, err := url.Parse(c.OIDCIssuer)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("SILT_OIDC_ISSUER %q must be an absolute URL, e.g. https://auth.example.com/application/o/silt/", c.OIDCIssuer)
+		}
+		// A provider reached over plain HTTP would carry the authorization
+		// code and the id_token in clear text. Loopback is exempt because a
+		// developer running a provider locally has no other option.
+		if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
+			return fmt.Errorf("SILT_OIDC_ISSUER %q must use https", c.OIDCIssuer)
+		}
+		if c.OIDCClientID == "" {
+			return fmt.Errorf("SILT_OIDC_ISSUER is set, so SILT_OIDC_CLIENT_ID is required")
+		}
+		if c.OIDCRedirectURL == "" && c.BaseURL == "" {
+			return fmt.Errorf("SILT_OIDC_ISSUER is set, so either SILT_OIDC_REDIRECT_URL or SILT_BASE_URL is required to build the callback URL")
+		}
+	}
 	if c.UnchangedRetentionDays > c.RetentionDays && c.RetentionDays > 0 {
 		return fmt.Errorf(
 			"SILT_UNCHANGED_RETENTION_DAYS (%d) exceeds SILT_RETENTION_DAYS (%d): unchanged snapshots would outlive the changes they sit between",
@@ -163,7 +225,30 @@ func (c Config) Clone() Config {
 	out.NotifyURLs = append([]string(nil), c.NotifyURLs...)
 	out.NotifyOn = append([]string(nil), c.NotifyOn...)
 	out.ComposeRoots = append([]string(nil), c.ComposeRoots...)
+	out.TrustedProxies = append([]string(nil), c.TrustedProxies...)
+	out.OIDCScopes = append([]string(nil), c.OIDCScopes...)
+	out.OIDCAllowedGroups = append([]string(nil), c.OIDCAllowedGroups...)
+	out.OIDCAllowedUsers = append([]string(nil), c.OIDCAllowedUsers...)
 	return out
+}
+
+// OIDCCallbackURL is where the provider sends the browser back to.
+func (c Config) OIDCCallbackURL() string {
+	if c.OIDCRedirectURL != "" {
+		return c.OIDCRedirectURL
+	}
+	if c.BaseURL == "" {
+		return ""
+	}
+	return strings.TrimRight(c.BaseURL, "/") + "/api/auth/callback"
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Days converts a retention setting to a duration. Zero means keep forever.

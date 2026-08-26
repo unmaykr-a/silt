@@ -214,6 +214,38 @@ actually change:
 | `SILT_INGEST_TOKEN` | *(empty)* | Enables the webhook |
 | `SILT_LOG_LEVEL` | `info` | |
 
+### Signing in
+
+Three ways, tried in that order. With none of them configured Silt is **open** — the right
+default for something behind your own proxy, and warned about at startup so it is never a
+surprise.
+
+| Variable | Purpose |
+|---|---|
+| `SILT_OIDC_ISSUER` | Enables OpenID Connect. Point it at your provider's issuer URL. |
+| `SILT_OIDC_CLIENT_ID` / `SILT_OIDC_CLIENT_SECRET` | The client you registered. |
+| `SILT_OIDC_REDIRECT_URL` | Defaults to `$SILT_BASE_URL/api/auth/callback`. |
+| `SILT_OIDC_ALLOWED_GROUPS` / `SILT_OIDC_ALLOWED_USERS` | Optional. Both empty admits anyone the provider authenticates. |
+| `SILT_OIDC_GROUPS_CLAIM` / `SILT_OIDC_USERNAME_CLAIM` | Default `groups` and `preferred_username`; providers disagree. |
+| `SILT_TRUST_PROXY_AUTH` + `SILT_AUTH_HEADER` | Believe an identity your reverse proxy asserts. |
+| `SILT_TRUSTED_PROXIES` | **Set this** if you use forward auth. See below. |
+| `SILT_PASSWORD_HASH` | A bcrypt hash, as the fallback when you have neither. |
+| `SILT_SESSION_TTL` / `SILT_SESSION_IDLE_TTL` | Default 30 days and 7 days. |
+| `SILT_METRICS_PUBLIC` | Leaves `/metrics` reachable without authentication. Off by default. |
+
+`SILT_TRUSTED_PROXIES` is the whole security of forward auth. The identity header is
+settable by anyone who can open a socket, so without a trust list "authenticated" means
+"reached the port" — and on a shared Docker network that is every other container on it.
+Set it to your proxy's address or subnet:
+
+```yaml
+SILT_TRUST_PROXY_AUTH: "true"
+SILT_TRUSTED_PROXIES: "172.18.0.0/16"
+```
+
+Sessions are rows in Silt's database, not signed cookies. They survive a restart, signing
+out revokes them server-side, and the Security tab has a button that ends all of them.
+
 Notification URLs are never read back: a shoutrrr URL carries the credential for the
 service it points at, so the Settings screen shows the scheme and host and never the
 token. The ingest token is the same — set-or-not, never echoed.

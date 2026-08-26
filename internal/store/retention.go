@@ -122,6 +122,11 @@ type Retainer struct {
 	// pass, so a retention window edited on the settings screen takes effect
 	// on the next pass rather than on the next restart.
 	Live func() RetentionSettings
+
+	// Extra runs after each pass, for anything else on the same schedule.
+	// Sessions use it: expiring them is the same "remove what is past its
+	// window" job, and one timer is easier to reason about than two.
+	Extra func(ctx context.Context)
 }
 
 // settings returns the policy in force right now.
@@ -176,6 +181,10 @@ func (r *Retainer) Run(ctx context.Context) error {
 				"events", stats.Events,
 				"blobs", stats.Blobs,
 			)
+		}
+
+		if r.Extra != nil {
+			r.Extra(ctx)
 		}
 
 		if current.Vacuum > 0 && time.Since(lastVacuum) >= current.Vacuum {

@@ -11,15 +11,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/unmaykr-a/silt/internal/api"
+	"github.com/unmaykr-a/silt/internal/auth"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/store"
 )
 
-func authServer(t *testing.T, trustProxy bool, header, passwordHash string) *httptest.Server {
+// gateOption tweaks the gate a test server is built with.
+type gateOption func(*api.Gate)
+
+func authServer(t *testing.T, trustProxy bool, header, passwordHash string, opts ...gateOption) *httptest.Server {
 	t.Helper()
 	db, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "silt.db"))
 	if err != nil {
@@ -27,13 +32,29 @@ func authServer(t *testing.T, trustProxy bool, header, passwordHash string) *htt
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	auth, err := api.NewAuth(trustProxy, header, passwordHash)
+	password, err := auth.NewPassword(passwordHash)
 	if err != nil {
-		t.Fatalf("NewAuth: %v", err)
+		t.Fatalf("NewPassword: %v", err)
 	}
+	// No trust list: these tests speak to a loopback listener, and the point
+	// under test is the header, not the peer address. The trust list has its
+	// own tests.
+	proxy, err := auth.NewProxy(trustProxy, header, nil)
+	if err != nil {
+		t.Fatalf("NewProxy: %v", err)
+	}
+	gate := &api.Gate{
+		Sessions: auth.NewSessions(db, time.Hour, 0),
+		Password: password,
+		Proxy:    proxy,
+	}
+	for _, opt := range opts {
+		opt(gate)
+	}
+
 	srv := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, nil,
 		config.Config{IngestToken: "ingest-token"}, nil)
-	srv.SetAuth(auth)
+	srv.SetAuth(gate)
 
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -134,9 +155,9 @@ func TestForgedSessionCookieIsRejected(t *testing.T) {
 
 	for _, value := range []string{
 		"9999999999.deadbeef",
-		"9999999999",
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		"",
-		"notanumber.abc",
+		"../../etc/passwd",
 	} {
 		code, _ := status(t, ts.Client(), "GET", ts.URL+"/api/hosts",
 			map[string]string{"Cookie": "silt_session=" + value}, "")
@@ -151,7 +172,7 @@ func TestForgedSessionCookieIsRejected(t *testing.T) {
 func TestPublicPathsBypassAuth(t *testing.T) {
 	ts := authServer(t, true, "X-Remote-User", "")
 
-	for _, path := range []string{"/healthz", "/readyz", "/metrics", "/api/auth"} {
+	for _, path := range []string{"/healthz", "/readyz", "/api/auth"} {
 		if code, _ := status(t, ts.Client(), "GET", ts.URL+path, nil, ""); code != 200 {
 			t.Errorf("%s = %d, want 200 without auth", path, code)
 		}
@@ -198,8 +219,8 @@ func TestAuthStateReporting(t *testing.T) {
 
 // A malformed hash would otherwise lock the owner out silently.
 func TestInvalidPasswordHashIsRejectedAtStartup(t *testing.T) {
-	if _, err := api.NewAuth(false, "", "not-a-bcrypt-hash"); err == nil {
-		t.Error("NewAuth accepted an invalid bcrypt hash")
+	if _, err := auth.NewPassword("not-a-bcrypt-hash"); err == nil {
+		t.Error("NewPassword accepted an invalid bcrypt hash")
 	}
 }
 

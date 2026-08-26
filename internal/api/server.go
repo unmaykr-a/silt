@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unmaykr-a/silt/internal/auth"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/settings"
 	"github.com/unmaykr-a/silt/internal/store"
@@ -35,7 +36,7 @@ type Server struct {
 	snapshotter Snapshotter
 	started     time.Time
 	version     string
-	auth        *Auth
+	gate        *Gate
 	files       FileReader
 	live        *settings.Live
 }
@@ -73,11 +74,6 @@ func (s *Server) SetSettings(l *settings.Live) { s.live = l }
 // SetFiles installs the compose file reader used by the marking preview.
 func (s *Server) SetFiles(f FileReader) { s.files = f }
 
-// SetAuth installs the authentication policy.
-func (s *Server) SetAuth(a *Auth) {
-	s.auth = a
-}
-
 // Hub exposes the event hub so the collector can publish to it.
 func (s *Server) Hub() *Hub { return s.hub }
 
@@ -114,6 +110,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth", s.getAuthState)
 	mux.HandleFunc("POST /api/login", s.postLogin)
 	mux.HandleFunc("POST /api/logout", s.postLogout)
+	mux.HandleFunc("GET /api/auth/login", s.getOIDCLogin)
+	mux.HandleFunc("GET /api/auth/callback", s.getOIDCCallback)
+	mux.HandleFunc("GET /api/auth/sessions", s.getSessions)
+	mux.HandleFunc("DELETE /api/auth/sessions", s.deleteSessions)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("DELETE /api/settings", s.deleteSettings)
@@ -122,7 +122,9 @@ func (s *Server) Handler() http.Handler {
 
 	// Anything not claimed by an API route belongs to the SPA.
 	mux.Handle("/", web.Handler())
-	return s.logRequests(s.requireAuth(mux))
+	// Security headers wrap everything, including the refusals: a 401 is still
+	// a response a browser renders.
+	return auth.SecurityHeaders(s.logRequests(s.requireAuth(mux)))
 }
 
 // HTTPServer returns a configured *http.Server for cfg.

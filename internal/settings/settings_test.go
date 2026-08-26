@@ -47,6 +47,8 @@ func baseline() config.Config {
 		EventRetentionDays:     90,
 		NotifyMinSeverity:      "medium",
 		MaxComposeFileBytes:    1 << 20,
+		SessionTTL:             720 * time.Hour,
+		SessionIdleTTL:         168 * time.Hour,
 		KeepKeys:               []string{"FROM_ENV"},
 	}
 }

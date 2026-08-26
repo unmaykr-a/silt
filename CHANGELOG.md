@@ -5,6 +5,26 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.4.0 — 2026-08-26
+
+Sign in with your identity provider, and a security pass over everything around it.
+
+### Added
+
+- OpenID Connect login against any provider — authentik, Authelia, Keycloak, Pocket ID, Google. Authorization code flow with PKCE, a verified id_token, and optional group and user allowlists.
+- Sessions are rows in Silt's database rather than signed cookies. They survive a restart, signing out revokes them server-side, and "sign out everywhere" ends all of them at once.
+- A Security section on the settings screen: what is protecting this install, which provider, how many sessions exist, and the button to end them.
+
+### Security
+
+- Forward auth now believes the identity header only from addresses on SILT_TRUSTED_PROXIES. Without that list anything able to reach the port could claim to be anyone — which on a shared Docker network is every other container on it. An empty list still trusts any source, and now says so loudly at startup.
+- /metrics requires authentication by default. It names every project on the host and counts its changes, which is not something to hand out because a scrape is easier without a token. SILT_METRICS_PUBLIC brings the old behaviour back.
+- Unsafe requests from another origin are refused, so a page elsewhere cannot drive Silt through a signed-in browser.
+- Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy and Permissions-Policy on every response. Scripts may only come from Silt itself.
+- Failed password attempts back off per client, after a few free tries so a typo costs nothing. bcrypt handles the offline attack; this handles the online one.
+- The session cookie is marked Secure when the request arrived over TLS, directly or through a proxy that says so — rather than never, as before.
+- The post-login destination is reduced to a same-origin path, so the login flow cannot be turned into an open redirect.
+
 ## 0.3.0 — 2026-08-26
 
 Compose files you can read, a timeline you can scan, and a layout you can choose.

@@ -24,6 +24,7 @@ export type Release = components["schemas"]["Release"];
 export type PruneResult = components["schemas"]["PruneResult"];
 export type ProjectModel = components["schemas"]["ProjectModel"];
 export type AuthState = components["schemas"]["AuthState"];
+export type SessionCount = components["schemas"]["SessionCount"];
 export type ComposeFile = components["schemas"]["ComposeFile"];
 export type FileContent = components["schemas"]["FileContent"];
 export type FileDiff = components["schemas"]["FileDiff"];
@@ -127,6 +128,18 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
   logout: () => request<{ authenticated: boolean }>("/api/logout", { method: "POST" }),
+  sessions: (signal?: AbortSignal) => get<SessionCount>("/api/auth/sessions", signal),
+  revokeSessions: () => request<{ revoked: number }>("/api/auth/sessions", { method: "DELETE" }),
+  /**
+   * Start the OpenID Connect flow.
+   *
+   * A full navigation rather than a fetch: the provider answers with a
+   * redirect to its own login page, which only means anything to the browser's
+   * address bar.
+   */
+  oidcLogin: (next = location.pathname + location.search) => {
+    location.href = `/api/auth/login?next=${encodeURIComponent(next)}`;
+  },
 
   snapshotFiles: (snapshotId: number, signal?: AbortSignal) =>
     get<ComposeFile[]>(`/api/snapshots/${snapshotId}/files`, signal),
