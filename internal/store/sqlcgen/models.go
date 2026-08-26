@@ -15,6 +15,15 @@ type Blob struct {
 	CreatedAt int64
 }
 
+type ComposeFile struct {
+	SnapshotID  int64
+	Path        string
+	ContentHash sql.NullString
+	LineCount   int64
+	Size        int64
+	Status      string
+}
+
 type EnvKey struct {
 	InspectHash    string
 	Key            string
@@ -58,6 +67,18 @@ type Project struct {
 	Archived    int64
 }
 
+type RedactionRule struct {
+	ID        int64
+	ProjectID int64
+	Path      string
+	Action    string
+	Kind      string
+	Key       string
+	LineNo    int64
+	Note      string
+	CreatedAt int64
+}
+
 type ServiceState struct {
 	ID             int64
 	SnapshotID     int64
@@ -93,4 +114,6 @@ type Snapshot struct {
 	RuntimeChanged     int64
 	LastObservedAt     int64
 	ObservationCount   int64
+	FilesFingerprint   string
+	FilesChanged       int64
 }

@@ -70,6 +70,53 @@ A test plants a sentinel string in every secret-shaped field, runs a full snapsh
 plus prune and GC, then byte-scans the database file, its WAL, every decompressed blob,
 and captured debug logs. It runs in CI.
 
+## Compose files, line by line
+
+Point Silt at your compose directories and it captures the files themselves on every
+change, so you can see exactly which line moved:
+
+```yaml
+environment:
+  SILT_COMPOSE_ROOTS: /srv,/opt
+volumes:
+  - /srv:/srv:ro     # same path as on the host, so Compose's labels resolve
+  - /opt:/opt:ro
+```
+
+`SILT_COMPOSE_ROOTS` is an **allowlist**, not a hint. The paths Silt would otherwise
+follow come from container labels, and anyone who can start a container sets those, so
+nothing outside these roots is ever read — symlinks included.
+
+**The files are redacted line for line.** A compose file can hold a literal secret and a
+`.env` file is nothing but secrets, so values are replaced with keyed digests while every
+line, comment, indent, image tag and port stays exactly as written:
+
+```diff
+     4 -    image: lscr.io/linuxserver/radarr:5.0.0
+     4 +    image: lscr.io/linuxserver/radarr:5.4.0
+     9 +      - ANALYTICS_DISABLED=[redacted:a04ebe1b1f9c]
+    11        - RADARR_API_KEY=[redacted:cdde1b9231f7]
+    12        - DB_PASSWORD=${POSTGRES_PASSWORD}
+```
+
+A changed secret is a visibly changed line without the value ever being stored.
+`${VAR}` references survive, because seeing *which* variable a service reads is worth
+noticing.
+
+**A file edited but not applied is drift, not a change.** Silt records it as a
+`config.drift` event rather than pretending your running stack moved.
+
+### Choosing what to hide
+
+The built-in safe-key list is a guess. On any file you can open **What to hide** and click
+a line to correct it in either direction — hide a value the list missed, or show one it hid
+unnecessarily.
+
+That view reads the file live and stores nothing. Hiding takes effect *before* anything is
+written, so a hidden value is never stored rather than stored and later concealed. Showing
+applies only to future captures: earlier snapshots hold a digest, not the value, so there
+is nothing there to uncover.
+
 ## Notifications
 
 Set `SILT_NOTIFY_URLS` to any [shoutrrr](https://containrrr.dev/shoutrrr/) target — ntfy,

@@ -127,7 +127,12 @@ func (f *fixture) get(t *testing.T, path string) (*http.Response, []byte) {
 
 func (f *fixture) post(t *testing.T, path, body string, headers map[string]string) (*http.Response, []byte) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, f.srv.URL+path, strings.NewReader(body))
+	return f.do(t, http.MethodPost, path, body, headers)
+}
+
+func (f *fixture) do(t *testing.T, method, path, body string, headers map[string]string) (*http.Response, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, f.srv.URL+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}

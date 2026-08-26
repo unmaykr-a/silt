@@ -22,7 +22,7 @@ func (q *Queries) CountSnapshots(ctx context.Context, projectID int64) (int64, e
 }
 
 const getSnapshot = `-- name: GetSnapshot :one
-SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots WHERE id = ?
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count, files_fingerprint, files_changed FROM snapshots WHERE id = ?
 `
 
 func (q *Queries) GetSnapshot(ctx context.Context, id int64) (Snapshot, error) {
@@ -41,6 +41,8 @@ func (q *Queries) GetSnapshot(ctx context.Context, id int64) (Snapshot, error) {
 		&i.RuntimeChanged,
 		&i.LastObservedAt,
 		&i.ObservationCount,
+		&i.FilesFingerprint,
+		&i.FilesChanged,
 	)
 	return i, err
 }
@@ -118,9 +120,9 @@ const insertSnapshot = `-- name: InsertSnapshot :one
 INSERT INTO snapshots (
   project_id, taken_at, trigger, compose_hash, compose_source,
   config_fingerprint, runtime_fingerprint, config_changed, runtime_changed,
-  last_observed_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count
+  last_observed_at, files_fingerprint, files_changed
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count, files_fingerprint, files_changed
 `
 
 type InsertSnapshotParams struct {
@@ -134,6 +136,8 @@ type InsertSnapshotParams struct {
 	ConfigChanged      int64
 	RuntimeChanged     int64
 	LastObservedAt     int64
+	FilesFingerprint   string
+	FilesChanged       int64
 }
 
 func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) (Snapshot, error) {
@@ -148,6 +152,8 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 		arg.ConfigChanged,
 		arg.RuntimeChanged,
 		arg.LastObservedAt,
+		arg.FilesFingerprint,
+		arg.FilesChanged,
 	)
 	var i Snapshot
 	err := row.Scan(
@@ -163,12 +169,14 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 		&i.RuntimeChanged,
 		&i.LastObservedAt,
 		&i.ObservationCount,
+		&i.FilesFingerprint,
+		&i.FilesChanged,
 	)
 	return i, err
 }
 
 const latestChangedSnapshotsBefore = `-- name: LatestChangedSnapshotsBefore :many
-SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count, files_fingerprint, files_changed FROM snapshots
 WHERE project_id = ?1
   AND taken_at < ?2
   AND config_changed = 1
@@ -204,6 +212,8 @@ func (q *Queries) LatestChangedSnapshotsBefore(ctx context.Context, arg LatestCh
 			&i.RuntimeChanged,
 			&i.LastObservedAt,
 			&i.ObservationCount,
+			&i.FilesFingerprint,
+			&i.FilesChanged,
 		); err != nil {
 			return nil, err
 		}
@@ -219,7 +229,7 @@ func (q *Queries) LatestChangedSnapshotsBefore(ctx context.Context, arg LatestCh
 }
 
 const latestSnapshot = `-- name: LatestSnapshot :one
-SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots WHERE project_id = ? ORDER BY taken_at DESC LIMIT 1
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count, files_fingerprint, files_changed FROM snapshots WHERE project_id = ? ORDER BY taken_at DESC LIMIT 1
 `
 
 func (q *Queries) LatestSnapshot(ctx context.Context, projectID int64) (Snapshot, error) {
@@ -238,6 +248,8 @@ func (q *Queries) LatestSnapshot(ctx context.Context, projectID int64) (Snapshot
 		&i.RuntimeChanged,
 		&i.LastObservedAt,
 		&i.ObservationCount,
+		&i.FilesFingerprint,
+		&i.FilesChanged,
 	)
 	return i, err
 }
@@ -322,7 +334,7 @@ func (q *Queries) ListServiceStates(ctx context.Context, snapshotID int64) ([]Se
 }
 
 const listSnapshots = `-- name: ListSnapshots :many
-SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count, files_fingerprint, files_changed FROM snapshots
 WHERE project_id = ?1
   AND taken_at < ?2
   AND (CAST(?3 AS INTEGER) = 0 OR config_changed = 1)
@@ -364,6 +376,8 @@ func (q *Queries) ListSnapshots(ctx context.Context, arg ListSnapshotsParams) ([
 			&i.RuntimeChanged,
 			&i.LastObservedAt,
 			&i.ObservationCount,
+			&i.FilesFingerprint,
+			&i.FilesChanged,
 		); err != nil {
 			return nil, err
 		}
@@ -568,7 +582,7 @@ func (q *Queries) ServiceHistory(ctx context.Context, arg ServiceHistoryParams) 
 }
 
 const snapshotsInRange = `-- name: SnapshotsInRange :many
-SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count, files_fingerprint, files_changed FROM snapshots
 WHERE taken_at >= ?1
   AND taken_at <= ?2
   AND (CAST(?3 AS INTEGER) = 0 OR project_id = ?3)
@@ -610,6 +624,8 @@ func (q *Queries) SnapshotsInRange(ctx context.Context, arg SnapshotsInRangePara
 			&i.RuntimeChanged,
 			&i.LastObservedAt,
 			&i.ObservationCount,
+			&i.FilesFingerprint,
+			&i.FilesChanged,
 		); err != nil {
 			return nil, err
 		}

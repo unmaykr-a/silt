@@ -63,3 +63,38 @@ func (s *Store) LoadSnapshotModel(ctx context.Context, id int64) (SnapshotModel,
 
 	return SnapshotModel{Snapshot: snap, Project: project, Runtimes: runtimes}, nil
 }
+
+// RedactionRules returns a project's manual redaction decisions.
+func (s *Store) RedactionRules(ctx context.Context, projectID int64) ([]compose.Rule, error) {
+	rows, err := s.RQ.ListRedactionRules(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("read redaction rules: %w", err)
+	}
+	out := make([]compose.Rule, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, compose.Rule{
+			Path:   r.Path,
+			Action: r.Action,
+			Kind:   r.Kind,
+			Key:    r.Key,
+			LineNo: r.LineNo,
+		})
+	}
+	return out, nil
+}
+
+// ComposeFileContent returns the redacted text of one captured file.
+func (s *Store) ComposeFileContent(ctx context.Context, snapshotID int64, path string) (string, error) {
+	row, err := s.RQ.GetComposeFile(ctx, sqlcgen.GetComposeFileParams{SnapshotID: snapshotID, Path: path})
+	if err != nil {
+		return "", fmt.Errorf("read compose file %s: %w", path, err)
+	}
+	if !row.ContentHash.Valid {
+		return "", nil
+	}
+	content, err := s.GetBlob(ctx, row.ContentHash.String)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}

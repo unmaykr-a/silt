@@ -254,3 +254,197 @@ func (r *Redactor) Mounts(in []MountInput) []Mount {
 	}
 	return out
 }
+
+// Reason explains why a line's value was kept or hidden, for the marking UI.
+type Reason string
+
+const (
+	// ReasonStructure means the line holds no value to redact.
+	ReasonStructure Reason = "structure"
+	// ReasonInterpolation means the value is a ${VAR} reference — a pointer to
+	// a secret, not the secret, and worth seeing when it changes.
+	ReasonInterpolation Reason = "interpolation"
+	// ReasonKeepList means the key is on the built-in safe list.
+	ReasonKeepList Reason = "keep_list"
+	// ReasonDefault means it was hidden because nothing said to keep it.
+	ReasonDefault Reason = "default"
+	// ReasonRuleHide and ReasonRuleReveal mean a person decided.
+	ReasonRuleHide   Reason = "rule_hide"
+	ReasonRuleReveal Reason = "rule_reveal"
+)
+
+// LinePolicy overrides the built-in keep-list for a specific file.
+//
+// It exists so a person can correct the guess in both directions: hide a key
+// the list missed, reveal one it over-hid.
+type LinePolicy interface {
+	// Decide returns whether to keep the value in cleartext, and true if a
+	// rule actually applied. A false second return means no rule matched and
+	// the keep-list decides.
+	Decide(lineNo int, key string) (keep bool, matched bool)
+}
+
+// Line describes one line of a redacted file, for the marking UI.
+type Line struct {
+	Number int    `json:"number"`
+	Text   string `json:"text"`
+	// Key is the assignment key on this line, when there is one. Rules keyed
+	// on it survive edits that move the line.
+	Key string `json:"key,omitempty"`
+	// Redacted is true when this line's value was replaced.
+	Redacted bool   `json:"redacted"`
+	Reason   Reason `json:"reason"`
+	// Markable is false for lines with no value to decide about.
+	Markable bool `json:"markable"`
+}
+
+// ComposeText redacts the raw text of a compose or .env file while preserving
+// its line structure exactly, and reports what it did to each line.
+//
+// This is what makes storing the files safe. A compose file can carry literal
+// secrets — an inline `POSTGRES_PASSWORD: hunter2`, a token in a command
+// argument — and a .env file is nothing but secrets. Storing them verbatim
+// would break the one promise the project rests on.
+//
+// Line structure is preserved so a line diff still answers the question people
+// actually ask: which line changed. The value shows as a keyed digest on both
+// sides, so a changed secret is visibly a change without the secret being
+// recoverable. Everything that is not a value — keys, indentation, image
+// references, ports, comments — stays exactly as written.
+//
+// The same function serves the capture path and the marking preview, so what
+// someone sees while choosing what to hide is exactly what would be stored.
+func (r *Redactor) ComposeText(content []byte, policy LinePolicy) ([]byte, []Line) {
+	raw := strings.Split(string(content), "\n")
+	out := make([]string, len(raw))
+	info := make([]Line, len(raw))
+
+	// inEnv tracks whether we are inside an `environment:` block, identified by
+	// indentation: entries indented further than the key belong to it.
+	inEnv := false
+	envIndent := 0
+
+	for i, line := range raw {
+		lineNo := i + 1
+		out[i] = line
+		info[i] = Line{Number: lineNo, Text: line, Reason: ReasonStructure}
+
+		trimmed := strings.TrimSpace(line)
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if inEnv && indent <= envIndent {
+			inEnv = false
+		}
+		if isEnvBlockStart(trimmed) {
+			inEnv = true
+			envIndent = indent
+			continue
+		}
+
+		key, value, ok := assignment(trimmed, inEnv)
+		if !ok || value == "" {
+			continue
+		}
+
+		replacement, redacted, reason := r.decide(lineNo, key, value, policy)
+		out[i] = replaceValue(line, value, replacement)
+		info[i] = Line{
+			Number:   lineNo,
+			Text:     out[i],
+			Key:      strings.TrimSpace(key),
+			Redacted: redacted,
+			Reason:   reason,
+			Markable: true,
+		}
+	}
+	return []byte(strings.Join(out, "\n")), info
+}
+
+// decide resolves one value against the rules and the keep-list, in that
+// order: a person's explicit choice beats a built-in guess in both directions.
+func (r *Redactor) decide(lineNo int, key, value string, policy LinePolicy) (replacement string, redacted bool, reason Reason) {
+	// A ${VAR} reference is not a secret — it is a pointer to one, and seeing
+	// which variable a service reads is exactly the kind of change worth
+	// noticing.
+	if isInterpolation(value) {
+		return value, false, ReasonInterpolation
+	}
+
+	if policy != nil {
+		if keep, matched := policy.Decide(lineNo, strings.TrimSpace(key)); matched {
+			if keep {
+				return value, false, ReasonRuleReveal
+			}
+			return r.Placeholder(unquote(value)), true, ReasonRuleHide
+		}
+	}
+
+	if r.Keep(key) {
+		return value, false, ReasonKeepList
+	}
+	return r.Placeholder(unquote(value)), true, ReasonDefault
+}
+
+// assignment extracts the key and value from a line, in whichever of the forms
+// a compose or .env file uses.
+func assignment(trimmed string, inEnv bool) (key, value string, ok bool) {
+	item := strings.TrimPrefix(trimmed, "- ")
+	listForm := item != trimmed
+	item = strings.TrimPrefix(item, "export ")
+
+	if k, v, found := strings.Cut(item, "="); found {
+		// A YAML key whose value merely contains '=' is not an assignment.
+		if strings.Contains(k, ":") {
+			return "", "", false
+		}
+		return k, v, true
+	}
+	// The mapping form (`KEY: value`) only counts inside an environment block;
+	// elsewhere it is YAML structure like `image: nginx:1.25`.
+	if !inEnv || listForm {
+		return "", "", false
+	}
+	k, v, found := strings.Cut(item, ":")
+	if !found {
+		return "", "", false
+	}
+	return k, strings.TrimSpace(v), true
+}
+
+// isEnvBlockStart reports whether a line opens an environment block.
+func isEnvBlockStart(trimmed string) bool {
+	return trimmed == "environment:" || trimmed == "- environment:"
+}
+
+// isInterpolation reports whether a value is entirely a ${VAR} reference.
+func isInterpolation(value string) bool {
+	v := strings.TrimSpace(unquote(value))
+	return strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") &&
+		!strings.Contains(v[2:len(v)-1], "${")
+}
+
+func unquote(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) >= 2 {
+		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+			return v[1 : len(v)-1]
+		}
+	}
+	return v
+}
+
+// replaceValue swaps the last occurrence of old in line, keeping surrounding
+// whitespace, quoting and any trailing comment untouched.
+func replaceValue(line, old, replacement string) string {
+	if old == replacement {
+		return line
+	}
+	i := strings.LastIndex(line, old)
+	if i < 0 {
+		return line
+	}
+	return line[:i] + replacement + line[i+len(old):]
+}

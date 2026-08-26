@@ -789,11 +789,19 @@ env_keys, events, retention + GC. Container-derived model building, normalisatio
 `config_changed=1`; an idle hour of interval snapshots adds under ~50 KB for 40 services;
 the sentinel test passes.
 
-**M2.5 — Compose file enrichment.** `SILT_COMPOSE_ROOTS`, fsnotify, `compose-go` loading
-with non-fatal interpolation, model merge, `compose_source`, `config.drift` events.
-*Done when:* a stack with `${VAR:?required}` in its compose file loads without aborting
-collection, and editing a compose file without running `up` produces a `config.drift`
-event rather than a phantom config change.
+**M2.5 — Compose file capture.** `SILT_COMPOSE_ROOTS`, raw file capture with
+line-preserving redaction, a line-level diff, manual redaction marking, and
+`config.drift` events.
+*Done when:* editing a compose file without running `up` produces a `config.drift`
+event rather than a phantom config change, and the file diff shows which line moved.
+
+*Delivered after M6, expanded from the original scope.* Rather than loading the files
+through `compose-go` and merging the model, Silt captures the file **text**, redacted
+line for line. That answers the question people actually ask — which line changed — which
+a merged model cannot: it reports that an environment key moved, not where in the file it
+lives or what sits around it. `compose-go` interpolation is not used at all, so the hazard
+Section 5 warns about (a `${VAR:?}` aborting the load for every project on the host) does
+not arise.
 
 **M3 — Diff engine.** Structural diff over normalised project models, classification,
 severity. Table-driven tests covering every change kind.
@@ -919,6 +927,8 @@ miserable, and second granularity collides on `UNIQUE (project_id, taken_at)`.
 | `SILT_RETENTION_INTERVAL` | `1h` | How often the retention pass runs |
 | `SILT_HOST_NAME` | `local` | Label for this Docker host in the database |
 | `SILT_BASE_URL` | *(empty)* | Public URL, used to link notifications to the diff |
+| `SILT_COMPOSE_ROOTS` | *(empty)* | Comma-separated absolute paths, mounted read-only, under which compose files may be read. An allowlist, not a hint |
+| `SILT_MAX_COMPOSE_FILE_BYTES` | `1048576` | Cap on a single captured file |
 | `SILT_KEEP_KEYS` | *(empty)* | Extra env keys kept in cleartext, `*` glob. Adds to the built-in safe list; there is no redact-list |
 | `SILT_NOTIFY_URLS` | *(empty)* | Comma-separated shoutrrr URLs |
 | `SILT_NOTIFY_ON` | `image_id,image_digest,volumes,service_removed` | Change kinds that notify |
@@ -1058,7 +1068,47 @@ Changed:
     not set on the cookie because Silt is commonly reached over plain HTTP on
     a LAN, where a cookie that never arrives is worse than one relying on the
     operator's own network boundary.
-27. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+27. **Compose file capture (post-M6)** — the files themselves are captured, not
+    just the model derived from containers, so a diff can show which line
+    changed. Three decisions carry it:
+
+    **Line-preserving redaction.** A compose file can hold a literal secret and
+    a `.env` file is nothing but secrets, so storing them verbatim would break
+    the project's one promise. Values are replaced with keyed digests while
+    every line, comment, indent, image tag and port stays exactly as written.
+    A changed secret is therefore a visibly changed line without the value ever
+    being stored. `${VAR}` references survive, since seeing which variable a
+    service reads is itself worth noticing.
+
+    **Compose roots are an allowlist, not a hint.** The paths come from
+    container labels, and anyone who can start a container sets those. Silt
+    resolves symlinks before deciding, so a link inside a mounted root cannot
+    reach outside it.
+
+    **A third fingerprint.** Files change independently of what is running, so
+    an edited-but-unapplied file is `config.drift`, not a configuration change.
+    Conflating them would report changes that never happened.
+
+28. **Manual redaction marking (post-M6)** — the keep-list is a guess, and the
+    person running Silt knows better. Marking works in both directions and
+    beats the keep-list either way. It operates on a live preview that stores
+    nothing, because a stored capture is already redacted and would leave
+    nothing to decide about; the preview applies exactly what a capture would,
+    so what someone marks against is what gets written. Hiding takes effect
+    before anything is written, so a hidden value is never stored rather than
+    stored and later concealed. Revealing applies only to future captures:
+    earlier snapshots hold a digest, not the value.
+
+29. **UI rebuilt for real scale (post-M6)** — the first design was tested
+    against two projects and fell over at thirty. Inline project links wrapped
+    over six lines and pushed content off screen, so navigation became a
+    filterable sidebar. Every configuration change appeared twice, because the
+    `snapshot.changed` event restated a change marker already rendered. A first
+    boot produced a wall of identical rows, now collapsed into one. Container
+    lifecycle chatter moved behind a toggle. The layout went full-width with
+    the overflow contained rather than scrolling the page sideways.
+
+30. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

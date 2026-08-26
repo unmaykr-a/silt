@@ -19,6 +19,11 @@ services:
       # Extra environment keys to keep readable instead of redacting.
       # SILT_KEEP_KEYS: MY_APP_REGION,APP_*
 
+      # Capture the compose and .env files themselves, so you can diff them
+      # line by line. This is an allowlist: Silt reads nothing outside it.
+      # Mount the same paths read-only below.
+      # SILT_COMPOSE_ROOTS: /srv,/opt
+
       # Notifications. Any shoutrrr target: ntfy, Gotify, Discord, email.
       # Kinds and severity are ANDed.
       # SILT_NOTIFY_URLS: ntfy://ntfy.sh/my-silt-topic
@@ -40,6 +45,11 @@ services:
       # Silt runs as a non-root user (uid 65532). A named volume gets the
       # ownership right without any chown on the host.
       - silt-data:/data
+      # Mount your compose directories at the same path they have on the host,
+      # so the paths in Compose's own labels resolve. Read-only: Silt never
+      # writes to them.
+      # - /srv:/srv:ro
+      # - /opt:/opt:ro
     depends_on:
       - docker-socket-proxy
     networks:

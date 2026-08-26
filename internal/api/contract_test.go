@@ -116,10 +116,24 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"getAuthState": {method: "GET", url: "/api/auth", wantStatus: 200, schema: "AuthState"},
 		// The fixture configures no password, so login reports that it is not
 		// available rather than accepting anything.
-		"login":       {method: "POST", url: "/api/login", body: `{"password":"x"}`, wantStatus: 503},
-		"logout":      {method: "POST", url: "/api/logout", wantStatus: 200},
-		"prune":       {method: "POST", url: "/api/maintenance/prune", wantStatus: 200, schema: "PruneResult"},
-		"getTimeline": {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
+		"login":                {method: "POST", url: "/api/login", body: `{"password":"x"}`, wantStatus: 503},
+		"logout":               {method: "POST", url: "/api/logout", wantStatus: 200},
+		"listSnapshotFiles":    {method: "GET", url: "/api/snapshots/1/files", wantStatus: 200},
+		"listProjectFilePaths": {method: "GET", url: "/api/projects/1/files", wantStatus: 200},
+		"listRedactionRules":   {method: "GET", url: "/api/projects/1/redaction-rules", wantStatus: 200},
+		"createRedactionRule": {
+			method: "POST", url: "/api/projects/1/redaction-rules",
+			body:       `{"action":"hide","kind":"key","key":"SMTP_PASSWORD"}`,
+			wantStatus: 201, schema: "RedactionRule",
+		},
+		// The fixture captures no files, so these report absence rather than
+		// content. Their success paths are covered by dedicated tests.
+		"getSnapshotFile":     {method: "GET", url: "/api/snapshots/1/file?path=/nope.yaml", wantStatus: 404},
+		"getFileDiff":         {method: "GET", url: "/api/diff/file?from=1&to=2&path=/nope.yaml", wantStatus: 200, schema: "FileDiff"},
+		"previewFile":         {method: "GET", url: "/api/projects/1/files/preview?path=/nope.yaml", wantStatus: 503},
+		"deleteRedactionRule": {method: "DELETE", url: "/api/projects/1/redaction-rules/999", wantStatus: 404},
+		"prune":               {method: "POST", url: "/api/maintenance/prune", wantStatus: 200, schema: "PruneResult"},
+		"getTimeline":         {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
 		"ingest": {
 			method: "POST", url: "/api/ingest", body: `{"type":"contract.test"}`,
 			headers: auth, wantStatus: 202,
@@ -150,9 +164,12 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 			t.Run(op.OperationID, func(t *testing.T) {
 				var resp *http.Response
 				var body []byte
-				if tc.method == http.MethodPost {
+				switch tc.method {
+				case http.MethodPost:
 					resp, body = f.post(t, tc.url, tc.body, tc.headers)
-				} else {
+				case http.MethodDelete:
+					resp, body = f.do(t, http.MethodDelete, tc.url, "", tc.headers)
+				default:
 					resp, body = f.get(t, tc.url)
 				}
 

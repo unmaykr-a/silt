@@ -92,6 +92,8 @@ type Observation struct {
 	// InspectBlobs maps service name to the canonical JSON of its redacted
 	// config subset, to be stored as blobs.
 	InspectBlobs map[string][]byte
+	// Files are the project's compose and .env files, already redacted.
+	Files []CapturedFile
 }
 
 // ServiceInput is one container's contribution to a project observation.

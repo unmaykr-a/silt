@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,6 +74,17 @@ type Config struct {
 	AuthHeader string `env:"SILT_AUTH_HEADER" envDefault:"X-Remote-User"`
 	// PasswordHash is a bcrypt hash for the fallback login.
 	PasswordHash string `env:"SILT_PASSWORD_HASH"`
+
+	// ComposeRoots are host paths, mounted read-only into Silt, under which
+	// compose files may be read.
+	//
+	// This is an allowlist, not a hint. The paths Silt would otherwise follow
+	// come from container labels, and anyone who can start a container can set
+	// those, so without a root check a crafted label could point Silt at any
+	// file it can reach.
+	ComposeRoots []string `env:"SILT_COMPOSE_ROOTS" envSeparator:","`
+	// MaxComposeFileBytes caps a single captured file.
+	MaxComposeFileBytes int64 `env:"SILT_MAX_COMPOSE_FILE_BYTES" envDefault:"1048576"`
 }
 
 // Load reads the environment, applies defaults, and validates the result.
@@ -115,6 +127,19 @@ func (c *Config) validate() error {
 		if days < 0 {
 			return fmt.Errorf("%s must not be negative, got %d", name, days)
 		}
+	}
+	for i, root := range c.ComposeRoots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		if !filepath.IsAbs(root) {
+			return fmt.Errorf("SILT_COMPOSE_ROOTS entry %q must be an absolute path", root)
+		}
+		c.ComposeRoots[i] = filepath.Clean(root)
+	}
+	if c.MaxComposeFileBytes <= 0 {
+		return fmt.Errorf("SILT_MAX_COMPOSE_FILE_BYTES must be positive, got %d", c.MaxComposeFileBytes)
 	}
 	if c.UnchangedRetentionDays > c.RetentionDays && c.RetentionDays > 0 {
 		return fmt.Errorf(

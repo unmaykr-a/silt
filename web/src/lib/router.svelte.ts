@@ -11,6 +11,7 @@ export type Route =
   | { name: "project"; projectId: number }
   | { name: "service"; projectId: number; service: string }
   | { name: "diff"; from?: number; to?: number; projectId?: number }
+  | { name: "files"; projectId: number; path?: string }
   | { name: "settings" }
   | { name: "notfound"; path: string };
 
@@ -41,6 +42,9 @@ function parse(pathname: string, search: string): Route {
     }
     if (parts[2] === "services" && parts[3]) {
       return { name: "service", projectId, service: decodeURIComponent(parts[3]) };
+    }
+    if (parts[2] === "files") {
+      return { name: "files", projectId, path: params.get("path") ?? undefined };
     }
     return { name: "project", projectId };
   }

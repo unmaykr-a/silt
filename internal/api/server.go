@@ -35,6 +35,7 @@ type Server struct {
 	started     time.Time
 	version     string
 	auth        *Auth
+	files       FileReader
 }
 
 // SetVersion records the build version for the settings screen.
@@ -50,6 +51,9 @@ func New(log *slog.Logger, db *store.Store, hub *Hub, cfg config.Config, snap Sn
 	}
 	return &Server{log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap, started: time.Now(), version: "dev"}
 }
+
+// SetFiles installs the compose file reader used by the marking preview.
+func (s *Server) SetFiles(f FileReader) { s.files = f }
 
 // SetAuth installs the authentication policy.
 func (s *Server) SetAuth(a *Auth) {
@@ -76,6 +80,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/projects/{id}/snapshot", s.takeSnapshot)
 	mux.HandleFunc("GET /api/snapshots/{id}", s.getSnapshot)
 	mux.HandleFunc("GET /api/snapshots/{id}/compose", s.getCompose)
+	mux.HandleFunc("GET /api/snapshots/{id}/files", s.listSnapshotFiles)
+	mux.HandleFunc("GET /api/snapshots/{id}/file", s.getSnapshotFile)
+	mux.HandleFunc("GET /api/diff/file", s.getFileDiff)
+	mux.HandleFunc("GET /api/projects/{id}/files", s.listProjectFilePaths)
+	mux.HandleFunc("GET /api/projects/{id}/files/preview", s.previewFile)
+	mux.HandleFunc("GET /api/projects/{id}/redaction-rules", s.listRedactionRules)
+	mux.HandleFunc("POST /api/projects/{id}/redaction-rules", s.postRedactionRule)
+	mux.HandleFunc("DELETE /api/projects/{id}/redaction-rules/{rule}", s.deleteRedactionRule)
 	mux.HandleFunc("GET /api/diff", s.getDiff)
 	mux.HandleFunc("GET /api/events", s.listEvents)
 	mux.HandleFunc("GET /api/timeline", s.getTimeline)
