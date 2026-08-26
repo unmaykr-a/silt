@@ -12,6 +12,7 @@ export type Route =
   | { name: "service"; projectId: number; service: string }
   | { name: "diff"; from?: number; to?: number; projectId?: number }
   | { name: "files"; projectId: number; path?: string }
+  | { name: "projects" }
   | { name: "settings" }
   | { name: "notfound"; path: string };
 
@@ -22,6 +23,7 @@ function parse(pathname: string, search: string): Route {
   if (parts.length === 0) return { name: "timeline" };
 
   if (parts[0] === "settings") return { name: "settings" };
+  if (parts[0] === "projects" && parts.length === 1) return { name: "projects" };
 
   if (parts[0] === "diff") {
     const from = Number(params.get("from"));

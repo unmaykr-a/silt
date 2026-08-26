@@ -149,3 +149,66 @@ func TestFormatOmitsLinkWithoutBaseURL(t *testing.T) {
 		t.Errorf("body invented a link without a base URL:\n%s", body)
 	}
 }
+
+// The settings screen reads these back, so the mask is the thing standing
+// between "look at the UI" and "read the webhook tokens".
+func TestMaskKeepsTheSchemeAndNeverTheCredential(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"discord://tok3n@webhookid", "discord://…"},
+		{"telegram://bottoken@telegram?chats=1234", "telegram://…"},
+		{"gotify://gotify.example.com/AppTokenHere", "gotify://gotify.example.com/…"},
+		{"smtp://user:pass@mail.example.com:587/?from=a&to=b", "smtp://mail.example.com:587/…"},
+		{"ntfy://ntfy.sh/mytopic", "ntfy://ntfy.sh/…"},
+		{"not a url", "…"},
+	}
+	for _, tc := range cases {
+		if got := Mask(tc.in); got != tc.want {
+			t.Errorf("Mask(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestMaskAllDropsBlanks(t *testing.T) {
+	got := MaskAll([]string{"discord://a@b", "  ", ""})
+	if len(got) != 1 {
+		t.Fatalf("MaskAll = %v, want one entry", got)
+	}
+}
+
+// Swapping targets at runtime must not leave a half-applied configuration: a
+// bad URL keeps the previous sender rather than silencing notifications.
+func TestLiveKeepsThePreviousSenderWhenAReplacementIsInvalid(t *testing.T) {
+	good, err := New([]string{"logger://"}, Filter{}, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	live := NewLive(good)
+	if !live.Enabled() {
+		t.Fatal("live sender reports itself disabled")
+	}
+	if err := live.Replace([]string{"notarealscheme://x"}, Filter{}, nil); err == nil {
+		t.Fatal("an unknown scheme was accepted")
+	}
+	if !live.Enabled() {
+		t.Error("a rejected replacement silenced the previous sender")
+	}
+}
+
+// An install that starts with nothing configured still has to be able to turn
+// notifications on without a restart.
+func TestLiveCanGoFromNothingToConfigured(t *testing.T) {
+	live := NewLive(nil)
+	if live.Enabled() {
+		t.Fatal("an empty live sender reports itself enabled")
+	}
+	live.Notify(t.Context(), Change{Project: "media"})
+	if err := live.Replace([]string{"logger://"}, Filter{}, nil); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	if !live.Enabled() {
+		t.Error("Replace did not install the new sender")
+	}
+}

@@ -185,8 +185,20 @@ location / {
 
 ## Configuration
 
-Everything is environment variables. The full table is in
-[`PROJECT.md`](PROJECT.md#13-config-reference); the ones people actually change:
+Environment variables are the baseline. Most of them can also be changed on the
+Settings screen, which stores the change on top of the environment and applies it
+immediately — no container recreate. Each field there says whether its value is coming
+from the environment or from the UI, and can be handed back to the environment with one
+click.
+
+Some settings are environment-only, and stay that way on purpose. `SILT_LISTEN_ADDR` and
+`SILT_DB_PATH` cannot change without a restart; `SILT_DOCKER_HOST`, `SILT_COMPOSE_ROOTS`,
+`SILT_TRUST_PROXY_AUTH` and `SILT_PASSWORD_HASH` are the boundary protecting the UI
+itself, and a UI that could widen which files Silt reads or turn off the login in front
+of it would be a way in rather than a setting.
+
+The full table is in [`PROJECT.md`](PROJECT.md#13-config-reference); the ones people
+actually change:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -201,6 +213,10 @@ Everything is environment variables. The full table is in
 | `SILT_NOTIFY_URLS` | *(empty)* | shoutrrr targets |
 | `SILT_INGEST_TOKEN` | *(empty)* | Enables the webhook |
 | `SILT_LOG_LEVEL` | `info` | |
+
+Notification URLs are never read back: a shoutrrr URL carries the credential for the
+service it points at, so the Settings screen shows the scheme and host and never the
+token. The ingest token is the same — set-or-not, never echoed.
 
 Storage is cheap by design: identical content is stored once, and an observation that
 matches the previous snapshot updates it in place rather than inserting a row. An idle

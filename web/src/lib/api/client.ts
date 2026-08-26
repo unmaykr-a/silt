@@ -17,6 +17,10 @@ export type ServiceHistory = components["schemas"]["ServiceHistory"];
 export type ServiceObservation = components["schemas"]["ServiceObservation"];
 export type EnvKeyChange = components["schemas"]["EnvKeyChange"];
 export type Settings = components["schemas"]["Settings"];
+export type SettingsValues = components["schemas"]["SettingsValues"];
+export type SettingsPatch = components["schemas"]["SettingsPatch"];
+export type VersionInfo = components["schemas"]["VersionInfo"];
+export type Release = components["schemas"]["Release"];
 export type PruneResult = components["schemas"]["PruneResult"];
 export type ProjectModel = components["schemas"]["ProjectModel"];
 export type AuthState = components["schemas"]["AuthState"];
@@ -104,6 +108,14 @@ export const api = {
   serviceHistory: (projectId: number, service: string, signal?: AbortSignal) =>
     get<ServiceHistory>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}`, signal),
   settings: (signal?: AbortSignal) => get<Settings>("/api/settings", signal),
+  updateSettings: (patch: SettingsPatch) =>
+    request<Settings>("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+  resetSettings: () => request<Settings>("/api/settings", { method: "DELETE" }),
+  version: (signal?: AbortSignal) => get<VersionInfo>("/api/version", signal),
   takeSnapshot: (projectId: number) =>
     request<{ status: string }>(`/api/projects/${projectId}/snapshot`, { method: "POST" }),
   prune: () => request<PruneResult>("/api/maintenance/prune", { method: "POST" }),

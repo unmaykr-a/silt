@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"path"
 	"strings"
+	"sync"
 )
 
 // Placeholder text used in stored compose blobs in place of a real value.
@@ -55,14 +56,34 @@ var defaultKeepKeys = []string{
 }
 
 // Redactor decides what is kept and hashes what is not.
+//
+// The keep-list is editable from the settings screen while the collector is
+// running, so it sits behind a mutex. The key never changes: it is generated
+// once per install, and rotating it would orphan every digest already stored.
 type Redactor struct {
-	key      []byte
+	key []byte
+
+	mu       sync.RWMutex
 	keepKeys []string
 }
 
 // New returns a Redactor using key for HMAC and the built-in keep-list plus
 // extra. Patterns may use a single leading or trailing '*'.
 func New(key []byte, extra []string) *Redactor {
+	return &Redactor{key: key, keepKeys: buildKeepList(extra)}
+}
+
+// SetKeepKeys replaces the extra keep-list. The built-in entries are always
+// included, so an empty list narrows Silt to its defaults rather than
+// redacting everything.
+func (r *Redactor) SetKeepKeys(extra []string) {
+	next := buildKeepList(extra)
+	r.mu.Lock()
+	r.keepKeys = next
+	r.mu.Unlock()
+}
+
+func buildKeepList(extra []string) []string {
 	keep := make([]string, 0, len(defaultKeepKeys)+len(extra))
 	for _, k := range defaultKeepKeys {
 		keep = append(keep, strings.ToUpper(k))
@@ -72,7 +93,7 @@ func New(key []byte, extra []string) *Redactor {
 			keep = append(keep, k)
 		}
 	}
-	return &Redactor{key: key, keepKeys: keep}
+	return keep
 }
 
 // Keep reports whether a key's value may be stored in cleartext.
@@ -81,7 +102,10 @@ func (r *Redactor) Keep(key string) bool {
 	if upper == "" {
 		return false
 	}
-	for _, pattern := range r.keepKeys {
+	r.mu.RLock()
+	patterns := r.keepKeys
+	r.mu.RUnlock()
+	for _, pattern := range patterns {
 		if ok, err := path.Match(pattern, upper); err == nil && ok {
 			return true
 		}

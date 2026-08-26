@@ -624,11 +624,14 @@ paths:
   /api/settings:
     get:
       tags: [system]
-      summary: Effective configuration, read-only
+      summary: Effective configuration
       description: |
-        Silt is configured by environment variables, so this reports what is in
-        force rather than offering to change it. Secrets are reported as
-        set-or-not and never echoed.
+        The environment is the baseline; the database holds a sparse set of
+        overrides on top of it. This returns both, plus which fields are
+        overridden, so the screen can say where a value came from and what
+        taking the override back would restore. Secrets are never echoed: the
+        ingest token is reported as set-or-not, and notification targets are
+        masked to their scheme and, where it is a real host, their host.
       operationId: getSettings
       responses:
         "200":
@@ -636,6 +639,75 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Settings" }
+    put:
+      tags: [system]
+      summary: Change settings
+      description: |
+        A sparse patch. An absent field is left alone; a field named in `reset`
+        drops its override and falls back to the environment. The merged
+        document is validated before anything is written, so a rejected edit
+        leaves both the stored settings and the running configuration exactly
+        as they were.
+
+        Only the fields in this schema are editable. Everything else — the
+        listen address, the database path, the Docker endpoint, the compose
+        root allowlist, authentication — is environment-only, because it either
+        cannot change without a restart or is the boundary protecting this
+        endpoint.
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SettingsPatch" }
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "400":
+          description: The merged configuration is not valid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Settings are read-only in this configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [system]
+      summary: Drop every override
+      description: Returns the install to exactly what its environment says.
+      operationId: resetSettings
+      responses:
+        "200":
+          description: The settings after the reset
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+        "503":
+          description: Settings are read-only in this configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/version:
+    get:
+      tags: [system]
+      summary: Build version and release history
+      description: |
+        `version` is the build stamp — a tag on a release, a commit otherwise.
+        `release` is the newest entry in the changelog, which is what the notes
+        describe.
+      operationId: getVersion
+      responses:
+        "200":
+          description: Version and changelog
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionInfo" }
 
   /api/maintenance/prune:
     post:
@@ -945,18 +1017,14 @@ components:
           type: array
           items: { $ref: "#/components/schemas/EnvKeyChange" }
 
-    Settings:
+    SettingsValues:
       type: object
       required:
-        [version, host_name, docker_host, db_path, snapshot_interval_ms,
-         retention_days, unchanged_retention_days, event_retention_days,
-         retention_interval_ms, vacuum_interval_ms, keep_keys,
-         ingest_configured, log_level, usage]
+        [snapshot_interval_ms, retention_days, unchanged_retention_days,
+         event_retention_days, retention_interval_ms, vacuum_interval_ms,
+         keep_keys, base_url, log_level, notify_targets, notify_on,
+         notify_min_severity, ingest_configured]
       properties:
-        version: { type: string }
-        host_name: { type: string }
-        docker_host: { type: string }
-        db_path: { type: string }
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }
         unchanged_retention_days: { type: integer }
@@ -966,10 +1034,67 @@ components:
         keep_keys:
           type: array
           items: { type: string }
+        base_url: { type: string }
+        log_level: { type: string }
+        notify_targets:
+          type: array
+          items: { type: string }
+          description: |
+            Masked shoutrrr targets. A shoutrrr URL is the credential for the
+            service it points at, so only the scheme and, where it is a real
+            host rather than an identifier, the host survive.
+        notify_on:
+          type: array
+          items: { type: string }
+        notify_min_severity: { type: string }
         ingest_configured:
           type: boolean
-          description: Whether SILT_INGEST_TOKEN is set. The token itself is never returned.
-        log_level: { type: string }
+          description: Whether an ingest token is set. The token itself is never returned.
+
+    SettingsFixed:
+      type: object
+      required:
+        [host_name, docker_host, db_path, listen_addr, compose_roots,
+         max_compose_file_bytes, auth_mode]
+      properties:
+        host_name: { type: string }
+        docker_host: { type: string }
+        db_path: { type: string }
+        listen_addr: { type: string }
+        compose_roots:
+          type: array
+          items: { type: string }
+        max_compose_file_bytes: { type: integer, format: int64 }
+        auth_mode:
+          type: string
+          enum: [none, proxy, password, "proxy+password"]
+
+    Settings:
+      type: object
+      required: [version, release, effective, environment, overridden, editable, fixed, usage]
+      properties:
+        version:
+          type: string
+          description: The build stamp — a tag on a release, a commit otherwise.
+        release:
+          type: string
+          description: The newest entry in the changelog.
+        effective:
+          allOf:
+            - $ref: "#/components/schemas/SettingsValues"
+          description: What is in force — the environment with any overrides applied.
+        environment:
+          allOf:
+            - $ref: "#/components/schemas/SettingsValues"
+          description: The baseline, shown beside any overridden value.
+        overridden:
+          type: array
+          items: { type: string }
+          description: Names of the fields whose value comes from the database.
+        editable:
+          type: boolean
+          description: False when there is nowhere to store an override.
+        fixed: { $ref: "#/components/schemas/SettingsFixed" }
         usage:
           type: object
           required: [blobs, stored_bytes, uncompressed_bytes, events]
@@ -978,6 +1103,76 @@ components:
             stored_bytes: { type: integer, format: int64 }
             uncompressed_bytes: { type: integer, format: int64 }
             events: { type: integer, format: int64 }
+
+    SettingsPatch:
+      type: object
+      description: |
+        Every field is optional. Present means "set this override", absent
+        means "leave it alone", and naming it in `reset` means "drop the
+        override and use the environment again".
+      properties:
+        snapshot_interval_ms: { type: integer, format: int64 }
+        retention_days: { type: integer }
+        unchanged_retention_days: { type: integer }
+        event_retention_days: { type: integer }
+        retention_interval_ms: { type: integer, format: int64 }
+        vacuum_interval_ms: { type: integer, format: int64 }
+        keep_keys:
+          type: array
+          items: { type: string }
+        base_url: { type: string }
+        log_level:
+          type: string
+          enum: [debug, info, warn, error]
+        notify_urls:
+          type: array
+          items: { type: string }
+          description: |
+            Write-only. Replaces the whole list; the stored values are never
+            returned, only their masked form under notify_targets.
+        notify_on:
+          type: array
+          items: { type: string }
+        notify_min_severity:
+          type: string
+          enum: [low, medium, high]
+        ingest_token:
+          type: string
+          description: Write-only. An empty string turns the ingest endpoint off.
+        reset:
+          type: array
+          items: { type: string }
+          description: Field names whose override should be dropped.
+
+    ChangelogEntry:
+      type: object
+      required: [kind, text]
+      properties:
+        kind:
+          type: string
+          enum: [added, changed, fixed, security, removed]
+        text: { type: string }
+
+    Release:
+      type: object
+      required: [version, date, entries]
+      properties:
+        version: { type: string }
+        date: { type: string }
+        summary: { type: string }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/ChangelogEntry" }
+
+    VersionInfo:
+      type: object
+      required: [version, release, releases]
+      properties:
+        version: { type: string }
+        release: { type: string }
+        releases:
+          type: array
+          items: { $ref: "#/components/schemas/Release" }
 
     AuthState:
       type: object

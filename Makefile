@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 SQLC_VERSION ?= v1.31.1
 
-.PHONY: check build web run test fmt tidy clean docker sqlc
+.PHONY: check build web run test fmt tidy clean docker sqlc changelog
 
 ## check: the gate every milestone must pass
 check:
@@ -31,6 +31,10 @@ test:
 
 race:
 	$(GO) test ./... -race -count=1
+
+## changelog: regenerate CHANGELOG.md from internal/changelog
+changelog:
+	$(GO) run ./internal/changelog/cmd/gen CHANGELOG.md
 
 ## sqlc: regenerate the typed query layer from internal/store/queries
 sqlc:

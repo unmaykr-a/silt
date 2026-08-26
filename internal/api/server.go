@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/config"
+	"github.com/unmaykr-a/silt/internal/settings"
 	"github.com/unmaykr-a/silt/internal/store"
 	"github.com/unmaykr-a/silt/internal/web"
 )
@@ -36,6 +37,19 @@ type Server struct {
 	version     string
 	auth        *Auth
 	files       FileReader
+	live        *settings.Live
+}
+
+// conf returns the configuration in force right now.
+//
+// Handlers must call this rather than reading s.cfg: settings are editable at
+// runtime, and a handler holding the startup copy would keep reporting — and
+// enforcing — a value the operator has already changed.
+func (s *Server) conf() config.Config {
+	if s.live != nil {
+		return s.live.Get()
+	}
+	return s.cfg
 }
 
 // SetVersion records the build version for the settings screen.
@@ -51,6 +65,10 @@ func New(log *slog.Logger, db *store.Store, hub *Hub, cfg config.Config, snap Sn
 	}
 	return &Server{log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap, started: time.Now(), version: "dev"}
 }
+
+// SetSettings installs the live settings layer. Without it the server serves
+// the startup configuration and reports settings as read-only.
+func (s *Server) SetSettings(l *settings.Live) { s.live = l }
 
 // SetFiles installs the compose file reader used by the marking preview.
 func (s *Server) SetFiles(f FileReader) { s.files = f }
@@ -97,6 +115,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.postLogin)
 	mux.HandleFunc("POST /api/logout", s.postLogout)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("DELETE /api/settings", s.deleteSettings)
+	mux.HandleFunc("GET /api/version", s.getVersion)
 	mux.HandleFunc("POST /api/maintenance/prune", s.postPrune)
 
 	// Anything not claimed by an API route belongs to the SPA.

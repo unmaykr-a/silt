@@ -197,3 +197,102 @@ func truncate(s string) string {
 	}
 	return s[:max] + "…"
 }
+
+// Enabled reports whether this sender has any targets. Nil-safe, so a caller
+// holding the no-op sender can skip the work of building a message.
+func (s *Sender) Enabled() bool { return s != nil && s.router != nil }
+
+// Live wraps a Sender that can be replaced while the collector is running.
+//
+// Notification targets are editable from the settings screen, and shoutrrr
+// builds its routers once at construction, so changing them means building a
+// new Sender and swapping it in — including swapping in from nothing, which is
+// why an install that starts with no targets still holds a Live rather than a
+// bare nil.
+type Live struct {
+	mu     sync.RWMutex
+	sender *Sender
+}
+
+// NewLive wraps s, which may be nil.
+func NewLive(s *Sender) *Live { return &Live{sender: s} }
+
+// Set replaces the wrapped sender.
+func (l *Live) Set(s *Sender) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.sender = s
+	l.mu.Unlock()
+}
+
+// Replace builds a Sender from urls and filter and installs it. A
+// configuration error leaves the previous sender in place: half-applied
+// notification settings are worse than unchanged ones.
+func (l *Live) Replace(urls []string, filter Filter, log *slog.Logger) error {
+	s, err := New(urls, filter, log)
+	if err != nil {
+		return err
+	}
+	l.Set(s)
+	return nil
+}
+
+func (l *Live) current() *Sender {
+	if l == nil {
+		return nil
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.sender
+}
+
+// Notify forwards to the sender in force right now.
+func (l *Live) Notify(ctx context.Context, c Change) { l.current().Notify(ctx, c) }
+
+// Enabled reports whether the sender in force has any targets.
+func (l *Live) Enabled() bool { return l.current().Enabled() }
+
+// Mask renders a shoutrrr URL for display.
+//
+// A shoutrrr URL is a credential: `discord://token@webhookid`, `gotify://
+// host/AppToken`. The settings screen has to show that targets exist and
+// roughly what they are without handing them back to whoever is looking at
+// the screen, so only the scheme and, where it is a real hostname rather than
+// an identifier, the host survive.
+func Mask(raw string) string {
+	raw = strings.TrimSpace(raw)
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok || scheme == "" {
+		return "…"
+	}
+	scheme = strings.ToLower(scheme)
+	switch scheme {
+	// Schemes whose host is a server the operator chose, not a secret.
+	case "smtp", "gotify", "ntfy", "matrix", "mattermost", "rocketchat", "zulip", "generic":
+		host := rest
+		if at := strings.LastIndex(host, "@"); at >= 0 {
+			host = host[at+1:]
+		}
+		if slash := strings.IndexAny(host, "/?"); slash >= 0 {
+			host = host[:slash]
+		}
+		if host != "" {
+			return scheme + "://" + host + "/…"
+		}
+	}
+	return scheme + "://…"
+}
+
+// MaskAll renders a list of targets for display.
+func MaskAll(urls []string) []string {
+	out := make([]string, 0, len(urls))
+	for _, u := range urls {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		out = append(out, Mask(u))
+	}
+	return out
+}

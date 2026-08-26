@@ -17,6 +17,7 @@ import (
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/docker"
 	"github.com/unmaykr-a/silt/internal/redact"
+	"github.com/unmaykr-a/silt/internal/settings"
 	"github.com/unmaykr-a/silt/internal/store"
 )
 
@@ -102,8 +103,30 @@ func newFixture(t *testing.T) *fixture {
 
 	hub := api.NewHub(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	snaps := &fakeSnapshotter{}
-	cfg := config.Config{IngestToken: "test-token"}
+	cfg := config.Config{
+		IngestToken:       "test-token",
+		ListenAddr:        ":8375",
+		LogLevel:          "info",
+		DockerHost:        "tcp://docker-socket-proxy:2375",
+		DBPath:            filepath.Join(t.TempDir(), "silt.db"),
+		SnapshotInterval:  5 * time.Minute,
+		RetentionInterval: time.Hour,
+		RetentionDays:     365,
+
+		UnchangedRetentionDays: 7,
+		EventRetentionDays:     90,
+		NotifyMinSeverity:      "medium",
+		MaxComposeFileBytes:    1 << 20,
+	}
 	server := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, hub, cfg, snaps)
+	// The settings layer is part of the surface under test: without it every
+	// write returns 503 and the contract test could only ever check the
+	// refusal.
+	live, err := settings.Load(ctx, cfg, db)
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	server.SetSettings(live)
 
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)
@@ -516,15 +539,23 @@ func TestSettingsNeverEchoesTheIngestToken(t *testing.T) {
 		t.Errorf("settings response leaked the ingest token: %s", body)
 	}
 
-	var settings map[string]any
-	if err := json.Unmarshal(body, &settings); err != nil {
+	var payload struct {
+		Effective   map[string]any `json:"effective"`
+		Environment map[string]any `json:"environment"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if settings["ingest_configured"] != true {
-		t.Errorf("ingest_configured = %v, want true", settings["ingest_configured"])
-	}
-	if _, present := settings["ingest_token"]; present {
-		t.Error("settings response has an ingest_token field at all")
+	for name, values := range map[string]map[string]any{
+		"effective":   payload.Effective,
+		"environment": payload.Environment,
+	} {
+		if values["ingest_configured"] != true {
+			t.Errorf("%s.ingest_configured = %v, want true", name, values["ingest_configured"])
+		}
+		if _, present := values["ingest_token"]; present {
+			t.Errorf("%s has an ingest_token field at all", name)
+		}
 	}
 }
 

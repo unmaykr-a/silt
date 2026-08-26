@@ -101,15 +101,35 @@ func (s *Store) Usage(ctx context.Context) (Usage, error) {
 	}, nil
 }
 
-// Retainer runs Prune on a schedule.
-type Retainer struct {
-	Store    *Store
+// RetentionSettings is everything the Retainer re-reads between passes.
+type RetentionSettings struct {
 	Policy   RetentionPolicy
 	Interval time.Duration
 	// Vacuum reclaims free pages. Zero disables it; it rewrites the whole
 	// file, so it belongs on a much longer cadence than pruning.
 	Vacuum time.Duration
-	Log    *slog.Logger
+}
+
+// Retainer runs Prune on a schedule.
+type Retainer struct {
+	Store    *Store
+	Policy   RetentionPolicy
+	Interval time.Duration
+	Vacuum   time.Duration
+	Log      *slog.Logger
+
+	// Live, when set, supersedes the static fields and is re-read after every
+	// pass, so a retention window edited on the settings screen takes effect
+	// on the next pass rather than on the next restart.
+	Live func() RetentionSettings
+}
+
+// settings returns the policy in force right now.
+func (r *Retainer) settings() RetentionSettings {
+	if r.Live != nil {
+		return r.Live()
+	}
+	return RetentionSettings{Policy: r.Policy, Interval: r.Interval, Vacuum: r.Vacuum}
 }
 
 // Run blocks until ctx is cancelled.
@@ -118,7 +138,8 @@ func (r *Retainer) Run(ctx context.Context) error {
 	if log == nil {
 		log = slog.Default()
 	}
-	interval := r.Interval
+	current := r.settings()
+	interval := current.Interval
 	if interval <= 0 {
 		interval = time.Hour
 	}
@@ -134,7 +155,13 @@ func (r *Retainer) Run(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		stats, err := r.Store.Prune(ctx, r.Policy, time.Now())
+		current = r.settings()
+		if next := current.Interval; next > 0 && next != interval {
+			interval = next
+			ticker.Reset(interval)
+		}
+
+		stats, err := r.Store.Prune(ctx, current.Policy, time.Now())
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -151,7 +178,7 @@ func (r *Retainer) Run(ctx context.Context) error {
 			)
 		}
 
-		if r.Vacuum > 0 && time.Since(lastVacuum) >= r.Vacuum {
+		if current.Vacuum > 0 && time.Since(lastVacuum) >= current.Vacuum {
 			if err := r.Store.Vacuum(ctx); err != nil {
 				log.Error("vacuum failed", "error", err)
 			} else {

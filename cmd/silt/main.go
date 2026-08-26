@@ -20,6 +20,7 @@ import (
 	"github.com/unmaykr-a/silt/internal/docker"
 	"github.com/unmaykr-a/silt/internal/notify"
 	"github.com/unmaykr-a/silt/internal/redact"
+	"github.com/unmaykr-a/silt/internal/settings"
 	"github.com/unmaykr-a/silt/internal/store"
 	"github.com/unmaykr-a/silt/internal/web"
 )
@@ -41,7 +42,11 @@ func run() error {
 		return err
 	}
 
-	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.Level()}))
+	// A LevelVar rather than a fixed level: the log level is editable on the
+	// settings screen, and every logger built from this handler follows it.
+	logLevel := new(slog.LevelVar)
+	logLevel.Set(cfg.Level())
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(log)
 
 	if _, err := web.FS(); errors.Is(err, web.ErrNotBuilt) {
@@ -70,17 +75,32 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// The environment is the baseline; the database holds overrides on top of
+	// it. A stored document that no longer validates is reported and skipped
+	// rather than fatal — refusing to start would lock someone out of the very
+	// screen that fixes it.
+	live, err := settings.Load(ctx, cfg, db)
+	if err != nil {
+		log.Warn("stored settings ignored", "error", err)
+	}
+	cfg = live.Get()
+	logLevel.Set(cfg.Level())
+
 	redactor := redact.New(redactionKey, cfg.KeepKeys)
 
 	notifyFilter, err := notify.ParseFilter(cfg.NotifyOn, cfg.NotifyMinSeverity)
 	if err != nil {
 		return err
 	}
-	notifier, err := notify.New(cfg.NotifyURLs, notifyFilter, log)
+	sender, err := notify.New(cfg.NotifyURLs, notifyFilter, log)
 	if err != nil {
 		return err
 	}
-	if notifier != nil {
+	// Always a Live, even with nothing configured: notification targets are
+	// editable at runtime, and a nil held by the collector could never become
+	// a sender.
+	notifier := notify.NewLive(sender)
+	if sender.Enabled() {
 		log.Info("notifications enabled", "targets", len(cfg.NotifyURLs),
 			"kinds", cfg.NotifyOn, "min_severity", cfg.NotifyMinSeverity)
 	}
@@ -115,20 +135,25 @@ func run() error {
 		Endpoint:  cfg.DockerHost,
 		Publisher: api.HubPublisher{Hub: hub},
 		Notifier:  notifier,
-		BaseURL:   cfg.BaseURL,
+		BaseURLFn: func() string { return live.Get().BaseURL },
 		Files:     fileReader,
 	}
 
 	retainer := &store.Retainer{
 		Store: db,
-		Policy: store.RetentionPolicy{
-			Changed:   config.Days(cfg.RetentionDays),
-			Unchanged: config.Days(cfg.UnchangedRetentionDays),
-			Events:    config.Days(cfg.EventRetentionDays),
+		Live: func() store.RetentionSettings {
+			c := live.Get()
+			return store.RetentionSettings{
+				Policy: store.RetentionPolicy{
+					Changed:   config.Days(c.RetentionDays),
+					Unchanged: config.Days(c.UnchangedRetentionDays),
+					Events:    config.Days(c.EventRetentionDays),
+				},
+				Interval: c.RetentionInterval,
+				Vacuum:   c.VacuumInterval,
+			}
 		},
-		Interval: cfg.RetentionInterval,
-		Vacuum:   cfg.VacuumInterval,
-		Log:      log,
+		Log: log,
 	}
 
 	// The collector retries forever, so an engine that is down at startup is
@@ -137,8 +162,24 @@ func run() error {
 		Client:      dc,
 		Log:         log,
 		Snapshotter: snapshotter,
-		Interval:    cfg.SnapshotInterval,
+		IntervalFn:  func() time.Duration { return live.Get().SnapshotInterval },
 	}
+
+	// Everything that caches a configuration value rather than re-reading it
+	// gets pushed the new one. Observe fires once immediately, so this is also
+	// where the startup values land.
+	live.Observe(func(c config.Config) {
+		logLevel.Set(c.Level())
+		redactor.SetKeepKeys(c.KeepKeys)
+		filter, err := notify.ParseFilter(c.NotifyOn, c.NotifyMinSeverity)
+		if err != nil {
+			log.Error("notification filter rejected; keeping the previous one", "error", err)
+			return
+		}
+		if err := notifier.Replace(c.NotifyURLs, filter, log); err != nil {
+			log.Error("notification targets rejected; keeping the previous ones", "error", err)
+		}
+	})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -159,6 +200,7 @@ func run() error {
 
 	apiServer := api.New(log, db, hub, cfg, snapshotter)
 	apiServer.SetVersion(version)
+	apiServer.SetSettings(live)
 	apiServer.SetAuth(auth)
 	apiServer.SetFiles(fileReader)
 	srv := apiServer.HTTPServer(cfg)

@@ -112,8 +112,14 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 			method: "GET", url: "/api/projects/1/services/radarr", wantStatus: 200,
 			schema: "ServiceHistory",
 		},
-		"getSettings":  {method: "GET", url: "/api/settings", wantStatus: 200, schema: "Settings"},
-		"getAuthState": {method: "GET", url: "/api/auth", wantStatus: 200, schema: "AuthState"},
+		"getSettings": {method: "GET", url: "/api/settings", wantStatus: 200, schema: "Settings"},
+		"updateSettings": {
+			method: "PUT", url: "/api/settings", body: `{"retention_days":30}`,
+			wantStatus: 200, schema: "Settings",
+		},
+		"resetSettings": {method: "DELETE", url: "/api/settings", wantStatus: 200, schema: "Settings"},
+		"getVersion":    {method: "GET", url: "/api/version", wantStatus: 200, schema: "VersionInfo"},
+		"getAuthState":  {method: "GET", url: "/api/auth", wantStatus: 200, schema: "AuthState"},
 		// The fixture configures no password, so login reports that it is not
 		// available rather than accepting anything.
 		"login":                {method: "POST", url: "/api/login", body: `{"password":"x"}`, wantStatus: 503},
@@ -167,8 +173,8 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 				switch tc.method {
 				case http.MethodPost:
 					resp, body = f.post(t, tc.url, tc.body, tc.headers)
-				case http.MethodDelete:
-					resp, body = f.do(t, http.MethodDelete, tc.url, "", tc.headers)
+				case http.MethodPut, http.MethodDelete:
+					resp, body = f.do(t, tc.method, tc.url, tc.body, tc.headers)
 				default:
 					resp, body = f.get(t, tc.url)
 				}
