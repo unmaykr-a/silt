@@ -56,6 +56,10 @@ type SnapshotResult struct {
 	// Touched is true when the observation matched the previous snapshot
 	// exactly and updated it in place instead of inserting a new one.
 	Touched bool
+	// FilesChanged is true when a compose file on disk differs from the last
+	// capture. On its own — without ConfigChanged — it means drift: the file
+	// was edited but not applied.
+	FilesChanged bool
 }
 
 // WriteSnapshot persists one observation of a project.
@@ -99,13 +103,15 @@ func (s *Store) WriteSnapshot(
 
 		configFP := compose.ConfigFingerprint(composeHash, runtimes)
 		runtimeFP := compose.RuntimeFingerprint(runtimes)
+		filesFP := compose.FilesFingerprint(obs.Files)
 
-		configChanged, runtimeChanged := true, true
+		configChanged, runtimeChanged, filesChanged := true, true, len(obs.Files) > 0
 		prev, err := q.LatestSnapshot(ctx, projectID)
 		switch {
 		case err == nil:
 			configChanged = prev.ConfigFingerprint != configFP
 			runtimeChanged = prev.RuntimeFingerprint != runtimeFP
+			filesChanged = prev.FilesFingerprint != filesFP
 			// Keep taken_at strictly increasing per project. Two triggers can
 			// land in the same millisecond — an event batch and a reconnect
 			// reconcile, say — and UNIQUE (project_id, taken_at) would turn
@@ -120,6 +126,7 @@ func (s *Store) WriteSnapshot(
 		}
 		result.ConfigChanged = configChanged
 		result.RuntimeChanged = runtimeChanged
+		result.FilesChanged = filesChanged
 		result.TakenAt = takenAt
 
 		// Nothing changed at all: record that the existing snapshot is still
@@ -127,7 +134,7 @@ func (s *Store) WriteSnapshot(
 		// row per service and an env_keys row per variable — hundreds of rows
 		// to say that nothing happened, which is what pushed an idle hour of
 		// 40 services to hundreds of kilobytes.
-		if !configChanged && !runtimeChanged {
+		if !configChanged && !runtimeChanged && !filesChanged {
 			if err := q.TouchSnapshot(ctx, sqlcgen.TouchSnapshotParams{
 				LastObservedAt: takenAt,
 				ID:             prev.ID,
@@ -151,11 +158,34 @@ func (s *Store) WriteSnapshot(
 			ConfigChanged:      boolToInt(configChanged),
 			RuntimeChanged:     boolToInt(runtimeChanged),
 			LastObservedAt:     takenAt,
+			FilesFingerprint:   filesFP,
+			FilesChanged:       boolToInt(filesChanged),
 		})
 		if err != nil {
 			return fmt.Errorf("insert snapshot: %w", err)
 		}
 		result.ID = snap.ID
+
+		for _, file := range obs.Files {
+			var hash sql.NullString
+			if file.Status == compose.FileOK {
+				stored, err := s.PutBlob(ctx, q, file.Content)
+				if err != nil {
+					return err
+				}
+				hash = sql.NullString{String: stored, Valid: true}
+			}
+			if err := q.InsertComposeFile(ctx, sqlcgen.InsertComposeFileParams{
+				SnapshotID:  snap.ID,
+				Path:        file.Path,
+				ContentHash: hash,
+				LineCount:   int64(file.LineCount),
+				Size:        file.Size,
+				Status:      file.Status,
+			}); err != nil {
+				return fmt.Errorf("insert compose file %s: %w", file.Path, err)
+			}
+		}
 
 		for _, rt := range runtimes {
 			if err := q.InsertServiceState(ctx, sqlcgen.InsertServiceStateParams{

@@ -55,6 +55,9 @@ type Snapshotter struct {
 	Notifier *notify.Sender
 	// BaseURL is used to build links in notifications.
 	BaseURL string
+	// Files captures compose files from disk. Nil or disabled means Silt
+	// records only what is running, which needs no mounts.
+	Files *compose.FileReader
 }
 
 // SnapshotProject snapshots one project by its database id, for
@@ -129,6 +132,17 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 		return store.SnapshotResult{}, fmt.Errorf("build model for %s: %w", p.Name, err)
 	}
 
+	if s.Files.Enabled() && len(p.ConfigFiles) > 0 {
+		rules, err := s.Store.RedactionRules(ctx, projectID)
+		if err != nil {
+			s.Log.Error("read redaction rules", "project", p.Name, "error", err)
+		}
+		obs.Files = s.Files.Capture(p.ConfigFiles, rules)
+		if len(obs.Files) > 0 {
+			obs.Project.Source = compose.SourceFiles
+		}
+	}
+
 	result, err := s.Store.WriteSnapshot(ctx, projectID, store.Now(), trigger, obs)
 	if err != nil {
 		return store.SnapshotResult{}, fmt.Errorf("write snapshot for %s: %w", p.Name, err)
@@ -161,6 +175,31 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 			s.Publisher.PublishChange(payload)
 		}
 		s.notifyChange(ctx, projectID, p.Name, result)
+	}
+
+	// A file that changed without the running configuration changing is
+	// drift: someone edited the compose file and has not applied it. That is
+	// worth surfacing precisely because nothing broke yet.
+	if result.FilesChanged && !result.ConfigChanged && !result.Touched {
+		id := projectID
+		if _, err := s.Store.RecordEvent(ctx, store.EventRecord{
+			ProjectID: &id,
+			TS:        result.TakenAt,
+			Source:    store.SourceSilt,
+			Type:      "config.drift",
+			Severity:  store.SeverityWarn,
+			Message:   "compose file changed but the running stack has not",
+			Payload:   map[string]any{"project": p.Name, "snapshot_id": result.ID},
+		}); err != nil {
+			s.Log.Error("record drift event", "project", p.Name, "error", err)
+		}
+		if s.Publisher != nil {
+			s.Publisher.PublishEvent(map[string]any{
+				"type": "config.drift", "severity": store.SeverityWarn,
+				"project": p.Name, "ts": result.TakenAt,
+				"message": "compose file changed but the running stack has not",
+			})
+		}
 	}
 	return result, nil
 }

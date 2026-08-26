@@ -219,6 +219,186 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/snapshots/{id}/files:
+    get:
+      tags: [snapshots]
+      summary: Compose files captured in a snapshot
+      operationId: listSnapshotFiles
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Captured files
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ComposeFile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/snapshots/{id}/file:
+    get:
+      tags: [snapshots]
+      summary: The redacted text of one captured file
+      description: |
+        Line structure is preserved exactly; only values are replaced, so line
+        numbers and surrounding context match the file as written.
+      operationId: getSnapshotFile
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileContent" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/diff/file:
+    get:
+      tags: [snapshots]
+      summary: Line-by-line diff of one file between two snapshots
+      description: |
+        Answers "which line changed", which the structured diff cannot: that
+        reports an environment key moved, not where in the file it lives.
+        A file absent from one side diffs against empty, rendering a creation
+        or deletion rather than an error.
+      operationId: getFileDiff
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+        - name: context
+          in: query
+          description: Unchanged lines around each hunk, or `full` for the whole file.
+          schema: { type: string, default: "3" }
+      responses:
+        "200":
+          description: File diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FileDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/files:
+    get:
+      tags: [projects]
+      summary: Every file path this project has captured
+      operationId: listProjectFilePaths
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: File paths
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/projects/{id}/files/preview:
+    get:
+      tags: [projects]
+      summary: Live preview of a file for marking
+      description: |
+        Reads the file fresh from disk, applies the redaction a capture would
+        apply, and stores nothing. The marking UI works from this because a
+        stored capture is already redacted and would leave nothing to decide
+        about. Only paths this project has referenced can be previewed.
+      operationId: previewFile
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Preview lines
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FilePreview" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: No compose roots configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/projects/{id}/redaction-rules:
+    get:
+      tags: [projects]
+      summary: Manual redaction decisions for a project
+      operationId: listRedactionRules
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RedactionRule" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    post:
+      tags: [projects]
+      summary: Hide or reveal a value
+      description: |
+        Applied at capture time, before anything is written, so a hidden value
+        is never stored rather than stored and later concealed. Revealing
+        affects only future captures: earlier snapshots hold a digest, not the
+        value. Adding a rule clears any opposing rule for the same target.
+      operationId: createRedactionRule
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RedactionRuleRequest" }
+      responses:
+        "201":
+          description: Rule stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedactionRule" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/projects/{id}/redaction-rules/{rule}:
+    delete:
+      tags: [projects]
+      summary: Remove a manual redaction decision
+      operationId: deleteRedactionRule
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: rule
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "204":
+          description: Removed
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/diff:
     get:
       tags: [snapshots]
@@ -817,6 +997,128 @@ components:
         changed_snapshots: { type: integer, format: int64 }
         events: { type: integer, format: int64 }
         blobs: { type: integer, format: int64 }
+
+    ComposeFile:
+      type: object
+      required: [path, status, line_count, size]
+      properties:
+        path: { type: string }
+        status:
+          type: string
+          enum: [ok, unreadable, outside_roots, too_large]
+        line_count: { type: integer, format: int64 }
+        size: { type: integer, format: int64 }
+        content_hash:
+          type: string
+          description: |
+            Content address of the redacted text. Comparing it across two
+            snapshots tells you which files differ without fetching their text.
+
+    FileContent:
+      type: object
+      required: [path, status, content]
+      properties:
+        path: { type: string }
+        status: { type: string }
+        content:
+          type: string
+          description: Redacted text with line structure preserved exactly.
+
+    DiffLine:
+      type: object
+      required: [op, old_number, new_number, text]
+      properties:
+        op: { type: string, enum: [equal, insert, delete] }
+        old_number:
+          type: integer
+          description: Line number in the "before" text, 0 if the line is new.
+        new_number:
+          type: integer
+          description: Line number in the "after" text, 0 if the line was removed.
+        text: { type: string }
+
+    DiffHunk:
+      type: object
+      required: [old_start, old_count, new_start, new_count, lines]
+      properties:
+        old_start: { type: integer }
+        old_count: { type: integer }
+        new_start: { type: integer }
+        new_count: { type: integer }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/DiffLine" }
+
+    FileDiff:
+      type: object
+      required: [path, from, to, status, diff]
+      properties:
+        path: { type: string }
+        from: { $ref: "#/components/schemas/DiffSide" }
+        to: { $ref: "#/components/schemas/DiffSide" }
+        status: { type: string }
+        diff:
+          type: object
+          required: [hunks, added, removed, identical]
+          properties:
+            hunks:
+              type: array
+              items: { $ref: "#/components/schemas/DiffHunk" }
+            added: { type: integer }
+            removed: { type: integer }
+            identical: { type: boolean }
+
+    PreviewLine:
+      type: object
+      required: [number, text, redacted, reason, markable]
+      properties:
+        number: { type: integer }
+        text: { type: string }
+        key:
+          type: string
+          description: The assignment key, when the line has one. Rules keyed on it survive edits.
+        redacted: { type: boolean }
+        reason:
+          type: string
+          enum: [structure, interpolation, keep_list, default, rule_hide, rule_reveal]
+        markable:
+          type: boolean
+          description: False for lines with no value to decide about.
+
+    FilePreview:
+      type: object
+      required: [path, status, lines]
+      properties:
+        path: { type: string }
+        status: { type: string }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/PreviewLine" }
+
+    RedactionRule:
+      type: object
+      required: [id, path, action, kind]
+      properties:
+        id: { type: integer, format: int64 }
+        path:
+          type: string
+          description: Empty means the rule applies to every file in the project.
+        action: { type: string, enum: [hide, reveal] }
+        kind: { type: string, enum: [key, line] }
+        key: { type: string }
+        line_no: { type: integer, format: int64 }
+        note: { type: string }
+
+    RedactionRuleRequest:
+      type: object
+      required: [action, kind]
+      properties:
+        path: { type: string }
+        action: { type: string, enum: [hide, reveal] }
+        kind: { type: string, enum: [key, line] }
+        key: { type: string }
+        line_no: { type: integer, format: int64 }
+        note: { type: string }
 
     IngestRequest:
       type: object

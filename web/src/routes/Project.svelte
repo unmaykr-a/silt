@@ -76,6 +76,13 @@
         {/if}
       </div>
       <div class="flex gap-2">
+        <a
+          use:link
+          href="/projects/{projectId}/files"
+          class="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Compose files
+        </a>
         <Button variant="outline" size="sm" onclick={takeSnapshot} disabled={snapshotting}>
           {snapshotting ? "Snapshotting…" : "Snapshot now"}
         </Button>

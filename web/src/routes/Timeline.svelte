@@ -6,7 +6,7 @@
   import Empty from "$lib/components/Empty.svelte";
   import { severityDot } from "$lib/format";
 
-  let { reloadKey }: { reloadKey: number } = $props();
+  let { reloadKey, projects: knownProjects }: { reloadKey: number; projects: Project[] } = $props();
 
   const RANGES = [
     { label: "1h", ms: 3_600_000 },
@@ -18,6 +18,7 @@
 
   let timeline = $state<Timeline | null>(null);
   let projects = $state<Project[]>([]);
+  let showRoutine = $state(false);
   let rangeMs = $state(86_400_000);
   let projectFilter = $state(0);
   let severityFilter = $state("");
@@ -39,7 +40,7 @@
     ])
       .then(([t, p]) => {
         timeline = t;
-        projects = p;
+        projects = p.length > 0 ? p : knownProjects;
         error = null;
       })
       .catch((err: Error) => {
@@ -52,17 +53,74 @@
 
   const projectName = $derived((id?: number) => projects.find((p) => p.id === id)?.name ?? "");
 
-  const feed = $derived.by(() => {
-    if (!timeline) return [] as Array<{ kind: "change" | "event"; ts: number; item: unknown }>;
-    const rows: Array<{ kind: "change" | "event"; ts: number; item: any }> = [];
-    for (const c of timeline.changes ?? []) rows.push({ kind: "change", ts: c.taken_at, item: c });
+  // snapshot.changed restates a change marker that is already rendered from
+  // timeline.changes, so every configuration change appeared twice. The event
+  // still exists in /api/events; it just has no place in a feed that already
+  // shows the change itself.
+  const DUPLICATE_TYPES = new Set(["snapshot.changed"]);
+
+  // Container lifecycle chatter is the bulk of the feed and rarely what
+  // someone opened the page for. It is one toggle away rather than gone.
+  const ROUTINE_TYPES = new Set([
+    "container.start",
+    "container.create",
+    "container.stop",
+    "container.destroy",
+    "container.restart",
+    "image.pull",
+  ]);
+
+  type Row =
+    | { kind: "change"; ts: number; id: string; item: any }
+    | { kind: "event"; ts: number; id: string; item: any }
+    | { kind: "group"; ts: number; id: string; projects: any[] };
+
+  const feed = $derived.by<Row[]>(() => {
+    if (!timeline) return [];
+
+    const rows: Row[] = [];
+    for (const c of timeline.changes ?? []) {
+      rows.push({ kind: "change", ts: c.taken_at, id: `c${c.id}`, item: c });
+    }
     for (const e of timeline.events ?? []) {
+      if (DUPLICATE_TYPES.has(e.type)) continue;
+      if (!showRoutine && ROUTINE_TYPES.has(e.type)) continue;
       if (severityFilter && e.severity !== severityFilter) continue;
-      rows.push({ kind: "event", ts: e.ts, item: e });
+      rows.push({ kind: "event", ts: e.ts, id: `e${e.id}`, item: e });
     }
     rows.sort((a, b) => b.ts - a.ts);
-    return rows.slice(0, 200);
+
+    // A first boot discovers every project at once, producing a wall of
+    // identical rows. Collapse changes that land within the same few seconds
+    // into one line naming the projects.
+    const GROUP_WINDOW_MS = 5000;
+    const out: Row[] = [];
+    for (let i = 0; i < rows.length; ) {
+      const row = rows[i];
+      if (row.kind !== "change") {
+        out.push(row);
+        i++;
+        continue;
+      }
+      let j = i;
+      const burst: any[] = [];
+      while (j < rows.length && rows[j].kind === "change" && row.ts - rows[j].ts <= GROUP_WINDOW_MS) {
+        burst.push((rows[j] as any).item);
+        j++;
+      }
+      if (burst.length > 2) {
+        out.push({ kind: "group", ts: row.ts, id: `g${row.id}`, projects: burst });
+      } else {
+        for (const item of burst) out.push({ kind: "change", ts: item.taken_at, id: `c${item.id}`, item });
+      }
+      i = j;
+    }
+    return out.slice(0, 300);
   });
+
+  const hiddenRoutine = $derived(
+    (timeline?.events ?? []).filter((e) => ROUTINE_TYPES.has(e.type)).length,
+  );
 </script>
 
 <div class="space-y-6">
@@ -98,6 +156,13 @@
       <option value="warn">Warnings</option>
       <option value="info">Info</option>
     </select>
+
+    {#if hiddenRoutine > 0 || showRoutine}
+      <label class="flex items-center gap-2 text-xs text-muted-foreground">
+        <input type="checkbox" bind:checked={showRoutine} class="accent-emerald-500" />
+        Container activity{#if !showRoutine && hiddenRoutine > 0}&nbsp;({hiddenRoutine}){/if}
+      </label>
+    {/if}
   </div>
 
   {#if error}
@@ -115,9 +180,15 @@
     />
   {:else}
     <ul class="divide-y divide-border border-y border-border">
-      {#each feed as row (row.kind + row.item.id)}
+      {#each feed as row (row.id)}
         <li class="flex items-baseline gap-3 py-2.5 text-sm">
-          {#if row.kind === "change"}
+          {#if row.kind === "group"}
+            <span class="size-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden="true"></span>
+            <span class="font-medium">{row.projects.length} projects changed</span>
+            <span class="min-w-0 truncate text-xs text-muted-foreground">
+              {row.projects.map((p) => projectName(p.project_id)).filter(Boolean).join(", ")}
+            </span>
+          {:else if row.kind === "change"}
             <span class="size-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden="true"></span>
             <a
               use:link

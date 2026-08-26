@@ -15,6 +15,7 @@ import (
 
 	"github.com/unmaykr-a/silt/internal/api"
 	"github.com/unmaykr-a/silt/internal/collect"
+	"github.com/unmaykr-a/silt/internal/compose"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/docker"
 	"github.com/unmaykr-a/silt/internal/notify"
@@ -96,6 +97,15 @@ func run() error {
 	}
 
 	hub := api.NewHub(log)
+	fileReader := &compose.FileReader{
+		Roots:    cfg.ComposeRoots,
+		MaxBytes: cfg.MaxComposeFileBytes,
+		Redactor: redactor,
+	}
+	if fileReader.Enabled() {
+		log.Info("compose file capture enabled", "roots", cfg.ComposeRoots)
+	}
+
 	snapshotter := &collect.Snapshotter{
 		Client:    dc,
 		Store:     db,
@@ -106,6 +116,7 @@ func run() error {
 		Publisher: api.HubPublisher{Hub: hub},
 		Notifier:  notifier,
 		BaseURL:   cfg.BaseURL,
+		Files:     fileReader,
 	}
 
 	retainer := &store.Retainer{
@@ -149,6 +160,7 @@ func run() error {
 	apiServer := api.New(log, db, hub, cfg, snapshotter)
 	apiServer.SetVersion(version)
 	apiServer.SetAuth(auth)
+	apiServer.SetFiles(fileReader)
 	srv := apiServer.HTTPServer(cfg)
 
 	errc := make(chan error, 1)

@@ -30,4 +30,5 @@ WHERE inspect_hash NOT IN (SELECT inspect_hash FROM service_states WHERE inspect
 -- name: DeleteUnreferencedBlobs :execrows
 DELETE FROM blobs
 WHERE hash NOT IN (SELECT compose_hash FROM snapshots)
-  AND hash NOT IN (SELECT inspect_hash FROM service_states WHERE inspect_hash IS NOT NULL);
+  AND hash NOT IN (SELECT inspect_hash FROM service_states WHERE inspect_hash IS NOT NULL)
+  AND hash NOT IN (SELECT content_hash FROM compose_files WHERE content_hash IS NOT NULL);

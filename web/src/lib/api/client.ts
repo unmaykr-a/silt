@@ -20,6 +20,13 @@ export type Settings = components["schemas"]["Settings"];
 export type PruneResult = components["schemas"]["PruneResult"];
 export type ProjectModel = components["schemas"]["ProjectModel"];
 export type AuthState = components["schemas"]["AuthState"];
+export type ComposeFile = components["schemas"]["ComposeFile"];
+export type FileContent = components["schemas"]["FileContent"];
+export type FileDiff = components["schemas"]["FileDiff"];
+export type DiffLine = components["schemas"]["DiffLine"];
+export type FilePreview = components["schemas"]["FilePreview"];
+export type PreviewLine = components["schemas"]["PreviewLine"];
+export type RedactionRule = components["schemas"]["RedactionRule"];
 
 export class ApiError extends Error {
   constructor(
@@ -108,6 +115,35 @@ export const api = {
       body: JSON.stringify({ password }),
     }),
   logout: () => request<{ authenticated: boolean }>("/api/logout", { method: "POST" }),
+
+  snapshotFiles: (snapshotId: number, signal?: AbortSignal) =>
+    get<ComposeFile[]>(`/api/snapshots/${snapshotId}/files`, signal),
+  snapshotFile: (snapshotId: number, path: string, signal?: AbortSignal) =>
+    get<FileContent>(`/api/snapshots/${snapshotId}/file?path=${encodeURIComponent(path)}`, signal),
+  fileDiff: (from: number, to: number, path: string, full = false, signal?: AbortSignal) =>
+    get<FileDiff>(
+      `/api/diff/file?from=${from}&to=${to}&path=${encodeURIComponent(path)}${full ? "&context=full" : ""}`,
+      signal,
+    ),
+  projectFiles: (projectId: number, signal?: AbortSignal) =>
+    get<string[]>(`/api/projects/${projectId}/files`, signal),
+  filePreview: (projectId: number, path: string, signal?: AbortSignal) =>
+    get<FilePreview>(`/api/projects/${projectId}/files/preview?path=${encodeURIComponent(path)}`, signal),
+  redactionRules: (projectId: number, signal?: AbortSignal) =>
+    get<RedactionRule[]>(`/api/projects/${projectId}/redaction-rules`, signal),
+  addRedactionRule: (
+    projectId: number,
+    rule: { path?: string; action: "hide" | "reveal"; kind: "key" | "line"; key?: string; line_no?: number },
+  ) =>
+    request<RedactionRule>(`/api/projects/${projectId}/redaction-rules`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rule),
+    }),
+  deleteRedactionRule: async (projectId: number, ruleId: number) => {
+    const res = await fetch(`/api/projects/${projectId}/redaction-rules/${ruleId}`, { method: "DELETE" });
+    if (!res.ok) throw new ApiError(res.status, res.statusText);
+  },
 };
 
 /** Named SSE events the server emits on /api/stream. */

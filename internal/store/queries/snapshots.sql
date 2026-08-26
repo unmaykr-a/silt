@@ -2,8 +2,8 @@
 INSERT INTO snapshots (
   project_id, taken_at, trigger, compose_hash, compose_source,
   config_fingerprint, runtime_fingerprint, config_changed, runtime_changed,
-  last_observed_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  last_observed_at, files_fingerprint, files_changed
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- An observation identical to the previous snapshot records that it is still
