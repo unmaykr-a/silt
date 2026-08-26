@@ -71,17 +71,39 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (Event
 }
 
 const listEvents = `-- name: ListEvents :many
-SELECT id, host_id, project_id, service, ts, source, type, severity, actor, message, payload FROM events WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?
+SELECT id, host_id, project_id, service, ts, source, type, severity, actor, message, payload FROM events
+WHERE ts >= ?1
+  AND ts <= ?2
+  AND (CAST(?3 AS INTEGER) = 0 OR project_id = ?3)
+  AND (CAST(?4 AS TEXT) = '' OR service = ?4)
+  AND (CAST(?5 AS TEXT) = '' OR type = ?5)
+  AND (CAST(?6 AS TEXT) = '' OR severity = ?6)
+ORDER BY ts DESC
+LIMIT ?7
 `
 
 type ListEventsParams struct {
-	Ts    int64
-	Ts_2  int64
-	Limit int64
+	FromTs    int64
+	ToTs      int64
+	ProjectID int64
+	Service   string
+	Type      string
+	Severity  string
+	MaxRows   int64
 }
 
+// Filters are optional: passing an empty string or 0 disables that clause,
+// which keeps one query serving the whole /api/events surface.
 func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]Event, error) {
-	rows, err := q.db.QueryContext(ctx, listEvents, arg.Ts, arg.Ts_2, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, listEvents,
+		arg.FromTs,
+		arg.ToTs,
+		arg.ProjectID,
+		arg.Service,
+		arg.Type,
+		arg.Severity,
+		arg.MaxRows,
+	)
 	if err != nil {
 		return nil, err
 	}

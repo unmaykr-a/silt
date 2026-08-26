@@ -49,3 +49,28 @@ SELECT env_keys.* FROM env_keys
 JOIN service_states ON service_states.inspect_hash = env_keys.inspect_hash
 WHERE service_states.snapshot_id = ?
 ORDER BY service_states.service, env_keys.key;
+
+-- name: SnapshotsInRange :many
+SELECT * FROM snapshots
+WHERE taken_at >= sqlc.arg(from_ts)
+  AND taken_at <= sqlc.arg(to_ts)
+  AND (CAST(sqlc.arg(project_id) AS INTEGER) = 0 OR project_id = sqlc.arg(project_id))
+ORDER BY taken_at DESC
+LIMIT sqlc.arg(max_rows);
+
+-- name: LatestChangedSnapshotsBefore :many
+SELECT * FROM snapshots
+WHERE project_id = sqlc.arg(project_id)
+  AND taken_at < sqlc.arg(before)
+  AND config_changed = 1
+ORDER BY taken_at DESC
+LIMIT sqlc.arg(max_rows);
+
+-- Resolve a service name to the project it most recently belonged to, so an
+-- external monitor named after a service still lands on the right project.
+-- name: ProjectForService :one
+SELECT snapshots.project_id FROM service_states
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE service_states.service = ?
+ORDER BY snapshots.taken_at DESC
+LIMIT 1;

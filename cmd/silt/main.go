@@ -70,13 +70,15 @@ func run() error {
 	}
 	redactor := redact.New(redactionKey, cfg.KeepKeys)
 
+	hub := api.NewHub(log)
 	snapshotter := &collect.Snapshotter{
-		Client:   dc,
-		Store:    db,
-		Redactor: redactor,
-		Log:      log,
-		HostName: cfg.HostName,
-		Endpoint: cfg.DockerHost,
+		Client:    dc,
+		Store:     db,
+		Redactor:  redactor,
+		Log:       log,
+		HostName:  cfg.HostName,
+		Endpoint:  cfg.DockerHost,
+		Publisher: api.HubPublisher{Hub: hub},
 	}
 
 	retainer := &store.Retainer{
@@ -117,7 +119,7 @@ func run() error {
 		}
 	}()
 
-	srv := api.New(log).HTTPServer(cfg)
+	srv := api.New(log, db, hub, cfg, snapshotter).HTTPServer(cfg)
 
 	errc := make(chan error, 1)
 	go func() {
