@@ -1187,7 +1187,60 @@ Changed:
     past it, and the timeline's own scroll position was hostage to how many
     stacks the host happened to run.
 
-37. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+37. **Sessions are rows, not signed cookies (auth batch)** — the original
+    scheme signed an expiry with a key generated at startup, which meant every
+    restart logged everyone out and "sign out" only asked the browser to forget
+    a token that stayed valid until it expired. An opaque random token recorded
+    in `sessions` fixes both, and adds the thing an identity provider needs:
+    something to attribute. Only the token's SHA-256 is stored, so a copy of the
+    database is not a set of working sessions, and there is no signing key to
+    protect because the token carries no claims to forge.
+
+38. **OpenID Connect, with PKCE (auth batch)** — authorization code flow
+    against any provider, discovered once at startup so a typo'd issuer
+    surfaces before anyone tries to sign in. PKCE is used even though this is a
+    confidential client with a secret: it costs one hash and closes the case
+    where the code leaks through a proxy log or a Referer header before the
+    exchange happens. The id_token's signature and its nonce are both checked —
+    the signature says the provider issued it, the nonce says it belongs to
+    *this* login rather than one replayed from elsewhere.
+
+    `go-oidc` and `oauth2` are the two dependencies this batch adds. Hand-rolled
+    JWKS fetching and RSA signature verification is precisely the category of
+    code that should not be hand-rolled, so the rule that every dependency earns
+    its place is what argues *for* them here.
+
+    Group and user allowlists are optional and empty by default. The point of
+    pointing Silt at a provider is to let the provider decide who gets in.
+
+39. **Forward auth needs a trusted-proxy list (auth batch)** — the header was
+    previously believed from any source, and anyone who can open a socket can
+    set a header, so "authenticated" meant "reached the port". Silt's own
+    documented deployment is a container on a bridge network with the proxy
+    beside it: exactly the case where the port is reachable by every other
+    container on that network. The trust list is checked against `RemoteAddr`
+    and nothing else — reading `X-Forwarded-For` to decide whether to believe a
+    header would be circular. An empty list still trusts any source, because
+    some deployments genuinely have nothing else on the network, but it is
+    warned about at startup rather than being the silent default.
+
+40. **/metrics is authenticated by default (auth batch)** — it names every
+    project on the host and counts their changes. It was on the public list
+    because a Prometheus scrape is easier without a token, which is a reason to
+    make the exception available, not to make it the default.
+    `SILT_METRICS_PUBLIC` restores it.
+
+41. **The rest of the security pass (auth batch)** — a cross-origin check on
+    unsafe methods, so a page elsewhere cannot drive Silt through a signed-in
+    browser; a content security policy that allows scripts only from Silt
+    itself; per-client backoff on failed passwords, after a few free attempts
+    so a typo costs nothing; the session cookie marked `Secure` when the
+    request actually arrived over TLS rather than never; and the post-login
+    destination reduced to a same-origin path, because an open redirect on a
+    login endpoint is how a phishing link comes to look like it came from the
+    real site.
+
+42. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

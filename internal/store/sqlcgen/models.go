@@ -96,6 +96,16 @@ type ServiceState struct {
 	InspectHash    sql.NullString
 }
 
+type Session struct {
+	TokenHash  string
+	Subject    string
+	Name       string
+	Method     string
+	CreatedAt  int64
+	LastSeenAt int64
+	ExpiresAt  int64
+}
+
 type Setting struct {
 	Key   string
 	Value string

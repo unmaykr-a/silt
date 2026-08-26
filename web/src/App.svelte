@@ -141,7 +141,7 @@
 {/snippet}
 
 {#if locked}
-  <Login onAuthenticated={refreshAuth} />
+  <Login onAuthenticated={refreshAuth} authState={auth} />
 {:else}
   <!-- h-screen with the overflow contained here is what lets the rail and the
        content scroll separately. Without it the tallest column decides the
@@ -196,16 +196,26 @@
         </span>
         <VersionButton />
         <ThemeToggle />
-        {#if auth?.required && auth.password_enabled}
+        {#if auth?.required && auth.method && auth.method !== "proxy"}
           <button
-            class="rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
             onclick={async () => {
               await api.logout();
               await refreshAuth();
             }}
+            title={auth.subject ? `Signed in as ${auth.subject}` : "Sign out"}
           >
+            {#if auth.subject}
+              <span class="hidden max-w-32 truncate sm:inline">{auth.subject}</span>
+            {/if}
             Sign out
           </button>
+        {:else if auth?.subject}
+          <!-- Forward auth: the proxy decides, so there is no session for Silt
+               to end. Showing who you are is still worth it. -->
+          <span class="hidden max-w-40 truncate px-2 text-muted-foreground sm:inline" title="Identity asserted by your reverse proxy">
+            {auth.subject}
+          </span>
         {/if}
       </div>
     </header>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type Settings, type SettingsPatch, type PruneResult } from "$lib/api/client";
+  import { api, type Settings, type SettingsPatch, type PruneResult, type AuthState } from "$lib/api/client";
   import { bytes, duration, sampleDate } from "$lib/format";
   import { prefs, type Clock, type DateStyle, type Layout, type TimeStamps } from "$lib/prefs.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -27,6 +27,7 @@
     { id: "retention", label: "Retention" },
     { id: "notifications", label: "Notifications" },
     { id: "ingest", label: "Ingest webhook" },
+    { id: "security", label: "Security" },
     { id: "environment", label: "Environment only" },
     { id: "storage", label: "Storage" },
   ];
@@ -111,6 +112,45 @@
   });
 
   const overridden = $derived(new Set(settings?.overridden ?? []));
+
+  // Security is read-only here on purpose: every knob on it is the boundary
+  // protecting this screen. What it can do is say what is in force, and end
+  // every session — which is the one action you want when you think a token
+  // has leaked, and which cannot widen anything.
+  let authState = $state<AuthState | null>(null);
+  let sessionCount = $state<number | null>(null);
+  let revoking = $state(false);
+
+  $effect(() => {
+    if (section !== "security") return;
+    const controller = new AbortController();
+    Promise.all([api.authState(controller.signal), api.sessions(controller.signal)])
+      .then(([a, s]) => {
+        authState = a;
+        sessionCount = s.count;
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  });
+
+  const AUTH_MODE_LABEL: Record<string, string> = {
+    none: "None — anyone who can reach this port has full read access",
+    proxy: "Reverse proxy header",
+    password: "Password",
+    "proxy+password": "Reverse proxy header, with a password fallback",
+  };
+
+  async function revokeAll() {
+    revoking = true;
+    try {
+      await api.revokeSessions();
+      // Every session went, including this one, so the app has to re-check.
+      location.reload();
+    } catch (err) {
+      error = (err as Error).message;
+      revoking = false;
+    }
+  }
 
   function list(value: string): string[] {
     return value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -646,6 +686,69 @@
         </section>
       {/if}
 
+      {#if section === "security"}
+        <section>
+          <h3 class="text-sm font-semibold">Security</h3>
+          <p class="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+            Nothing here is editable, and that is the point: every one of these is the boundary
+            protecting this screen. A UI that could turn off the login in front of it would be a way
+            in rather than a setting. Change them in your environment and recreate the container.
+          </p>
+
+          <dl class="mt-3 divide-y divide-border">
+            {#snippet row(label: string, value: string, envVar: string, hint?: string)}
+              <div class="grid gap-1 py-2.5 text-sm sm:grid-cols-[15rem_1fr] sm:gap-6">
+                <dt class="min-w-0">
+                  {label}
+                  <span class="mt-0.5 block font-mono text-[10px] text-muted-foreground/40">{envVar}</span>
+                </dt>
+                <dd class="min-w-0">
+                  <span class="break-all font-mono text-xs">{value}</span>
+                  {#if hint}
+                    <p class="mt-1 text-xs leading-relaxed text-muted-foreground/70">{hint}</p>
+                  {/if}
+                </dd>
+              </div>
+            {/snippet}
+
+            {@render row(
+              "Sign-in method",
+              AUTH_MODE_LABEL[settings.fixed.auth_mode] ?? settings.fixed.auth_mode,
+              "SILT_OIDC_ISSUER / SILT_TRUST_PROXY_AUTH / SILT_PASSWORD_HASH",
+              settings.fixed.auth_mode === "none"
+                ? "Silt is open. That is the right default for something behind your own proxy, and the wrong one for anything else."
+                : undefined,
+            )}
+
+            {#if authState?.oidc_enabled}
+              {@render row("Identity provider", authState.oidc_issuer ?? "configured", "SILT_OIDC_ISSUER")}
+            {/if}
+
+            {@render row(
+              "Signed-in sessions",
+              sessionCount === null ? "…" : String(sessionCount),
+              "SILT_SESSION_TTL / SILT_SESSION_IDLE_TTL",
+              "Sessions are rows in Silt's database, not signed cookies. Signing out revokes one; the button below revokes all of them.",
+            )}
+          </dl>
+
+          <div class="mt-5">
+            <Button variant="outline" size="sm" onclick={revokeAll} disabled={revoking || !authState?.required}>
+              {revoking ? "Signing out…" : "Sign out everywhere"}
+            </Button>
+            <p class="mt-1.5 max-w-xl text-xs text-muted-foreground/70">
+              {#if authState?.required}
+                Ends every session, including this one. Use it if you think a session token has
+                leaked — a cookie the browser throws away is still a working credential to anyone
+                who copied it, but a deleted row is not.
+              {:else}
+                There is nothing to revoke while no authentication is configured.
+              {/if}
+            </p>
+          </div>
+        </section>
+      {/if}
+
       {#if section === "environment"}
         <section>
           <h3 class="text-sm font-semibold">Environment only</h3>
@@ -702,7 +805,7 @@
       <!-- Sticky rather than at the bottom: a save button you have to scroll to
            find is the same complaint as a settings link you have to scroll to
            find. It only shows on the sections that can be saved. -->
-      {#if section !== "appearance" && section !== "environment" && section !== "storage"}
+      {#if section !== "appearance" && section !== "environment" && section !== "storage" && section !== "security"}
         <div class="sticky bottom-0 -mx-1 flex items-center gap-3 border-t border-border bg-background/95 px-1 py-3 backdrop-blur-sm">
           <Button size="sm" onclick={save} disabled={!dirty || saving}>
             {saving ? "Saving…" : "Save changes"}

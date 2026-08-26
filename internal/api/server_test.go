@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/api"
+	"github.com/unmaykr-a/silt/internal/auth"
 	"github.com/unmaykr-a/silt/internal/compose"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/docker"
@@ -117,6 +118,8 @@ func newFixture(t *testing.T) *fixture {
 		EventRetentionDays:     90,
 		NotifyMinSeverity:      "medium",
 		MaxComposeFileBytes:    1 << 20,
+		SessionTTL:             720 * time.Hour,
+		SessionIdleTTL:         168 * time.Hour,
 	}
 	server := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, hub, cfg, snaps)
 	// The settings layer is part of the surface under test: without it every
@@ -127,6 +130,23 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatalf("load settings: %v", err)
 	}
 	server.SetSettings(live)
+	// A gate with only a session store: no password, no proxy, no provider, so
+	// authentication is off and the fixture stays open — but the session
+	// endpoints are real rather than reporting themselves unavailable.
+	password, err := auth.NewPassword("")
+	if err != nil {
+		t.Fatalf("NewPassword: %v", err)
+	}
+	proxy, err := auth.NewProxy(false, "", nil)
+	if err != nil {
+		t.Fatalf("NewProxy: %v", err)
+	}
+	server.SetAuth(&api.Gate{
+		Sessions:      auth.NewSessions(db, 720*time.Hour, 0),
+		Password:      password,
+		Proxy:         proxy,
+		MetricsPublic: true,
+	})
 
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(ts.Close)

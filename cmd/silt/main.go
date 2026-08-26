@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/api"
+	"github.com/unmaykr-a/silt/internal/auth"
 	"github.com/unmaykr-a/silt/internal/collect"
 	"github.com/unmaykr-a/silt/internal/compose"
 	"github.com/unmaykr-a/silt/internal/config"
@@ -105,15 +107,9 @@ func run() error {
 			"kinds", cfg.NotifyOn, "min_severity", cfg.NotifyMinSeverity)
 	}
 
-	auth, err := api.NewAuth(cfg.TrustProxyAuth, cfg.AuthHeader, cfg.PasswordHash)
+	gate, err := buildGate(ctx, cfg, db, log)
 	if err != nil {
 		return err
-	}
-	if !auth.Enabled() {
-		// Worth saying out loud rather than leaving someone to assume Silt
-		// asks for a password by default.
-		log.Warn("no authentication configured; anyone who can reach this port has full read access",
-			"hint", "set SILT_TRUST_PROXY_AUTH with your reverse proxy, or SILT_PASSWORD_HASH")
 	}
 
 	hub := api.NewHub(log)
@@ -154,6 +150,16 @@ func run() error {
 			}
 		},
 		Log: log,
+		// Expired sessions are swept alongside everything else rather than on
+		// their own timer: it is the same "remove what is past its window"
+		// pass, and one schedule is easier to reason about than two.
+		Extra: func(ctx context.Context) {
+			if removed, err := gate.Sessions.Sweep(ctx); err != nil {
+				log.Error("sweep sessions failed", "error", err)
+			} else if removed > 0 {
+				log.Info("expired sessions removed", "count", removed)
+			}
+		},
 	}
 
 	// The collector retries forever, so an engine that is down at startup is
@@ -201,7 +207,7 @@ func run() error {
 	apiServer := api.New(log, db, hub, cfg, snapshotter)
 	apiServer.SetVersion(version)
 	apiServer.SetSettings(live)
-	apiServer.SetAuth(auth)
+	apiServer.SetAuth(gate)
 	apiServer.SetFiles(fileReader)
 	srv := apiServer.HTTPServer(cfg)
 
@@ -239,4 +245,79 @@ func run() error {
 	}
 	wg.Wait()
 	return runErr
+}
+
+// buildGate assembles authentication and says out loud what it did.
+//
+// Every one of these warnings is about a default that is convenient and not
+// safe. None of them stop Silt starting: someone bringing a stack up at 02:00
+// needs the tool that tells them what changed, not a refusal to boot.
+func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slog.Logger) (*api.Gate, error) {
+	password, err := auth.NewPassword(cfg.PasswordHash)
+	if err != nil {
+		return nil, err
+	}
+	proxy, err := auth.NewProxy(cfg.TrustProxyAuth, cfg.AuthHeader, cfg.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
+
+	// Discovery reaches the network, so a provider that is down is a warning
+	// and a disabled login rather than a refusal to start. Silt's job is to
+	// tell you what changed; being unable to do that because an unrelated
+	// service is down would be the wrong trade.
+	provider, err := auth.NewOIDC(ctx, auth.OIDCConfig{
+		Issuer:        cfg.OIDCIssuer,
+		ClientID:      cfg.OIDCClientID,
+		ClientSecret:  cfg.OIDCClientSecret,
+		RedirectURL:   cfg.OIDCCallbackURL(),
+		Scopes:        cfg.OIDCScopes,
+		UsernameClaim: cfg.OIDCUsernameClaim,
+		GroupsClaim:   cfg.OIDCGroupsClaim,
+		AllowedGroups: cfg.OIDCAllowedGroups,
+		AllowedUsers:  cfg.OIDCAllowedUsers,
+	})
+	if err != nil {
+		log.Error("OpenID Connect is configured but unusable; that login is disabled", "error", err)
+		provider = nil
+	}
+
+	gate := &api.Gate{
+		Sessions:       auth.NewSessions(db, cfg.SessionTTL, cfg.SessionIdleTTL),
+		Password:       password,
+		Proxy:          proxy,
+		OIDC:           provider,
+		MetricsPublic:  cfg.MetricsPublic,
+		AllowedOrigins: originsOf(cfg.BaseURL),
+	}
+
+	switch {
+	case !gate.Enabled():
+		log.Warn("no authentication configured; anyone who can reach this port has full read access",
+			"hint", "set SILT_OIDC_ISSUER, SILT_TRUST_PROXY_AUTH with your reverse proxy, or SILT_PASSWORD_HASH")
+	default:
+		log.Info("authentication enabled",
+			"oidc", provider.Enabled(), "proxy", proxy.Enabled(), "password", password.Enabled())
+	}
+	if proxy.TrustsAnySource() {
+		log.Warn("forward auth trusts the identity header from any source; anything that can reach this port can claim to be anyone",
+			"hint", "set SILT_TRUSTED_PROXIES to your proxy's address or subnet", "header", proxy.Header())
+	}
+	if cfg.MetricsPublic {
+		log.Warn("/metrics is reachable without authentication and names every project on this host")
+	}
+	return gate, nil
+}
+
+// originsOf returns the origin of a configured base URL, so a request the
+// browser addresses to that name is not treated as cross-site.
+func originsOf(baseURL string) []string {
+	if baseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil
+	}
+	return []string{u.Scheme + "://" + u.Host}
 }

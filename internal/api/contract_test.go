@@ -120,6 +120,12 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"resetSettings": {method: "DELETE", url: "/api/settings", wantStatus: 200, schema: "Settings"},
 		"getVersion":    {method: "GET", url: "/api/version", wantStatus: 200, schema: "VersionInfo"},
 		"getAuthState":  {method: "GET", url: "/api/auth", wantStatus: 200, schema: "AuthState"},
+		// The fixture configures no provider, so these report absence. Their
+		// success paths are covered by dedicated tests against a fake provider.
+		"startOIDCLogin":  {method: "GET", url: "/api/auth/login", wantStatus: 503},
+		"finishOIDCLogin": {method: "GET", url: "/api/auth/callback", wantStatus: 503},
+		"getSessions":     {method: "GET", url: "/api/auth/sessions", wantStatus: 200, schema: "SessionCount"},
+		"revokeSessions":  {method: "DELETE", url: "/api/auth/sessions", wantStatus: 200},
 		// The fixture configures no password, so login reports that it is not
 		// available rather than accepting anything.
 		"login":                {method: "POST", url: "/api/login", body: `{"password":"x"}`, wantStatus: 503},

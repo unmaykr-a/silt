@@ -555,8 +555,8 @@ paths:
       tags: [system]
       summary: Whether authentication is required and satisfied
       description: |
-        Lets the UI decide whether to render a login form. Never returns the
-        password hash or any credential.
+        Lets the UI decide which login to offer, and who is signed in. Never
+        returns the password hash, the client secret, or any other credential.
       operationId: getAuthState
       responses:
         "200":
@@ -564,6 +564,110 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AuthState" }
+
+  /api/auth/login:
+    get:
+      tags: [system]
+      summary: Start an OpenID Connect login
+      description: |
+        Redirects to the configured provider's authorization endpoint using the
+        authorization code flow with PKCE. The per-login state, nonce and code
+        verifier ride back in a short-lived, path-scoped cookie; nothing is
+        stored server-side, because there is exactly one consumer and it
+        arrives with the callback.
+
+        `next` is where to send the browser afterwards. It is reduced to a
+        same-origin path before it is used, so this cannot become an open
+        redirect.
+      operationId: startOIDCLogin
+      parameters:
+        - name: next
+          in: query
+          schema: { type: string }
+          description: Same-origin path to return to. Anything else becomes "/".
+      responses:
+        "302":
+          description: Redirect to the provider
+        "503":
+          description: OpenID Connect is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/callback:
+    get:
+      tags: [system]
+      summary: Finish an OpenID Connect login
+      description: |
+        Verifies the state, exchanges the code with the PKCE verifier,
+        validates the id_token and its nonce, applies the group and user
+        allowlists, and starts a session.
+
+        Failures redirect back to the app with a `login_error` query
+        parameter rather than returning JSON: the browser arrived here by
+        navigation, and a JSON error would be a dead end with no way back.
+      operationId: finishOIDCLogin
+      parameters:
+        - name: code
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: error
+          in: query
+          schema: { type: string }
+          description: Set by the provider when it refused the login.
+      responses:
+        "302":
+          description: Redirect to the app, signed in or carrying login_error
+        "503":
+          description: OpenID Connect is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/sessions:
+    get:
+      tags: [system]
+      summary: How many sessions exist
+      operationId: getSessions
+      responses:
+        "200":
+          description: Session count
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionCount" }
+    delete:
+      tags: [system]
+      summary: Sign every browser out
+      description: |
+        Revokes every session belonging to the caller's identity, including the
+        one making the request. This is the button for "I think a token
+        leaked". It is all-or-nothing rather than a list with individual revoke
+        buttons: Silt has nothing to tell one session from another that would
+        help someone choose.
+      operationId: revokeSessions
+      responses:
+        "200":
+          description: How many sessions were revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, format: int64 }
+        "401":
+          description: Not signed in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Sessions are not in use
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/login:
     post:
@@ -1176,13 +1280,31 @@ components:
 
     AuthState:
       type: object
-      required: [required, password_enabled, authenticated]
+      required:
+        [required, password_enabled, oidc_enabled, proxy_enabled, authenticated]
       properties:
         required:
           type: boolean
           description: Whether any authentication is configured at all.
         password_enabled: { type: boolean }
+        oidc_enabled: { type: boolean }
+        oidc_issuer:
+          type: string
+          description: Shown on the login screen so it is clear where the button leads.
+        proxy_enabled: { type: boolean }
         authenticated: { type: boolean }
+        subject:
+          type: string
+          description: Display name of the signed-in identity. Never a credential.
+        method:
+          type: string
+          enum: [password, oidc, proxy]
+
+    SessionCount:
+      type: object
+      required: [count]
+      properties:
+        count: { type: integer, format: int64 }
 
     PruneResult:
       type: object
