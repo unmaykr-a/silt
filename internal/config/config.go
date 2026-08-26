@@ -57,6 +57,22 @@ type Config struct {
 	// IngestToken guards POST /api/ingest. Empty means the endpoint is not
 	// configured and returns 503 — unset must never mean open.
 	IngestToken string `env:"SILT_INGEST_TOKEN"`
+
+	// NotifyURLs are shoutrrr targets. Empty disables notifications.
+	NotifyURLs []string `env:"SILT_NOTIFY_URLS" envSeparator:","`
+	// NotifyOn lists the change kinds worth interrupting someone for.
+	NotifyOn []string `env:"SILT_NOTIFY_ON" envSeparator:"," envDefault:"image_id,image_digest,volumes,service_removed"`
+	// NotifyMinSeverity is ANDed with NotifyOn.
+	NotifyMinSeverity string `env:"SILT_NOTIFY_MIN_SEVERITY" envDefault:"medium"`
+	// BaseURL is used to build links in notifications. Empty omits the link.
+	BaseURL string `env:"SILT_BASE_URL"`
+
+	// TrustProxyAuth accepts an identity asserted by a reverse proxy.
+	TrustProxyAuth bool `env:"SILT_TRUST_PROXY_AUTH" envDefault:"false"`
+	// AuthHeader is the forward-auth header name.
+	AuthHeader string `env:"SILT_AUTH_HEADER" envDefault:"X-Remote-User"`
+	// PasswordHash is a bcrypt hash for the fallback login.
+	PasswordHash string `env:"SILT_PASSWORD_HASH"`
 }
 
 // Load reads the environment, applies defaults, and validates the result.

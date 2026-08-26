@@ -19,6 +19,7 @@ export type EnvKeyChange = components["schemas"]["EnvKeyChange"];
 export type Settings = components["schemas"]["Settings"];
 export type PruneResult = components["schemas"]["PruneResult"];
 export type ProjectModel = components["schemas"]["ProjectModel"];
+export type AuthState = components["schemas"]["AuthState"];
 
 export class ApiError extends Error {
   constructor(
@@ -99,6 +100,14 @@ export const api = {
   takeSnapshot: (projectId: number) =>
     request<{ status: string }>(`/api/projects/${projectId}/snapshot`, { method: "POST" }),
   prune: () => request<PruneResult>("/api/maintenance/prune", { method: "POST" }),
+  authState: (signal?: AbortSignal) => get<AuthState>("/api/auth", signal),
+  login: (password: string) =>
+    request<{ authenticated: boolean }>("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    }),
+  logout: () => request<{ authenticated: boolean }>("/api/logout", { method: "POST" }),
 };
 
 /** Named SSE events the server emits on /api/stream. */

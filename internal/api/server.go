@@ -34,6 +34,7 @@ type Server struct {
 	snapshotter Snapshotter
 	started     time.Time
 	version     string
+	auth        *Auth
 }
 
 // SetVersion records the build version for the settings screen.
@@ -48,6 +49,11 @@ func New(log *slog.Logger, db *store.Store, hub *Hub, cfg config.Config, snap Sn
 		hub = NewHub(log)
 	}
 	return &Server{log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap, started: time.Now(), version: "dev"}
+}
+
+// SetAuth installs the authentication policy.
+func (s *Server) SetAuth(a *Auth) {
+	s.auth = a
 }
 
 // Hub exposes the event hub so the collector can publish to it.
@@ -75,12 +81,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/timeline", s.getTimeline)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("POST /api/ingest", s.ingest)
+	mux.HandleFunc("GET /api/auth", s.getAuthState)
+	mux.HandleFunc("POST /api/login", s.postLogin)
+	mux.HandleFunc("POST /api/logout", s.postLogout)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("POST /api/maintenance/prune", s.postPrune)
 
 	// Anything not claimed by an API route belongs to the SPA.
 	mux.Handle("/", web.Handler())
-	return s.logRequests(mux)
+	return s.logRequests(s.requireAuth(mux))
 }
 
 // HTTPServer returns a configured *http.Server for cfg.

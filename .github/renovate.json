@@ -1,0 +1,45 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommitsDisabled"],
+  "timezone": "Europe/Tallinn",
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "Group Go module updates so a week of patch bumps is one review, not ten.",
+      "matchManagers": ["gomod"],
+      "groupName": "go modules"
+    },
+    {
+      "description": "Same for the frontend.",
+      "matchManagers": ["npm"],
+      "groupName": "npm packages"
+    },
+    {
+      "description": "The Go toolchain floor is set by dependencies, not by preference. Raising it changes the pinned build images too, so it gets its own review.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang"],
+      "groupName": null,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "shadcn-svelte components are copied into the tree, not installed; bits-ui and friends are their runtime and should move together.",
+      "matchPackageNames": ["bits-ui", "tailwind-variants", "tailwind-merge", "clsx"],
+      "groupName": "shadcn runtime"
+    },
+    {
+      "description": "Docker base images move on their own cadence.",
+      "matchManagers": ["dockerfile"],
+      "groupName": "docker base images"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  }
+}

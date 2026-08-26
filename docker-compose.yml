@@ -18,6 +18,22 @@ services:
       # SILT_LOG_LEVEL: debug
       # Extra environment keys to keep readable instead of redacting.
       # SILT_KEEP_KEYS: MY_APP_REGION,APP_*
+
+      # Notifications. Any shoutrrr target: ntfy, Gotify, Discord, email.
+      # Kinds and severity are ANDed.
+      # SILT_NOTIFY_URLS: ntfy://ntfy.sh/my-silt-topic
+      # SILT_NOTIFY_ON: image_id,image_digest,volumes,service_removed
+      # SILT_NOTIFY_MIN_SEVERITY: medium
+      # SILT_BASE_URL: https://silt.example.com
+
+      # External events (Uptime Kuma, cron, Home Assistant). Unset, the
+      # endpoint returns 503 rather than accepting anything.
+      # SILT_INGEST_TOKEN: change-me
+
+      # Authentication. Unset, Silt is open to anyone who can reach the port.
+      # SILT_TRUST_PROXY_AUTH: "true"
+      # SILT_AUTH_HEADER: X-Remote-User
+      # SILT_PASSWORD_HASH: "$$2a$$12$$..."   # note the doubled $ for compose
     ports:
       - "8375:8375"
     volumes:
