@@ -25,14 +25,19 @@
     history.replaceState({}, "", location.pathname + (query ? `?${query}` : ""));
   });
 
-  const setup = $derived(!!authState?.setup_required);
+  // The setup form belongs on this screen only when it is the only way in.
+  // With a provider configured, signing in there is the way in and setting a
+  // local password is something you do afterwards, from the settings screen.
+  const setup = $derived(!!authState?.setup_only);
   const minimum = $derived(authState?.min_password_length ?? 10);
   const showOIDC = $derived(!!authState?.oidc_enabled && !setup);
   const showPassword = $derived(!!authState?.password_enabled && !setup);
   const both = $derived(showOIDC && showPassword);
   // Forward auth only, and the proxy did not assert anyone. There is nothing
   // to type; saying so beats an empty screen with a lone heading.
-  const proxyOnly = $derived(!!authState?.required && !setup && !showOIDC && !showPassword);
+  const proxyOnly = $derived(
+    !!authState?.required && !setup && !showOIDC && !showPassword && !authState?.oidc_error,
+  );
 
   // Where the button will send them, so it is not a leap of faith.
   const issuerHost = $derived.by(() => {
@@ -79,7 +84,11 @@
       Silt
     </h1>
     <p class="mt-1 text-sm text-muted-foreground">
-      {setup ? "Nobody has set this up yet. Choose a password." : "What settled on your stack, and when."}
+      {setup
+        ? "Nobody has set this up yet. Choose a password."
+        : authState?.setup_required
+          ? "Sign in with your provider. You can add a password afterwards."
+          : "What settled on your stack, and when."}
     </p>
 
     {#if error}
@@ -132,6 +141,18 @@
           <Button class="w-full" onclick={() => api.oidcLogin()}>
             Sign in{#if issuerHost}&nbsp;with {issuerHost}{/if}
           </Button>
+        </div>
+      {:else if authState?.oidc_error}
+        <!-- Configured but unusable. A button that quietly does not appear
+             sends you looking at your provider's configuration rather than at
+             the reason. -->
+        <div class="mt-7 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+          <p class="text-xs font-medium text-amber-700 dark:text-amber-300">
+            Your identity provider is configured but unreachable.
+          </p>
+          <p class="mt-1 break-words font-mono text-[11px] leading-relaxed text-amber-700/80 dark:text-amber-300/80">
+            {authState.oidc_error}
+          </p>
         </div>
       {/if}
 

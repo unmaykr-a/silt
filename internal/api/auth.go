@@ -35,6 +35,11 @@ type Gate struct {
 	Password *auth.Password
 	Proxy    *auth.Proxy
 	OIDC     *auth.OIDC
+	// OIDCError explains why a configured provider is not usable, so the login
+	// screen can say so instead of quietly omitting the button. Silt that
+	// looks like it has no provider, when you configured one, is worse than
+	// Silt that says the provider is unreachable.
+	OIDCError string
 	// MetricsPublic leaves /metrics reachable without authentication.
 	MetricsPublic bool
 	// AllowedOrigins are extra origins accepted on unsafe requests, beyond the
@@ -209,12 +214,17 @@ type authStateResponse struct {
 	OIDCEnabled     bool   `json:"oidc_enabled"`
 	OIDCIssuer      string `json:"oidc_issuer,omitempty"`
 	ProxyEnabled    bool   `json:"proxy_enabled"`
-	Authenticated   bool   `json:"authenticated"`
-	Subject         string `json:"subject,omitempty"`
-	Method          string `json:"method,omitempty"`
-	// SetupRequired means the built-in account exists but has no password, so
-	// the only thing the UI should offer is choosing one.
+	// OIDCError is set when a provider is configured but unusable.
+	OIDCError     string `json:"oidc_error,omitempty"`
+	Authenticated bool   `json:"authenticated"`
+	Subject       string `json:"subject,omitempty"`
+	Method        string `json:"method,omitempty"`
+	// SetupRequired means the built-in account exists but has no password.
 	SetupRequired bool `json:"setup_required"`
+	// SetupOnly means it is also the only way in, so the login screen should
+	// offer nothing but choosing a password. With a provider configured the
+	// setup form belongs on the settings screen instead, behind a sign-in.
+	SetupOnly bool `json:"setup_only"`
 	// MinPasswordLen lets the form say the rule before it refuses.
 	MinPasswordLen int `json:"min_password_length"`
 	// The built-in account's state, for the Security screen.
@@ -231,6 +241,7 @@ func (s *Server) getAuthState(w http.ResponseWriter, r *http.Request) {
 		OIDCEnabled:     s.gate != nil && s.gate.OIDC.Enabled(),
 		ProxyEnabled:    s.gate != nil && s.gate.Proxy.Enabled(),
 		SetupRequired:   s.gate.setupRequired(),
+		SetupOnly:       s.gate.setupRequired() && !s.gate.otherWayIn(),
 		MinPasswordLen:  auth.MinPasswordLength,
 	}
 	if s.gate != nil && s.gate.Account.Available() {
@@ -241,6 +252,7 @@ func (s *Server) getAuthState(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.gate != nil {
 		out.OIDCIssuer = s.gate.OIDC.Issuer()
+		out.OIDCError = s.gate.OIDCError
 	}
 	if id, ok := s.identify(r); ok && s.gate.Enabled() {
 		out.Authenticated = true
@@ -323,7 +335,7 @@ func (s *Server) getOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), false)
+	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), false, requestBase(r))
 	if err != nil {
 		s.log.Error("start OIDC login", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not start the login")
@@ -526,17 +538,34 @@ func decodeJSON[T any](w http.ResponseWriter, r *http.Request, out *T) bool {
 	return true
 }
 
+// otherWayIn reports whether something besides the built-in account could
+// admit someone.
+func (g *Gate) otherWayIn() bool {
+	return g != nil && (g.OIDC.Enabled() || g.Proxy.Enabled())
+}
+
 // postSetup claims the built-in account with its first password.
 //
-// Public, because on a fresh install there is no way to authenticate yet — and
-// gated on the account still being unclaimed, so it works exactly once. That
-// is the same first-run window every setup screen has; it is narrowed by
-// refusing every other endpoint until it closes, and it does not exist at all
-// for anyone who set SILT_PASSWORD_HASH.
+// Anonymous only when the account is the only way in. On a fresh install with
+// nothing else configured that is the sole route, and the door is shut until
+// it is used — the same first-run window every setup screen has, narrowed by
+// refusing every other endpoint until it closes.
+//
+// The moment a provider or a proxy could let someone in, an anonymous claim
+// would be an escalation rather than a bootstrap: a stranger would be taking
+// an account that bypasses the provider. So it requires a session, which means
+// signing in the way the install is already set up to do.
 func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 	if s.gate == nil || !s.gate.setupRequired() {
 		writeError(w, http.StatusConflict, "this Silt has already been set up")
 		return
+	}
+	if s.gate.otherWayIn() {
+		if _, ok := s.identify(r); !ok {
+			writeError(w, http.StatusUnauthorized,
+				"sign in with your identity provider first, then set a password under Settings → Security")
+			return
+		}
 	}
 
 	var req passwordRequest
@@ -661,7 +690,7 @@ func (s *Server) getLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), true)
+	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), true, requestBase(r))
 	if err != nil {
 		s.log.Error("start OIDC link", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not start the link")
@@ -690,4 +719,35 @@ func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("built-in account unlinked from its provider identity")
 	writeJSON(w, http.StatusOK, map[string]bool{"linked": false})
+}
+
+// requestBase reconstructs the origin this request was addressed to, so the
+// OpenID Connect callback can be derived when nothing was configured.
+//
+// Behind a reverse proxy the Host and scheme Silt sees are the proxy's own, so
+// the forwarded headers are what carry the name a browser actually used. They
+// are believed here because the only thing they decide is a URL sent to the
+// provider — and the provider redirects only to URIs registered with it, so a
+// forged Host produces a refusal rather than a redirect somewhere else.
+func requestBase(r *http.Request) string {
+	scheme := "http"
+	if auth.SecureRequest(r) {
+		scheme = "https"
+	}
+	host := firstValue(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = r.Host
+	}
+	if host == "" {
+		return ""
+	}
+	return scheme + "://" + host
+}
+
+// firstValue takes the client-most entry of a comma-separated forwarded header.
+func firstValue(header string) string {
+	if idx := strings.Index(header, ","); idx >= 0 {
+		header = header[:idx]
+	}
+	return strings.TrimSpace(header)
 }

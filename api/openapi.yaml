@@ -1431,8 +1431,8 @@ components:
       type: object
       required:
         [required, password_enabled, oidc_enabled, proxy_enabled, authenticated,
-         setup_required, min_password_length, local_available, local_enabled,
-         local_managed, local_linked]
+         setup_required, setup_only, min_password_length, local_available,
+         local_enabled, local_managed, local_linked]
       properties:
         required:
           type: boolean
@@ -1442,6 +1442,14 @@ components:
         oidc_issuer:
           type: string
           description: Shown on the login screen so it is clear where the button leads.
+        oidc_error:
+          type: string
+          description: |
+            Set when a provider is configured but unusable — unreachable,
+            wrong issuer, bad client. The login screen shows it rather than
+            quietly omitting the button, because Silt that looks like it has no
+            provider, when you configured one, sends you to the wrong place to
+            debug it.
         proxy_enabled: { type: boolean }
         authenticated: { type: boolean }
         subject:
@@ -1452,10 +1460,15 @@ components:
           enum: [password, oidc, proxy]
         setup_required:
           type: boolean
+          description: The built-in account exists but has no password.
+        setup_only:
+          type: boolean
           description: |
-            The built-in account exists but has no password. The only thing the
-            UI should offer is choosing one, and every other endpoint is
-            refused until it does.
+            Setup is also the only way in, so the login screen should offer
+            nothing but choosing a password. With a provider or a proxy
+            configured, the setup form belongs on the settings screen instead
+            and the endpoint requires a session — an anonymous claim would then
+            be an escalation rather than a bootstrap.
         min_password_length:
           type: integer
           description: So the form can state the rule before it refuses.

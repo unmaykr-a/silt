@@ -165,6 +165,27 @@
     }
   }
 
+  const canSetFirst = $derived(
+    newPassword.length >= minimum && newPassword === confirmPassword,
+  );
+
+  async function setFirstPassword() {
+    changing = true;
+    try {
+      await api.setupAccount(newPassword);
+      newPassword = "";
+      confirmPassword = "";
+      error = null;
+      notice = "Password set. You can now sign in without your provider.";
+      await refreshAuthState();
+    } catch (err) {
+      error = (err as Error).message;
+      notice = null;
+    } finally {
+      changing = false;
+    }
+  }
+
   async function changePassword() {
     changing = true;
     try {
@@ -797,6 +818,13 @@
 
             {#if authState?.oidc_enabled}
               {@render row("Identity provider", authState.oidc_issuer ?? "configured", "SILT_OIDC_ISSUER")}
+            {:else if authState?.oidc_error}
+              {@render row(
+                "Identity provider",
+                "configured, but unreachable",
+                "SILT_OIDC_ISSUER",
+                authState.oidc_error,
+              )}
             {/if}
 
             {@render row(
@@ -814,6 +842,41 @@
                 The password comes from <span class="font-mono">SILT_PASSWORD_HASH</span>, so it is
                 not this screen's to change. Unset that variable if you would rather manage it here.
               </p>
+            {:else if authState.setup_required}
+              <p class="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground/70">
+                This account has no password yet. Set one and you can sign in without your
+                provider — useful for the day the provider is the thing that is down.
+              </p>
+              <div class="mt-3 max-w-md space-y-3">
+                <div>
+                  <label class="block text-xs text-muted-foreground" for="new-password">
+                    Password <span class="text-muted-foreground/60">· at least {minimum} characters</span>
+                  </label>
+                  <input
+                    id="new-password"
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={newPassword}
+                    class="{input} mt-1"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-muted-foreground" for="confirm-password">Confirm</label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={confirmPassword}
+                    class="{input} mt-1"
+                  />
+                  {#if confirmPassword !== "" && confirmPassword !== newPassword}
+                    <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">These do not match.</p>
+                  {/if}
+                </div>
+                <Button size="sm" onclick={setFirstPassword} disabled={!canSetFirst || changing}>
+                  {changing ? "Setting…" : "Set password"}
+                </Button>
+              </div>
             {:else if authState.local_enabled}
               <div class="mt-3 max-w-md space-y-3">
                 <div>
