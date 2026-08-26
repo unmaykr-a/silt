@@ -1,6 +1,9 @@
 <script lang="ts">
   import { api, type VersionInfo } from "$lib/api/client";
   import Dialog from "./Dialog.svelte";
+  import SiltMark from "./SiltMark.svelte";
+
+  const KOFI = "https://ko-fi.com/unmaykr";
 
   let info = $state<VersionInfo | null>(null);
   let open = $state(false);
@@ -43,8 +46,31 @@
   </button>
 
   <Dialog bind:open title="What's new in Silt">
-    <p class="mb-5 font-mono text-[11px] text-muted-foreground">
-      release {info.release} · build {info.version}
+    <div class="mb-5 flex flex-wrap items-center gap-3">
+      <SiltMark size={20} marker="#34d399" />
+      <p class="font-mono text-[11px] text-muted-foreground">
+        release {info.release} · build {info.version}
+      </p>
+      <a
+        href={KOFI}
+        target="_blank"
+        rel="noreferrer noopener"
+        class="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1 text-xs
+               transition-colors hover:border-foreground/25 hover:bg-secondary/50"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
+          <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4Z" />
+          <path d="M6 1v3M10 1v3M14 1v3" />
+        </svg>
+        Support on Ko-fi
+      </a>
+    </div>
+
+    <p class="mb-5 text-xs leading-relaxed text-muted-foreground">
+      Silt is free and AGPL-3.0 licensed. If it has saved you an evening of
+      “what changed?”, a coffee is a kind way to say so — and never required.
     </p>
 
     <div class="space-y-7">
@@ -60,8 +86,10 @@
           <ul class="mt-3 space-y-2">
             {#each release.entries as entry, i (i)}
               <li class="flex gap-2.5 text-sm">
+                <!-- A fixed width so the text column lines up: "added" and
+                     "security" are very different lengths. -->
                 <span
-                  class="mt-0.5 h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide
+                  class="mt-0.5 w-16 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-medium uppercase tracking-wide
                          {KIND_STYLE[entry.kind] ?? KIND_STYLE.removed}"
                 >
                   {entry.kind}

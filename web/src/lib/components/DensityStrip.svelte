@@ -2,8 +2,9 @@
   import uPlot from "uplot";
   import "uplot/dist/uPlot.min.css";
   import type { Timeline } from "$lib/api/client";
-  import { Card, CardContent } from "$lib/components/ui/card";
   import { theme } from "$lib/theme.svelte";
+  import { prefs } from "$lib/prefs.svelte";
+  import { datetime } from "$lib/format";
 
   // Change markers and health events share one axis. That shared axis is the
   // whole point of the app: it is what lets someone see the image that got
@@ -26,15 +27,38 @@
   let container = $state<HTMLDivElement | null>(null);
   let chart: uPlot | null = null;
 
+  // 96px was too short to read: a day of activity collapsed into three pixels
+  // of bar and the y axis had room for two labels. Taller by default, and
+  // taller still on request, because a spike you cannot resolve is a spike you
+  // cannot act on.
+  const HEIGHTS = { compact: 84, normal: 148, tall: 260 } as const;
+  type Size = keyof typeof HEIGHTS;
+  let size = $state<Size>("normal");
+  const height = $derived(HEIGHTS[size]);
+
+  // Which series are drawn. Clicking a legend entry isolates or restores it,
+  // the way every chart people already use behaves.
+  let hidden = $state<Record<string, boolean>>({});
+
   // The hover readout. Rendered as normal DOM beside the canvas rather than
   // painted into it, so it inherits the theme and stays selectable.
-  let hover = $state<{ x: number; start: number; changes: number; events: number; errors: number } | null>(null);
+  let hover = $state<{
+    x: number;
+    start: number;
+    changes: number;
+    events: number;
+    errors: number;
+  } | null>(null);
 
   const SERIES = [
-    { key: "changes" as const, label: "config changes", stroke: "#34d399", fill: "rgba(52,211,153,0.3)" },
-    { key: "events" as const, label: "events", stroke: "#71717a", fill: "rgba(113,113,122,0.25)" },
-    { key: "errors" as const, label: "errors", stroke: "#f87171", fill: "rgba(248,113,113,0.35)" },
-  ];
+    { key: "changes", label: "config changes", stroke: "#10b981" },
+    { key: "events", label: "events", stroke: "#8b8b94" },
+    { key: "errors", label: "errors", stroke: "#ef4444" },
+  ] as const;
+
+  function fill(stroke: string, dark: boolean): string {
+    return dark ? `${stroke}55` : `${stroke}44`;
+  }
 
   function series(t: Timeline) {
     const buckets = t.buckets ?? [];
@@ -53,15 +77,18 @@
     ];
   }
 
-  function build(node: HTMLDivElement, t: Timeline, dark: boolean): uPlot {
+  function build(node: HTMLDivElement, t: Timeline, dark: boolean, h: number): uPlot {
     const data = series(t) as uPlot.AlignedData;
-    const axis = dark ? "#71717a" : "#a1a1aa";
-    const grid = dark ? "#27272a" : "#e4e4e7";
+    const axis = dark ? "#8b8b94" : "#71717a";
+    // A hairline grid rather than a full-strength one: the chart should read as
+    // data with a scale behind it, not as a table of boxes.
+    const grid = dark ? "#ffffff14" : "#0000000f";
 
     return new uPlot(
       {
         width: node.clientWidth || 640,
-        height: 96,
+        height: h,
+        padding: [8, 4, 0, 0],
         cursor: {
           y: false,
           points: { show: false },
@@ -73,22 +100,25 @@
         // Pin the x range to the window that was actually requested. Left to
         // auto-range, a series with few populated buckets produces an axis
         // spanning years for a one-day window.
-        scales: {
-          x: { time: true, range: [t.from / 1000, t.to / 1000] },
-        },
+        scales: { x: { time: true, range: [t.from / 1000, t.to / 1000] } },
         axes: [
           {
             stroke: axis,
             grid: { stroke: grid, width: 1 },
-            ticks: { stroke: grid },
+            ticks: { stroke: grid, size: 4 },
             font: "11px ui-sans-serif, system-ui",
+            // uPlot's own time formatting is 12-hour by default, which ignores
+            // the reader's preference; these follow it.
+            values: (_u, splits) => splits.map((s) => tick(s * 1000)),
           },
           {
             stroke: axis,
             grid: { stroke: grid, width: 1 },
-            ticks: { stroke: grid },
+            ticks: { stroke: grid, size: 4 },
             font: "11px ui-sans-serif, system-ui",
-            size: 34,
+            size: 40,
+            // Counts are integers; "1.5 errors" is not a thing.
+            values: (_u, splits) => splits.map((s) => (Number.isInteger(s) ? String(s) : "")),
           },
         ],
         series: [
@@ -96,8 +126,9 @@
           ...SERIES.map((s) => ({
             label: s.label,
             stroke: s.stroke,
-            fill: s.fill,
-            paths: uPlot.paths.bars!({ size: [0.7] }),
+            fill: fill(s.stroke, dark),
+            show: !hidden[s.key],
+            paths: uPlot.paths.bars!({ size: [0.82, 24] }),
           })),
         ],
         hooks: {
@@ -142,17 +173,34 @@
     );
   }
 
+  // Axis ticks: time on its own, with the date only where the day turns over.
+  function tick(ms: number): string {
+    const d = new Date(ms);
+    const midnight = d.getHours() === 0 && d.getMinutes() === 0;
+    if (midnight) {
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    return d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: prefs.clock === "h12" ? true : prefs.clock === "h24" ? false : undefined,
+    });
+  }
+
   $effect(() => {
     if (!container || !timeline) return;
-    // Reading theme.dark here is what makes the canvas repaint on a theme
-    // change: the axes are drawn pixels, not styled elements.
+    // Reading these here is what makes the canvas repaint on a theme, size or
+    // clock change: the axes are drawn pixels, not styled elements.
     const dark = theme.dark;
+    const h = height;
+    void [hidden, prefs.clock];
+
     chart?.destroy();
-    chart = build(container, timeline, dark);
+    chart = build(container, timeline, dark, h);
     hover = null;
 
     const observer = new ResizeObserver(() => {
-      if (container && chart) chart.setSize({ width: container.clientWidth, height: 96 });
+      if (container && chart) chart.setSize({ width: container.clientWidth, height: h });
     });
     observer.observe(container);
 
@@ -163,74 +211,106 @@
     };
   });
 
-  const stamp = $derived((ms: number) =>
-    new Date(ms).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-  );
+  const totals = $derived.by(() => {
+    const buckets = timeline?.buckets ?? [];
+    let changes = 0;
+    let events = 0;
+    let errors = 0;
+    for (const b of buckets) {
+      changes += b.changes;
+      errors += b.errors;
+      events += b.events - b.errors;
+    }
+    return { changes, events, errors };
+  });
+
+  function toggle(key: string) {
+    // Clicking the only visible series restores the rest, rather than leaving
+    // an empty chart with no obvious way back.
+    const others = SERIES.filter((s) => s.key !== key);
+    const onlyThis = !hidden[key] && others.every((s) => hidden[s.key]);
+    hidden = onlyThis ? {} : { ...hidden, [key]: !hidden[key] };
+  }
 </script>
 
-<Card>
-  <CardContent class="p-3">
-    <div class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-      {#each SERIES as s (s.key)}
-        <span class="inline-flex items-center gap-1.5">
-          <span class="size-2 rounded-sm" style="background: {s.stroke}"></span>
-          {s.label}
+<div class="rounded-md border border-border bg-card">
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 text-xs">
+    {#each SERIES as s (s.key)}
+      <button
+        type="button"
+        class="inline-flex items-center gap-1.5 transition-opacity {hidden[s.key]
+          ? 'opacity-35'
+          : 'opacity-100'} hover:opacity-100"
+        onclick={() => toggle(s.key)}
+        title="Show only {s.label}"
+      >
+        <span class="size-2 rounded-[2px]" style="background: {s.stroke}"></span>
+        <span class="text-muted-foreground">{s.label}</span>
+        <span class="font-mono tabular-nums">
+          {s.key === "changes" ? totals.changes : s.key === "errors" ? totals.errors : totals.events}
         </span>
-      {/each}
+      </button>
+    {/each}
 
-      <span class="ml-auto flex items-center gap-3">
-        {#if zoomed}
+    <span class="ml-auto flex items-center gap-2">
+      {#if zoomed}
+        <button
+          type="button"
+          class="rounded px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+          onclick={() => onReset?.()}
+        >
+          Reset zoom
+        </button>
+      {:else if onZoom}
+        <span class="hidden text-[11px] text-muted-foreground/50 sm:inline">drag to zoom</span>
+      {/if}
+      <div class="flex rounded border border-border">
+        {#each [["compact", "S"], ["normal", "M"], ["tall", "L"]] as [value, label] (value)}
           <button
             type="button"
-            class="rounded border border-border px-2 py-0.5 text-[11px] transition-colors hover:bg-secondary/60 hover:text-foreground"
-            onclick={() => onReset?.()}
+            class="px-1.5 py-0.5 text-[10px] transition-colors first:rounded-l last:rounded-r
+                   {size === value ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground'}"
+            onclick={() => (size = value as Size)}
+            title="{label === 'S' ? 'Compact' : label === 'M' ? 'Normal' : 'Tall'} chart"
           >
-            Reset zoom
+            {label}
           </button>
-        {:else if onZoom}
-          <span class="hidden text-[11px] text-muted-foreground/60 sm:inline">drag to zoom</span>
-        {/if}
-      </span>
-    </div>
+        {/each}
+      </div>
+    </span>
+  </div>
 
-    <div class="relative">
+  <div class="relative px-1 pb-1">
+    <div
+      bind:this={container}
+      class="w-full {onZoom ? 'cursor-crosshair' : ''}"
+      ondblclick={() => onReset?.()}
+      role="presentation"
+    ></div>
+
+    {#if hover}
+      <!-- Clamped to the container so a bucket at either edge does not push
+           the page sideways. -->
       <div
-        bind:this={container}
-        class="w-full {onZoom ? 'cursor-crosshair' : ''}"
-        ondblclick={() => onReset?.()}
-        role="presentation"
-      ></div>
-
-      {#if hover}
-        <!-- Clamped to the container so a bucket at either edge does not push
-             the page sideways. -->
-        <div
-          class="pointer-events-none absolute top-0 z-10 -translate-x-1/2 rounded-md border border-border
-                 bg-background/95 px-2.5 py-1.5 text-[11px] shadow-lg backdrop-blur-sm"
-          style="left: clamp(4.5rem, {hover.x}px, calc(100% - 4.5rem))"
-        >
-          <div class="font-mono text-muted-foreground">{stamp(hover.start)}</div>
-          <div class="mt-1 space-y-0.5">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-muted-foreground">changes</span>
-              <span class="font-mono tabular-nums">{hover.changes}</span>
+        class="pointer-events-none absolute top-1 z-10 -translate-x-1/2 rounded-md border border-border
+               bg-background/95 px-2.5 py-1.5 text-[11px] shadow-lg backdrop-blur-sm"
+        style="left: clamp(5rem, {hover.x}px, calc(100% - 5rem))"
+      >
+        <div class="font-mono text-muted-foreground">{datetime(hover.start)}</div>
+        <div class="mt-1 space-y-0.5">
+          {#each SERIES as s (s.key)}
+            <div class="flex items-center justify-between gap-4">
+              <span class="flex items-center gap-1.5 text-muted-foreground">
+                <span class="size-1.5 rounded-[2px]" style="background: {s.stroke}"></span>
+                {s.label}
+              </span>
+              <span class="font-mono tabular-nums">
+                {s.key === "changes" ? hover.changes : s.key === "errors" ? hover.errors : hover.events}
+              </span>
             </div>
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-muted-foreground">events</span>
-              <span class="font-mono tabular-nums">{hover.events}</span>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-muted-foreground">errors</span>
-              <span class="font-mono tabular-nums {hover.errors > 0 ? 'text-red-400' : ''}">{hover.errors}</span>
-            </div>
-          </div>
+          {/each}
         </div>
-      {/if}
-    </div>
-  </CardContent>
-</Card>
+      </div>
+    {/if}
+  </div>
+</div>

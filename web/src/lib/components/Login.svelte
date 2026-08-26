@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api/client";
   import { Button } from "$lib/components/ui/button";
+  import SiltMark from "$lib/components/SiltMark.svelte";
 
   let { onAuthenticated }: { onAuthenticated: () => void } = $props();
 
@@ -26,7 +27,10 @@
 
 <div class="flex min-h-screen items-center justify-center bg-background px-6">
   <form class="w-full max-w-xs" onsubmit={submit}>
-    <h1 class="text-2xl font-semibold tracking-tight">Silt</h1>
+    <h1 class="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
+      <SiltMark size={26} marker="#34d399" />
+      Silt
+    </h1>
     <p class="mt-1 text-sm text-muted-foreground">What settled on your stack, and when.</p>
 
     <label class="mt-8 block text-xs text-muted-foreground" for="password">Password</label>

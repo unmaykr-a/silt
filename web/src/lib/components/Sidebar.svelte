@@ -1,18 +1,25 @@
 <script lang="ts">
   import { link, router } from "$lib/router.svelte";
   import type { Project } from "$lib/api/client";
+  import type { Snippet } from "svelte";
 
   // Inline project links were fine for a handful of stacks and unusable at
-  // thirty: they wrapped over six lines and pushed the content off screen. A
-  // filtered list scales, and stays navigable by keyboard.
+  // thirty. A filtered list scales and stays navigable by keyboard.
   //
-  // Nothing but projects lives here any more. Timeline and Settings are in the
-  // header, because a settings link at the bottom of a thirty-item scroll is a
-  // settings link nobody can find.
+  // The rail scrolls on its own rather than making the page taller: a project
+  // list forty entries long should not decide how far the timeline scrolls.
+  // That is what `min-h-0` plus `overflow-y-auto` on the list buys, and it
+  // only works because the shell above is a fixed-height flex column.
   let {
     projects,
     open = $bindable(),
-  }: { projects: Project[]; open: boolean } = $props();
+    nav,
+  }: {
+    projects: Project[];
+    open: boolean;
+    /** Section links, rendered above the project list in the side layout. */
+    nav?: Snippet;
+  } = $props();
 
   let filter = $state("");
 
@@ -39,10 +46,16 @@
 </script>
 
 <aside
-  class="{open ? 'flex' : 'hidden'} w-60 shrink-0 flex-col border-r border-border md:flex"
-  aria-label="Projects"
+  class="{open ? 'flex' : 'hidden'} w-60 shrink-0 flex-col overflow-hidden border-r border-border md:flex"
+  aria-label="Navigation"
 >
-  <div class="p-3">
+  {#if nav}
+    <div class="shrink-0 border-b border-border p-2">
+      {@render nav()}
+    </div>
+  {/if}
+
+  <div class="shrink-0 p-2">
     <input
       type="search"
       bind:value={filter}
@@ -52,7 +65,7 @@
     />
   </div>
 
-  <nav class="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+  <nav class="min-h-0 flex-1 overflow-y-auto px-2 pb-3" aria-label="Projects">
     <a
       use:link
       href="/projects"
@@ -87,6 +100,5 @@
         {/each}
       </ul>
     {/if}
-
   </nav>
 </aside>

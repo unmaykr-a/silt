@@ -3,7 +3,8 @@
   import { link, router } from "$lib/router.svelte";
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
-  import { severityDot } from "$lib/format";
+  import YamlDiff from "$lib/components/YamlDiff.svelte";
+  import { severityDot, datetime } from "$lib/format";
   import { Badge } from "$lib/components/ui/badge";
   import * as Tabs from "$lib/components/ui/tabs";
 
@@ -20,6 +21,7 @@
   let view = $state("structured");
   let yamlBefore = $state("");
   let yamlAfter = $state("");
+  let yamlLoading = $state(false);
   // Set by resolve() to explain why a pair could not be formed.
   let unresolved = "";
 
@@ -76,6 +78,7 @@
   $effect(() => {
     if (view !== "yaml" || !diff) return;
     const controller = new AbortController();
+    yamlLoading = true;
     Promise.all([
       api.composeYaml(diff.from.id, controller.signal),
       api.composeYaml(diff.to.id, controller.signal),
@@ -84,7 +87,8 @@
         yamlBefore = a;
         yamlAfter = b;
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => (yamlLoading = false));
     return () => controller.abort();
   });
 
@@ -132,7 +136,7 @@
         onchange={(e) => reselect("from", e.currentTarget.value)}
       >
         {#each snapshots as s (s.id)}
-          <option value={String(s.id)}>#{s.id} · {new Date(s.taken_at).toLocaleString()}</option>
+          <option value={String(s.id)}>#{s.id} · {datetime(s.taken_at)}</option>
         {/each}
       </select>
       <span class="text-muted-foreground">→</span>
@@ -142,7 +146,7 @@
         onchange={(e) => reselect("to", e.currentTarget.value)}
       >
         {#each snapshots as s (s.id)}
-          <option value={String(s.id)}>#{s.id} · {new Date(s.taken_at).toLocaleString()}</option>
+          <option value={String(s.id)}>#{s.id} · {datetime(s.taken_at)}</option>
         {/each}
       </select>
       {#if projectId}
@@ -168,16 +172,20 @@
     </div>
 
     {#if view === "yaml"}
-      <div class="grid gap-4 md:grid-cols-2">
-        <div>
-          <p class="mb-1 text-xs text-muted-foreground">#{diff.from.id}</p>
-          <pre class="max-h-[32rem] overflow-auto rounded-lg border border-border bg-card p-3 text-xs">{yamlBefore}</pre>
-        </div>
-        <div>
-          <p class="mb-1 text-xs text-muted-foreground">#{diff.to.id}</p>
-          <pre class="max-h-[32rem] overflow-auto rounded-lg border border-border bg-card p-3 text-xs">{yamlAfter}</pre>
-        </div>
-      </div>
+      {#if yamlLoading && yamlBefore === ""}
+        <p class="text-sm text-muted-foreground">Loading…</p>
+      {:else}
+        <!-- Two whole documents side by side with nothing marked left the
+             reader to find the changed line themselves. The lines that moved
+             are tinted, the words inside them are marked, and the long
+             unchanged runs between them collapse. -->
+        <YamlDiff
+          before={yamlBefore}
+          after={yamlAfter}
+          beforeLabel="#{diff.from.id}"
+          afterLabel="#{diff.to.id}"
+        />
+      {/if}
     {:else if diff.changes.length === 0}
       <Empty title="These two snapshots are identical." />
     {:else}

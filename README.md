@@ -218,6 +218,11 @@ Notification URLs are never read back: a shoutrrr URL carries the credential for
 service it points at, so the Settings screen shows the scheme and host and never the
 token. The ingest token is the same — set-or-not, never echoed.
 
+Date and time formatting, and whether navigation sits across the top or in a left rail,
+are per-viewer preferences stored in the browser rather than settings on the install —
+a 24-hour clock is a property of whoever is reading the screen, not of the Docker host.
+They are on the Appearance tab of the Settings screen.
+
 Storage is cheap by design: identical content is stored once, and an observation that
 matches the previous snapshot updates it in place rather than inserting a row. An idle
 hour of five-minute snapshots across 40 services costs **zero bytes**.
@@ -249,3 +254,9 @@ AGPL-3.0-or-later. Copyright (c) 2026 unmaykr-a. See [`LICENSE`](LICENSE).
 
 The gap Silt fills is a paywalled feature elsewhere; the licence is chosen to keep it
 from becoming one again.
+
+## Supporting Silt
+
+Silt is free and AGPL-3.0 licensed, and always will be. If it has saved you an evening
+of "what changed?", [a coffee](https://ko-fi.com/unmaykr) is a kind way to say so — and
+never required.

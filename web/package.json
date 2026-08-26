@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run api-types && svelte-check --tsconfig ./tsconfig.json && vite build",
+    "build": "npm run api-types && svelte-check --tsconfig ./tsconfig.json && vitest run && vite build",
     "check": "npm run api-types && svelte-check --tsconfig ./tsconfig.json",
     "preview": "vite preview",
-    "api-types": "openapi-typescript ../api/openapi.yaml -o src/lib/api/schema.d.ts"
+    "api-types": "openapi-typescript ../api/openapi.yaml -o src/lib/api/schema.d.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@lucide/svelte": "^1.34.0",
@@ -27,6 +28,7 @@
     "svelte-check": "^4.1.4",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11"
+    "vite": "^6.0.11",
+    "vitest": "^3.2.7"
   }
 }

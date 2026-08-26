@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <!-- Silt: strata, and the moment one layer was marked. The dot is what keeps
+       this from reading as a hamburger menu at 16px. -->
+  <style>
+    .strata { stroke: #18181b; }
+    @media (prefers-color-scheme: dark) { .strata { stroke: #e4e4e7; } }
+  </style>
+  <g class="strata" fill="none" stroke-width="2" stroke-linecap="round">
+    <path d="M3 7h18" opacity="0.4" />
+    <path d="M3 12h18" opacity="0.75" />
+    <path d="M3 17h18" opacity="0.4" />
+  </g>
+  <circle cx="16" cy="12" r="3" fill="#10b981" />
+</svg>
