@@ -24,6 +24,12 @@ function keepEmbedDir(): Plugin {
 
 export default defineConfig({
   plugins: [tailwindcss(), svelte(), keepEmbedDir()],
+  resolve: {
+    // $lib is the SvelteKit convention that shadcn-svelte components import
+    // through; this project is plain Vite, so the alias is declared here and
+    // mirrored in tsconfig.json.
+    alias: { $lib: resolve(import.meta.dirname, "src/lib") },
+  },
   build: {
     outDir: OUT_DIR,
     // outDir sits outside the Vite root, so this must be explicit.

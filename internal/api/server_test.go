@@ -498,3 +498,111 @@ func TestIngestMatchesProjectByServiceName(t *testing.T) {
 		t.Errorf("event named after a service did not resolve to its project: %s", body)
 	}
 }
+
+// The settings screen reports what is configured, never the secrets
+// themselves.
+func TestSettingsNeverEchoesTheIngestToken(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.get(t, "/api/settings")
+	if resp.StatusCode != 200 {
+		t.Fatalf("settings = %d %s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), f.ingestTok) {
+		t.Errorf("settings response leaked the ingest token: %s", body)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(body, &settings); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if settings["ingest_configured"] != true {
+		t.Errorf("ingest_configured = %v, want true", settings["ingest_configured"])
+	}
+	if _, present := settings["ingest_token"]; present {
+		t.Error("settings response has an ingest_token field at all")
+	}
+}
+
+func TestServiceHistory(t *testing.T) {
+	f := newFixture(t)
+
+	_, body := f.get(t, "/api/projects/1/services")
+	var services []string
+	if err := json.Unmarshal(body, &services); err != nil || len(services) != 1 || services[0] != "radarr" {
+		t.Fatalf("services = %s (err %v)", body, err)
+	}
+
+	resp, body := f.get(t, "/api/projects/1/services/radarr")
+	if resp.StatusCode != 200 {
+		t.Fatalf("history = %d %s", resp.StatusCode, body)
+	}
+	var history struct {
+		Service      string `json:"service"`
+		Observations []struct {
+			ImageID string `json:"image_id"`
+		} `json:"observations"`
+		EnvChanges []struct {
+			Key       string `json:"key"`
+			Redacted  bool   `json:"redacted"`
+			Digest    string `json:"digest"`
+			Value     string `json:"value"`
+			FirstSeen bool   `json:"first_seen"`
+		} `json:"env_changes"`
+	}
+	if err := json.Unmarshal(body, &history); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	if len(history.Observations) != 2 {
+		t.Errorf("observations = %d, want 2", len(history.Observations))
+	}
+
+	// The fixture writes API_KEY as "old" then "new": one first sighting plus
+	// one change. PUID never changes, so it appears once as a first sighting.
+	var apiKeyEntries, puidEntries int
+	for _, c := range history.EnvChanges {
+		switch c.Key {
+		case "API_KEY":
+			apiKeyEntries++
+			if !c.Redacted {
+				t.Error("API_KEY should be redacted")
+			}
+			if c.Value != "" {
+				t.Errorf("API_KEY history carried a value: %q", c.Value)
+			}
+			if c.Digest == "" {
+				t.Error("API_KEY history has no digest to compare")
+			}
+		case "PUID":
+			puidEntries++
+			if c.Value != "1000" {
+				t.Errorf("PUID value = %q, want 1000 readable", c.Value)
+			}
+		}
+	}
+	if apiKeyEntries != 2 {
+		t.Errorf("API_KEY entries = %d, want 2 (first sighting plus one change)", apiKeyEntries)
+	}
+	if puidEntries != 1 {
+		t.Errorf("PUID entries = %d, want 1 (unchanged keys are not repeated)", puidEntries)
+	}
+	if strings.Contains(string(body), `"old"`) || strings.Contains(string(body), `"new"`) {
+		t.Errorf("service history leaked secret values: %s", body)
+	}
+}
+
+func TestManualPrune(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.post(t, "/api/maintenance/prune", "", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("prune = %d %s", resp.StatusCode, body)
+	}
+	var out map[string]int64
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	for _, key := range []string{"unchanged_snapshots", "changed_snapshots", "events", "blobs"} {
+		if _, ok := out[key]; !ok {
+			t.Errorf("prune result missing %q: %s", key, body)
+		}
+	}
+}

@@ -105,7 +105,16 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"getCompose":   {method: "GET", url: "/api/snapshots/1/compose", wantStatus: 200, schema: "ProjectModel"},
 		"getDiff":      {method: "GET", url: "/api/diff?from=1&to=2", wantStatus: 200, schema: "Diff"},
 		"listEvents":   {method: "GET", url: "/api/events", wantStatus: 200, schema: "Event", element: true},
-		"getTimeline":  {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
+		"listProjectServices": {
+			method: "GET", url: "/api/projects/1/services", wantStatus: 200,
+		},
+		"getServiceHistory": {
+			method: "GET", url: "/api/projects/1/services/radarr", wantStatus: 200,
+			schema: "ServiceHistory",
+		},
+		"getSettings": {method: "GET", url: "/api/settings", wantStatus: 200, schema: "Settings"},
+		"prune":       {method: "POST", url: "/api/maintenance/prune", wantStatus: 200, schema: "PruneResult"},
+		"getTimeline": {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
 		"ingest": {
 			method: "POST", url: "/api/ingest", body: `{"type":"contract.test"}`,
 			headers: auth, wantStatus: 202,

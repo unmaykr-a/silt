@@ -119,7 +119,9 @@ func run() error {
 		}
 	}()
 
-	srv := api.New(log, db, hub, cfg, snapshotter).HTTPServer(cfg)
+	apiServer := api.New(log, db, hub, cfg, snapshotter)
+	apiServer.SetVersion(version)
+	srv := apiServer.HTTPServer(cfg)
 
 	errc := make(chan error, 1)
 	go func() {

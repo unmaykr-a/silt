@@ -395,6 +395,178 @@ func (q *Queries) ProjectForService(ctx context.Context, service string) (int64,
 	return project_id, err
 }
 
+const projectServices = `-- name: ProjectServices :many
+SELECT DISTINCT service_states.service
+FROM service_states
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE snapshots.project_id = ?
+ORDER BY service_states.service
+`
+
+// Distinct service names seen in a project, for navigation.
+func (q *Queries) ProjectServices(ctx context.Context, projectID int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, projectServices, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var service string
+		if err := rows.Scan(&service); err != nil {
+			return nil, err
+		}
+		items = append(items, service)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const serviceEnvHistory = `-- name: ServiceEnvHistory :many
+SELECT
+  snapshots.taken_at,
+  env_keys.key,
+  env_keys.value_hmac,
+  env_keys.value_len_bucket,
+  env_keys.redacted,
+  env_keys.value
+FROM env_keys
+JOIN service_states ON service_states.inspect_hash = env_keys.inspect_hash
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE snapshots.project_id = ?1
+  AND service_states.service = ?2
+ORDER BY snapshots.taken_at DESC, env_keys.key
+LIMIT ?3
+`
+
+type ServiceEnvHistoryParams struct {
+	ProjectID int64
+	Service   string
+	MaxRows   int64
+}
+
+type ServiceEnvHistoryRow struct {
+	TakenAt        int64
+	Key            string
+	ValueHmac      string
+	ValueLenBucket string
+	Redacted       int64
+	Value          sql.NullString
+}
+
+// Every env key observation for one service, newest first. The handler folds
+// these into per-key transitions; doing it in SQL would need a window function
+// per key for no real gain.
+func (q *Queries) ServiceEnvHistory(ctx context.Context, arg ServiceEnvHistoryParams) ([]ServiceEnvHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, serviceEnvHistory, arg.ProjectID, arg.Service, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServiceEnvHistoryRow{}
+	for rows.Next() {
+		var i ServiceEnvHistoryRow
+		if err := rows.Scan(
+			&i.TakenAt,
+			&i.Key,
+			&i.ValueHmac,
+			&i.ValueLenBucket,
+			&i.Redacted,
+			&i.Value,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const serviceHistory = `-- name: ServiceHistory :many
+SELECT
+  snapshots.id AS snapshot_id,
+  snapshots.taken_at,
+  snapshots.config_changed,
+  service_states.image_ref,
+  service_states.image_id,
+  service_states.image_digest,
+  service_states.state,
+  service_states.health,
+  service_states.restart_count,
+  service_states.inspect_hash
+FROM service_states
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE snapshots.project_id = ?1
+  AND service_states.service = ?2
+ORDER BY snapshots.taken_at DESC
+LIMIT ?3
+`
+
+type ServiceHistoryParams struct {
+	ProjectID int64
+	Service   string
+	MaxRows   int64
+}
+
+type ServiceHistoryRow struct {
+	SnapshotID    int64
+	TakenAt       int64
+	ConfigChanged int64
+	ImageRef      string
+	ImageID       string
+	ImageDigest   string
+	State         string
+	Health        string
+	RestartCount  int64
+	InspectHash   sql.NullString
+}
+
+// One service's observations over time, newest first. Powers the Service
+// screen's image history and restart sparkline.
+func (q *Queries) ServiceHistory(ctx context.Context, arg ServiceHistoryParams) ([]ServiceHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, serviceHistory, arg.ProjectID, arg.Service, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ServiceHistoryRow{}
+	for rows.Next() {
+		var i ServiceHistoryRow
+		if err := rows.Scan(
+			&i.SnapshotID,
+			&i.TakenAt,
+			&i.ConfigChanged,
+			&i.ImageRef,
+			&i.ImageID,
+			&i.ImageDigest,
+			&i.State,
+			&i.Health,
+			&i.RestartCount,
+			&i.InspectHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const snapshotsInRange = `-- name: SnapshotsInRange :many
 SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots
 WHERE taken_at >= ?1

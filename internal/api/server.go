@@ -33,7 +33,11 @@ type Server struct {
 	cfg         config.Config
 	snapshotter Snapshotter
 	started     time.Time
+	version     string
 }
+
+// SetVersion records the build version for the settings screen.
+func (s *Server) SetVersion(v string) { s.version = v }
 
 // New returns a Server ready to be mounted.
 func New(log *slog.Logger, db *store.Store, hub *Hub, cfg config.Config, snap Snapshotter) *Server {
@@ -43,7 +47,7 @@ func New(log *slog.Logger, db *store.Store, hub *Hub, cfg config.Config, snap Sn
 	if hub == nil {
 		hub = NewHub(log)
 	}
-	return &Server{log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap, started: time.Now()}
+	return &Server{log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap, started: time.Now(), version: "dev"}
 }
 
 // Hub exposes the event hub so the collector can publish to it.
@@ -61,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("GET /api/projects/{id}", s.getProject)
 	mux.HandleFunc("GET /api/projects/{id}/snapshots", s.listSnapshots)
+	mux.HandleFunc("GET /api/projects/{id}/services", s.listProjectServices)
+	mux.HandleFunc("GET /api/projects/{id}/services/{service}", s.getServiceHistory)
 	mux.HandleFunc("POST /api/projects/{id}/snapshot", s.takeSnapshot)
 	mux.HandleFunc("GET /api/snapshots/{id}", s.getSnapshot)
 	mux.HandleFunc("GET /api/snapshots/{id}/compose", s.getCompose)
@@ -69,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/timeline", s.getTimeline)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("POST /api/ingest", s.ingest)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("POST /api/maintenance/prune", s.postPrune)
 
 	// Anything not claimed by an API route belongs to the SPA.
 	mux.Handle("/", web.Handler())

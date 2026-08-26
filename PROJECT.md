@@ -1030,7 +1030,24 @@ Changed:
     every documented operation is reachable and shaped as declared, and every
     registered route is documented — verified by confirming it fails when a
     route is added without a spec entry.
-24. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+24. **Added during M5** — Section 9's screens need data no endpoint in Section 8
+    returns, so the API gained `/api/projects/{id}/services`,
+    `/api/projects/{id}/services/{service}`, `/api/settings` and
+    `/api/maintenance/prune`; assembling a service's history client-side would
+    otherwise be one request per snapshot. The settings screen is read-only:
+    Silt is configured by environment variables, and a screen that wrote to a
+    database Silt does not read from would be a lie. The timeline zero-fills
+    its buckets — a sparse series left uPlot to infer its own x-range, which
+    produced an axis spanning years for a one-day window.
+25. **shadcn-svelte installed by hand** — its CLI expects a TTY and hung
+    indefinitely in a non-interactive environment. The components were fetched
+    from the same registry the CLI reads, with its alias placeholders
+    substituted. They are the real components, not a reimplementation. Only
+    the ones actually used are kept, which is the model shadcn is built
+    around. Note that its interactive primitives depend on `bits-ui` and its
+    variants on `tailwind-merge`, so "no runtime dep" in Section 6 is not
+    quite right: those add roughly 80 KB to the bundle.
+26. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

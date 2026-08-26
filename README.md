@@ -10,10 +10,11 @@ Docker host, then lets you diff any two points in time — so when something bre
 Silt **never writes to the Docker API.** It observes, through a read-only socket proxy.
 
 > **Status: pre-alpha, under active construction.** Silt discovers your Compose
-> projects, records their configuration and state over time, and serves that
-> history over a REST API with live updates. The web UI is still a status page —
-> the timeline, diff and per-service screens arrive next. Follow
-> [`PROJECT.md`](PROJECT.md) for the design brief and milestone plan.
+> projects, records their configuration and state over time, and shows you the
+> history: a live timeline, per-project snapshots, structured diffs, and
+> per-service image and environment history. Notifications and authentication
+> are still to come. Follow [`PROJECT.md`](PROJECT.md) for the design brief and
+> milestone plan.
 
 ## Running it
 
