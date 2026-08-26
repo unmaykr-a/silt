@@ -1020,7 +1020,17 @@ Changed:
     `SUM`/`COALESCE` or disambiguate a self-referencing `DELETE` subquery on
     SQLite; both needed explicit `CAST`s and aliasing, as the brief's note about
     rough edges anticipated.
-23. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+23. **Added during M4** — nothing wrote to the `events` table: M2 created it but
+    only the collector's log recorded activity, so `/api/events` would have
+    returned an empty list forever. Docker events, `snapshot.changed`, and
+    ingested webhooks now all persist. `/metrics` is hand-written Prometheus
+    exposition rather than pulling in the client library, since the brief
+    defers anything beyond a basic endpoint and a handful of gauges do not
+    justify a registry. The OpenAPI contract test checks both directions:
+    every documented operation is reachable and shaped as declared, and every
+    registered route is documented — verified by confirming it fails when a
+    route is added without a spec entry.
+24. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

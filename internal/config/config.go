@@ -53,6 +53,10 @@ type Config struct {
 
 	// HostName labels this Docker host in the database.
 	HostName string `env:"SILT_HOST_NAME" envDefault:"local"`
+
+	// IngestToken guards POST /api/ingest. Empty means the endpoint is not
+	// configured and returns 503 — unset must never mean open.
+	IngestToken string `env:"SILT_INGEST_TOKEN"`
 }
 
 // Load reads the environment, applies defaults, and validates the result.

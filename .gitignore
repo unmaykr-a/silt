@@ -19,3 +19,4 @@
 # Editors
 .DS_Store
 *.swp
+/web/src/lib/api/schema.d.ts

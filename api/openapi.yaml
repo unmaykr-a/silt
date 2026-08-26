@@ -1,0 +1,587 @@
+openapi: 3.1.0
+info:
+  title: Silt API
+  version: 0.1.0
+  description: |
+    A self-hosted change journal for Docker Compose stacks.
+
+    This document is hand-maintained: there is no OpenAPI generator for stdlib
+    net/http handlers, and adding one is not worth a dependency at this size.
+    It is the contract, not a description of one — `openapi-typescript`
+    generates the frontend types from it, and a Go contract test asserts the
+    handlers still match, so drift fails CI instead of surfacing in a browser.
+
+    All timestamps are Unix milliseconds in UTC.
+  license:
+    name: AGPL-3.0-or-later
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+
+servers:
+  - url: /
+
+tags:
+  - name: hosts
+  - name: projects
+  - name: snapshots
+  - name: events
+  - name: system
+
+paths:
+  /api/hosts:
+    get:
+      tags: [hosts]
+      summary: List Docker hosts
+      operationId: listHosts
+      responses:
+        "200":
+          description: Hosts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Host" }
+
+  /api/projects:
+    get:
+      tags: [projects]
+      summary: List Compose projects
+      operationId: listProjects
+      parameters:
+        - name: host
+          in: query
+          description: Host id. Defaults to the only host on a single-host install.
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Project" }
+
+  /api/projects/{id}:
+    get:
+      tags: [projects]
+      summary: Get one project
+      operationId: getProject
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/projects/{id}/snapshots:
+    get:
+      tags: [snapshots]
+      summary: List a project's snapshots, newest first
+      operationId: listSnapshots
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: before
+          in: query
+          description: Only snapshots taken before this timestamp.
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+        - name: changed_only
+          in: query
+          description: Only snapshots where the configuration changed.
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Snapshots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Snapshot" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/projects/{id}/snapshot:
+    post:
+      tags: [snapshots]
+      summary: Take a snapshot now
+      operationId: takeSnapshot
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "202":
+          description: Snapshot taken
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: The snapshot could not be taken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: The collector is not running
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/snapshots/{id}:
+    get:
+      tags: [snapshots]
+      summary: Get one snapshot with its service states
+      operationId: getSnapshot
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SnapshotDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/snapshots/{id}/compose:
+    get:
+      tags: [snapshots]
+      summary: The effective, redacted project model for a snapshot
+      description: |
+        A record of what ran, with secret values already replaced by keyed
+        digests. It is not a file to re-apply.
+      operationId: getCompose
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, yaml], default: json }
+      responses:
+        "200":
+          description: Project model
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectModel" }
+            application/yaml:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/diff:
+    get:
+      tags: [snapshots]
+      summary: Structural diff between two snapshots
+      operationId: getDiff
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Diff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/events:
+    get:
+      tags: [events]
+      summary: List events, newest first
+      operationId: listEvents
+      parameters:
+        - name: from
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: project
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: service
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, warn, error] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 1000 }
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Event" }
+
+  /api/timeline:
+    get:
+      tags: [events]
+      summary: Change markers and events merged onto one axis
+      operationId: getTimeline
+      parameters:
+        - name: from
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: project
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: bucket
+          in: query
+          description: |
+            Bucket width as a Go duration (`5m`, `1h`). Clamped server-side so
+            no request can ask for an unbounded number of buckets.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Timeline
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Timeline" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/stream:
+    get:
+      tags: [events]
+      summary: Server-sent event stream
+      description: |
+        Emits a `ready` event on connect, then `event` and `snapshot.changed`
+        as they occur, with a comment heartbeat every 20 seconds.
+
+        Behind nginx or Nginx Proxy Manager set `proxy_buffering off;` on the
+        location, or events arrive in batches minutes late.
+      operationId: stream
+      responses:
+        "200":
+          description: An event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+
+  /api/ingest:
+    post:
+      tags: [events]
+      summary: Generic external event webhook
+      description: |
+        Accepts a loose body so Uptime Kuma, a cron `curl` and a Home Assistant
+        automation all work without a custom integration. Authenticate with
+        `Authorization: Bearer <token>` or `?token=`; not every webhook source
+        can set headers. Returns 503 when `SILT_INGEST_TOKEN` is unset — an
+        unconfigured endpoint is closed, not open.
+      operationId: ingest
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IngestRequest" }
+      responses:
+        "202":
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: { type: integer, format: int64 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: Body too large
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Ingest is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /healthz:
+    get:
+      tags: [system]
+      summary: Liveness
+      operationId: healthz
+      responses:
+        "200":
+          description: The process is up
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /readyz:
+    get:
+      tags: [system]
+      summary: Readiness
+      description: Reports whether the database answers, not just that the process is up.
+      operationId: readyz
+      responses:
+        "200":
+          description: Ready
+          content:
+            text/plain:
+              schema: { type: string }
+        "503":
+          description: Not ready
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /metrics:
+    get:
+      tags: [system]
+      summary: Prometheus exposition
+      operationId: metrics
+      responses:
+        "200":
+          description: Metrics
+          content:
+            text/plain:
+              schema: { type: string }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    Host:
+      type: object
+      required: [id, name, endpoint]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        endpoint: { type: string }
+        docker_version: { type: string }
+        last_seen_at: { type: integer, format: int64 }
+
+    Project:
+      type: object
+      required: [id, host_id, name, config_files, first_seen_at, last_seen_at, archived]
+      properties:
+        id: { type: integer, format: int64 }
+        host_id: { type: integer, format: int64 }
+        name: { type: string }
+        working_dir: { type: string }
+        config_files:
+          type: array
+          items: { type: string }
+        first_seen_at: { type: integer, format: int64 }
+        last_seen_at: { type: integer, format: int64 }
+        archived: { type: boolean }
+
+    Snapshot:
+      type: object
+      required:
+        [id, project_id, taken_at, last_observed_at, observation_count,
+         trigger, compose_source, config_changed, runtime_changed]
+      properties:
+        id: { type: integer, format: int64 }
+        project_id: { type: integer, format: int64 }
+        taken_at: { type: integer, format: int64 }
+        last_observed_at:
+          type: integer
+          format: int64
+          description: |
+            An observation identical to this snapshot updates this instead of
+            inserting a row.
+        observation_count: { type: integer, format: int64 }
+        trigger: { type: string, enum: [event, file, interval, manual] }
+        compose_source: { type: string, enum: [containers, files, unavailable] }
+        config_changed:
+          type: boolean
+          description: |
+            False means runtime changed but configuration did not — a restart
+            or health transition.
+        runtime_changed: { type: boolean }
+
+    ServiceState:
+      type: object
+      required: [service, restart_count]
+      properties:
+        service: { type: string }
+        container_id: { type: string }
+        container_name: { type: string }
+        image_ref: { type: string }
+        image_id:
+          type: string
+          description: Local image ID. Always present; this is the fingerprinted identity.
+        image_digest:
+          type: string
+          description: Registry digest. Empty for locally-built images.
+        state: { type: string }
+        health: { type: string }
+        restart_count: { type: integer, format: int64 }
+        started_at: { type: integer, format: int64 }
+
+    SnapshotDetail:
+      allOf:
+        - $ref: "#/components/schemas/Snapshot"
+        - type: object
+          required: [services]
+          properties:
+            services:
+              type: array
+              items: { $ref: "#/components/schemas/ServiceState" }
+
+    ProjectModel:
+      type: object
+      required: [name, source, services]
+      properties:
+        name: { type: string }
+        working_dir: { type: string }
+        config_files:
+          type: array
+          items: { type: string }
+        source: { type: string, enum: [containers, files, unavailable] }
+        services:
+          type: object
+          additionalProperties: { type: object }
+
+    Change:
+      type: object
+      required: [kind, path, op, severity]
+      properties:
+        kind:
+          type: string
+          enum:
+            [image_ref, image_id, image_digest, env, ports, volumes, networks,
+             healthcheck, resources, command, entrypoint, restart_policy,
+             labels, depends_on, service_added, service_removed, state, other]
+        service: { type: string }
+        path: { type: string }
+        op: { type: string, enum: [add, remove, replace] }
+        before:
+          type: string
+          description: |
+            For a redacted value this is a keyed digest placeholder, never the
+            value itself.
+        after: { type: string }
+        severity: { type: string, enum: [high, medium, low] }
+
+    DiffSide:
+      type: object
+      required: [id, taken_at]
+      properties:
+        id: { type: integer, format: int64 }
+        taken_at: { type: integer, format: int64 }
+
+    Diff:
+      type: object
+      required: [from, to, summary, changes]
+      properties:
+        from: { $ref: "#/components/schemas/DiffSide" }
+        to: { $ref: "#/components/schemas/DiffSide" }
+        summary:
+          type: object
+          additionalProperties: { type: integer }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/Change" }
+
+    Event:
+      type: object
+      required: [id, ts, source, type, severity]
+      properties:
+        id: { type: integer, format: int64 }
+        project_id: { type: integer, format: int64 }
+        service: { type: string }
+        ts: { type: integer, format: int64 }
+        source: { type: string, enum: [docker, silt, webhook] }
+        type: { type: string }
+        severity: { type: string, enum: [info, warn, error] }
+        actor: { type: string }
+        message: { type: string }
+        payload: {}
+
+    TimelineBucket:
+      type: object
+      required: [start, changes, events, errors]
+      properties:
+        start: { type: integer, format: int64 }
+        changes: { type: integer }
+        events: { type: integer }
+        errors: { type: integer }
+
+    Timeline:
+      type: object
+      required: [from, to, bucket_ms, buckets, changes, events]
+      properties:
+        from: { type: integer, format: int64 }
+        to: { type: integer, format: int64 }
+        bucket_ms: { type: integer, format: int64 }
+        buckets:
+          type: array
+          items: { $ref: "#/components/schemas/TimelineBucket" }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/Snapshot" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+
+    IngestRequest:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string }
+        project: { type: string }
+        service: { type: string }
+        severity: { type: string, enum: [info, warn, error] }
+        message: { type: string }
+        actor: { type: string }
+        ts: { type: integer, format: int64 }

@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "preview": "vite preview"
+    "build": "npm run api-types && svelte-check --tsconfig ./tsconfig.json && vite build",
+    "check": "npm run api-types && svelte-check --tsconfig ./tsconfig.json",
+    "preview": "vite preview",
+    "api-types": "openapi-typescript ../api/openapi.yaml -o src/lib/api/schema.d.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^26.3.0",
+    "openapi-typescript": "^7.13.0",
     "svelte": "^5.19.0",
     "svelte-check": "^4.1.4",
     "tailwindcss": "^4.0.0",

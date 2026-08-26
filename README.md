@@ -9,9 +9,10 @@ Docker host, then lets you diff any two points in time — so when something bre
 
 Silt **never writes to the Docker API.** It observes, through a read-only socket proxy.
 
-> **Status: pre-alpha, under active construction.** Silt currently discovers your
-> Compose projects and reports coalesced changes to its log; it does not yet store
-> history, diff snapshots, or show you anything beyond a status page. Follow
+> **Status: pre-alpha, under active construction.** Silt discovers your Compose
+> projects, records their configuration and state over time, and serves that
+> history over a REST API with live updates. The web UI is still a status page —
+> the timeline, diff and per-service screens arrive next. Follow
 > [`PROJECT.md`](PROJECT.md) for the design brief and milestone plan.
 
 ## Running it
@@ -28,6 +29,20 @@ The socket proxy in that file is not optional decoration. Mounting
 read-only applies to the file, not to the API, so anything holding it can still
 create privileged containers. The proxy enforces read-only at the HTTP verb
 level with `POST=0`.
+
+## Behind a reverse proxy
+
+Silt pushes live updates over server-sent events. Behind nginx or Nginx Proxy
+Manager, set `proxy_buffering off;` on the location, or events arrive in
+batches minutes late instead of as they happen:
+
+```nginx
+location / {
+    proxy_pass http://silt:8375;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+}
+```
 
 ## What Silt stores
 

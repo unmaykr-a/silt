@@ -31,6 +31,13 @@ func (a projectIdentity) ConfigFiles() []string {
 	return a.p.ConfigFiles
 }
 
+// Publisher receives things worth telling connected clients about. The
+// collector does not depend on the API package for this.
+type Publisher interface {
+	PublishEvent(payload any)
+	PublishChange(payload any)
+}
+
 // Snapshotter builds and persists snapshots.
 type Snapshotter struct {
 	Client   *docker.Client
@@ -39,6 +46,33 @@ type Snapshotter struct {
 	Log      *slog.Logger
 	HostName string
 	Endpoint string
+	// Publisher is optional; nil means nothing is broadcast.
+	Publisher Publisher
+}
+
+// SnapshotProject snapshots one project by its database id, for
+// POST /api/projects/{id}/snapshot.
+func (s *Snapshotter) SnapshotProject(ctx context.Context, projectID int64) error {
+	project, err := s.Store.RQ.GetProject(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("read project %d: %w", projectID, err)
+	}
+	discovered, err := s.Client.Discover(ctx)
+	if err != nil {
+		return fmt.Errorf("discover projects: %w", err)
+	}
+	for _, p := range discovered {
+		if p.Name != project.Name {
+			continue
+		}
+		result, err := s.Snapshot(ctx, p, TriggerManual)
+		if err != nil {
+			return err
+		}
+		s.logResult(p.Name, TriggerManual, result)
+		return nil
+	}
+	return fmt.Errorf("project %q has no running containers", project.Name)
 }
 
 // Snapshot observes one project and writes the result.
@@ -91,6 +125,34 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 	result, err := s.Store.WriteSnapshot(ctx, projectID, store.Now(), trigger, obs)
 	if err != nil {
 		return store.SnapshotResult{}, fmt.Errorf("write snapshot for %s: %w", p.Name, err)
+	}
+
+	// A configuration change is the thing Silt exists to record, so it earns
+	// both an event row and a live broadcast. Runtime-only changes are already
+	// covered by the docker events that caused them.
+	if result.ConfigChanged {
+		payload := map[string]any{
+			"snapshot_id": result.ID,
+			"project_id":  projectID,
+			"project":     p.Name,
+			"trigger":     trigger,
+			"taken_at":    result.TakenAt,
+		}
+		id := projectID
+		if _, err := s.Store.RecordEvent(ctx, store.EventRecord{
+			ProjectID: &id,
+			TS:        result.TakenAt,
+			Source:    store.SourceSilt,
+			Type:      "snapshot.changed",
+			Severity:  store.SeverityInfo,
+			Message:   "configuration changed",
+			Payload:   payload,
+		}); err != nil {
+			s.Log.Error("record snapshot event", "project", p.Name, "error", err)
+		}
+		if s.Publisher != nil {
+			s.Publisher.PublishChange(payload)
+		}
 	}
 	return result, nil
 }

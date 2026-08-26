@@ -167,6 +167,57 @@ func (q *Queries) InsertSnapshot(ctx context.Context, arg InsertSnapshotParams) 
 	return i, err
 }
 
+const latestChangedSnapshotsBefore = `-- name: LatestChangedSnapshotsBefore :many
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots
+WHERE project_id = ?1
+  AND taken_at < ?2
+  AND config_changed = 1
+ORDER BY taken_at DESC
+LIMIT ?3
+`
+
+type LatestChangedSnapshotsBeforeParams struct {
+	ProjectID int64
+	Before    int64
+	MaxRows   int64
+}
+
+func (q *Queries) LatestChangedSnapshotsBefore(ctx context.Context, arg LatestChangedSnapshotsBeforeParams) ([]Snapshot, error) {
+	rows, err := q.db.QueryContext(ctx, latestChangedSnapshotsBefore, arg.ProjectID, arg.Before, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Snapshot{}
+	for rows.Next() {
+		var i Snapshot
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.TakenAt,
+			&i.Trigger,
+			&i.ComposeHash,
+			&i.ComposeSource,
+			&i.ConfigFingerprint,
+			&i.RuntimeFingerprint,
+			&i.ConfigChanged,
+			&i.RuntimeChanged,
+			&i.LastObservedAt,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const latestSnapshot = `-- name: LatestSnapshot :one
 SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots WHERE project_id = ? ORDER BY taken_at DESC LIMIT 1
 `
@@ -291,6 +342,80 @@ func (q *Queries) ListSnapshots(ctx context.Context, arg ListSnapshotsParams) ([
 		arg.ProjectID,
 		arg.Before,
 		arg.ChangedOnly,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Snapshot{}
+	for rows.Next() {
+		var i Snapshot
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.TakenAt,
+			&i.Trigger,
+			&i.ComposeHash,
+			&i.ComposeSource,
+			&i.ConfigFingerprint,
+			&i.RuntimeFingerprint,
+			&i.ConfigChanged,
+			&i.RuntimeChanged,
+			&i.LastObservedAt,
+			&i.ObservationCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const projectForService = `-- name: ProjectForService :one
+SELECT snapshots.project_id FROM service_states
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE service_states.service = ?
+ORDER BY snapshots.taken_at DESC
+LIMIT 1
+`
+
+// Resolve a service name to the project it most recently belonged to, so an
+// external monitor named after a service still lands on the right project.
+func (q *Queries) ProjectForService(ctx context.Context, service string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, projectForService, service)
+	var project_id int64
+	err := row.Scan(&project_id)
+	return project_id, err
+}
+
+const snapshotsInRange = `-- name: SnapshotsInRange :many
+SELECT id, project_id, taken_at, "trigger", compose_hash, compose_source, config_fingerprint, runtime_fingerprint, config_changed, runtime_changed, last_observed_at, observation_count FROM snapshots
+WHERE taken_at >= ?1
+  AND taken_at <= ?2
+  AND (CAST(?3 AS INTEGER) = 0 OR project_id = ?3)
+ORDER BY taken_at DESC
+LIMIT ?4
+`
+
+type SnapshotsInRangeParams struct {
+	FromTs    int64
+	ToTs      int64
+	ProjectID int64
+	MaxRows   int64
+}
+
+func (q *Queries) SnapshotsInRange(ctx context.Context, arg SnapshotsInRangeParams) ([]Snapshot, error) {
+	rows, err := q.db.QueryContext(ctx, snapshotsInRange,
+		arg.FromTs,
+		arg.ToTs,
+		arg.ProjectID,
 		arg.MaxRows,
 	)
 	if err != nil {
