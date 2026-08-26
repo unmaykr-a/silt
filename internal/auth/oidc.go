@@ -120,6 +120,9 @@ type Flow struct {
 	// same-origin path before it is ever used, so it cannot become an open
 	// redirect through the login flow.
 	Next string `json:"r"`
+	// Link marks a round trip whose purpose is to record which provider
+	// identity belongs to the local account, rather than to sign anyone in.
+	Link bool `json:"l,omitempty"`
 }
 
 // Start begins a login and returns the URL to send the browser to.
@@ -128,7 +131,7 @@ type Flow struct {
 // costs one hash and closes the case where the authorization code leaks — a
 // proxy log, a Referer header, a shared machine's history — before the
 // exchange happens.
-func (o *OIDC) Start(next string) (authURL string, flow Flow, err error) {
+func (o *OIDC) Start(next string, link bool) (authURL string, flow Flow, err error) {
 	state, err := randomString()
 	if err != nil {
 		return "", Flow{}, err
@@ -148,7 +151,13 @@ func (o *OIDC) Start(next string) (authURL string, flow Flow, err error) {
 		oauth2.SetAuthURLParam("code_challenge", base64.RawURLEncoding.EncodeToString(challenge[:])),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
-	return url, Flow{State: state, Nonce: nonce, Verifier: verifier, Next: SafeNext(next)}, nil
+	return url, Flow{
+		State:    state,
+		Nonce:    nonce,
+		Verifier: verifier,
+		Next:     SafeNext(next),
+		Link:     link,
+	}, nil
 }
 
 // Claims is what Silt reads out of an ID token.
@@ -169,50 +178,58 @@ func (e *ErrNotAllowed) Error() string {
 
 // Finish exchanges the code and returns the identity, or refuses it.
 func (o *OIDC) Finish(ctx context.Context, flow Flow, state, code string) (Identity, error) {
+	claims, err := o.Exchange(ctx, flow, state, code)
+	if err != nil {
+		return Identity{}, err
+	}
+	if !o.Allowed(claims) {
+		return Identity{}, &ErrNotAllowed{Subject: claims.Display()}
+	}
+	return Identity{Subject: claims.Subject, Name: claims.Display(), Method: MethodOIDC}, nil
+}
+
+// Exchange completes the round trip and returns the verified claims, without
+// applying the allowlists.
+//
+// Separate from Finish because two callers want different things from the same
+// exchange: a login has to be refused when the allowlists say so, and linking
+// an account only needs to know which identity just proved itself.
+func (o *OIDC) Exchange(ctx context.Context, flow Flow, state, code string) (Claims, error) {
 	// Compared before anything is spent on a network round trip: a mismatched
 	// state means this callback did not come from the login Silt started.
 	if state == "" || state != flow.State {
-		return Identity{}, fmt.Errorf("state mismatch; the login did not start here")
+		return Claims{}, fmt.Errorf("state mismatch; the login did not start here")
 	}
 
 	token, err := o.oauth.Exchange(ctx, code,
 		oauth2.SetAuthURLParam("code_verifier", flow.Verifier))
 	if err != nil {
-		return Identity{}, fmt.Errorf("exchange authorization code: %w", err)
+		return Claims{}, fmt.Errorf("exchange authorization code: %w", err)
 	}
 
 	rawID, ok := token.Extra("id_token").(string)
 	if !ok || rawID == "" {
-		return Identity{}, fmt.Errorf("provider returned no id_token")
+		return Claims{}, fmt.Errorf("provider returned no id_token")
 	}
 	idToken, err := o.verifier.Verify(ctx, rawID)
 	if err != nil {
-		return Identity{}, fmt.Errorf("verify id_token: %w", err)
+		return Claims{}, fmt.Errorf("verify id_token: %w", err)
 	}
 	// The nonce binds this token to the login Silt started, which is what stops
 	// a token obtained elsewhere from being replayed into this session.
 	if idToken.Nonce != flow.Nonce {
-		return Identity{}, fmt.Errorf("nonce mismatch; the id_token belongs to a different login")
+		return Claims{}, fmt.Errorf("nonce mismatch; the id_token belongs to a different login")
 	}
 
 	var raw map[string]any
 	if err := idToken.Claims(&raw); err != nil {
-		return Identity{}, fmt.Errorf("read claims: %w", err)
+		return Claims{}, fmt.Errorf("read claims: %w", err)
 	}
-	claims := o.extract(idToken.Subject, raw)
-
-	if !o.allowed(claims) {
-		return Identity{}, &ErrNotAllowed{Subject: claims.display()}
-	}
-
-	return Identity{
-		Subject: claims.Subject,
-		Name:    claims.display(),
-		Method:  MethodOIDC,
-	}, nil
+	return o.extract(idToken.Subject, raw), nil
 }
 
-func (c Claims) display() string {
+// Display is the friendliest name the provider offered.
+func (c Claims) Display() string {
 	for _, candidate := range []string{c.Username, c.Email, c.Name, c.Subject} {
 		if candidate != "" {
 			return candidate
@@ -230,10 +247,10 @@ func (o *OIDC) extract(subject string, raw map[string]any) Claims {
 	return c
 }
 
-// allowed applies the group and user lists. Both empty admits anyone the
+// Allowed applies the group and user lists. Both empty admits anyone the
 // provider authenticated, which is a deliberate default: the point of pointing
 // Silt at a provider is to let the provider decide.
-func (o *OIDC) allowed(c Claims) bool {
+func (o *OIDC) Allowed(c Claims) bool {
 	if len(o.cfg.AllowedGroups) == 0 && len(o.cfg.AllowedUsers) == 0 {
 		return true
 	}

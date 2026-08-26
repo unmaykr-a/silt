@@ -22,6 +22,12 @@
   // Bumped on every server-sent event; screens depend on it to refetch.
   let reloadKey = $state(0);
   let auth = $state<AuthState | null>(null);
+  // Separate from `auth` being null, which is also what a failed request
+  // leaves behind. Until the first answer arrives Silt does not know whether
+  // it is locked, and rendering the app on that guess is what made an
+  // unauthenticated reload flash the whole UI before replacing it with a
+  // login form.
+  let authKnown = $state(false);
   let navOpen = $state(false);
 
   const locked = $derived(auth !== null && auth.required && !auth.authenticated);
@@ -30,7 +36,12 @@
     try {
       auth = await api.authState();
     } catch {
+      // Silt is unreachable rather than refusing: show the app and let the
+      // screens report their own errors, which is more use than a login form
+      // for a server that is not answering.
       auth = null;
+    } finally {
+      authKnown = true;
     }
   }
 
@@ -140,7 +151,16 @@
   </nav>
 {/snippet}
 
-{#if locked}
+{#if !authKnown}
+  <!-- One paint of the mark rather than the whole application. The request it
+       is waiting on is local and answers in a few milliseconds, so this is
+       almost never seen — and when Silt is slow to answer, a quiet mark is a
+       better wait than a UI that is about to be taken away. -->
+  <div class="flex min-h-screen items-center justify-center bg-background">
+    <SiltMark size={30} class="animate-pulse text-muted-foreground/40" marker="currentColor" />
+    <span class="sr-only">Loading Silt</span>
+  </div>
+{:else if locked}
   <Login onAuthenticated={refreshAuth} authState={auth} />
 {:else}
   <!-- h-screen with the overflow contained here is what lets the rail and the

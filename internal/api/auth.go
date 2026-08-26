@@ -29,6 +29,9 @@ const (
 // Gate is everything the server needs to decide who is asking.
 type Gate struct {
 	Sessions *auth.Sessions
+	// Account is the built-in administrator. It supersedes Password, which
+	// remains only for tests that want a bare verifier.
+	Account  *auth.Account
 	Password *auth.Password
 	Proxy    *auth.Proxy
 	OIDC     *auth.OIDC
@@ -39,14 +42,41 @@ type Gate struct {
 	AllowedOrigins []string
 }
 
-// Enabled reports whether any authentication is configured. With none, Silt is
-// open — the right default for something behind someone's own proxy, and
-// warned about at startup rather than left to be assumed.
+// Enabled reports whether Silt refuses anonymous requests.
+//
+// An unclaimed local account counts. It has no password yet, so nobody can
+// sign in — which is exactly why the door has to stay shut: an open API behind
+// a setup screen would make the setup screen decoration.
 func (g *Gate) Enabled() bool {
 	if g == nil {
 		return false
 	}
-	return g.Proxy.Enabled() || g.Password.Enabled() || g.OIDC.Enabled()
+	return g.Proxy.Enabled() || g.passwordEnabled() || g.OIDC.Enabled() || g.Account.Active()
+}
+
+// passwordEnabled covers both the account and the bare verifier tests use.
+func (g *Gate) passwordEnabled() bool {
+	return g.Account.Enabled() || g.Password.Enabled()
+}
+
+// verifyPassword checks a password against whichever verifier is in play.
+func (g *Gate) verifyPassword(client, password string) bool {
+	if g.Account.Enabled() {
+		return g.Account.Verify(client, password)
+	}
+	return g.Password.Verify(client, password)
+}
+
+func (g *Gate) throttled(client string) (bool, time.Duration) {
+	if g.Account.Enabled() {
+		return g.Account.Throttled(client)
+	}
+	return g.Password.Throttled(client)
+}
+
+// setupRequired reports that the first thing to do is choose a password.
+func (g *Gate) setupRequired() bool {
+	return g != nil && g.Account.SetupRequired()
 }
 
 // SetAuth installs the gate.
@@ -84,7 +114,7 @@ func (s *Server) identify(r *http.Request) (auth.Identity, bool) {
 func (s *Server) isPublic(path string) bool {
 	switch path {
 	case "/healthz", "/readyz",
-		"/api/login", "/api/logout", "/api/auth",
+		"/api/login", "/api/logout", "/api/auth", "/api/auth/setup",
 		"/api/auth/login", "/api/auth/callback",
 		"/api/ingest":
 		return true
@@ -182,14 +212,32 @@ type authStateResponse struct {
 	Authenticated   bool   `json:"authenticated"`
 	Subject         string `json:"subject,omitempty"`
 	Method          string `json:"method,omitempty"`
+	// SetupRequired means the built-in account exists but has no password, so
+	// the only thing the UI should offer is choosing one.
+	SetupRequired bool `json:"setup_required"`
+	// MinPasswordLen lets the form say the rule before it refuses.
+	MinPasswordLen int `json:"min_password_length"`
+	// The built-in account's state, for the Security screen.
+	LocalAvailable bool `json:"local_available"`
+	LocalEnabled   bool `json:"local_enabled"`
+	LocalManaged   bool `json:"local_managed"`
+	LocalLinked    bool `json:"local_linked"`
 }
 
 func (s *Server) getAuthState(w http.ResponseWriter, r *http.Request) {
 	out := authStateResponse{
 		Required:        s.gate.Enabled(),
-		PasswordEnabled: s.gate != nil && s.gate.Password.Enabled(),
+		PasswordEnabled: s.gate != nil && s.gate.passwordEnabled(),
 		OIDCEnabled:     s.gate != nil && s.gate.OIDC.Enabled(),
 		ProxyEnabled:    s.gate != nil && s.gate.Proxy.Enabled(),
+		SetupRequired:   s.gate.setupRequired(),
+		MinPasswordLen:  auth.MinPasswordLength,
+	}
+	if s.gate != nil && s.gate.Account.Available() {
+		out.LocalAvailable = true
+		out.LocalEnabled = s.gate.Account.Active()
+		out.LocalManaged = s.gate.Account.ManagedByEnvironment()
+		out.LocalLinked = s.gate.Account.LinkedSubject() != ""
 	}
 	if s.gate != nil {
 		out.OIDCIssuer = s.gate.OIDC.Issuer()
@@ -209,13 +257,17 @@ type loginRequest struct {
 }
 
 func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.Password.Enabled() {
+	if s.gate == nil || !s.gate.passwordEnabled() {
+		if s.gate.setupRequired() {
+			writeError(w, http.StatusConflict, "this Silt has not been set up yet; choose a password first")
+			return
+		}
 		writeError(w, http.StatusServiceUnavailable, "password login is not configured")
 		return
 	}
 
 	client := clientKey(r)
-	if blocked, wait := s.gate.Password.Throttled(client); blocked {
+	if blocked, wait := s.gate.throttled(client); blocked {
 		// Told plainly rather than silently rejected: the owner who typed it
 		// wrong needs to know to wait, and an attacker learns nothing they
 		// could not measure anyway.
@@ -230,7 +282,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body must be JSON")
 		return
 	}
-	if !s.gate.Password.Verify(client, req.Password) {
+	if !s.gate.verifyPassword(client, req.Password) {
 		s.log.Warn("failed login attempt", "remote", client)
 		writeError(w, http.StatusUnauthorized, "incorrect password")
 		return
@@ -271,23 +323,32 @@ func (s *Server) getOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"))
+	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), false)
 	if err != nil {
 		s.log.Error("start OIDC login", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not start the login")
 		return
 	}
 
+	if !s.writeFlowCookie(w, r, flow) {
+		return
+	}
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+// writeFlowCookie stores the per-round-trip state on the browser.
+//
+// A cookie rather than server state: there is exactly one consumer and it
+// arrives with the callback, so a table would buy nothing but rows to expire.
+// SameSite=Lax is required, not incidental — the callback is a top-level
+// cross-site navigation from the provider, and Strict would drop the cookie on
+// arrival.
+func (s *Server) writeFlowCookie(w http.ResponseWriter, r *http.Request, flow auth.Flow) bool {
 	encoded, err := json.Marshal(flow)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not start the login")
-		return
+		return false
 	}
-	// The flow state rides in a cookie rather than server state: there is
-	// exactly one consumer and it arrives with the callback, so a table would
-	// buy nothing but rows to expire. SameSite=Lax is required, not incidental
-	// — the callback is a top-level cross-site navigation from the provider,
-	// and Strict would drop the cookie on arrival.
 	http.SetCookie(w, &http.Cookie{
 		Name:     flowCookie,
 		Value:    base64.RawURLEncoding.EncodeToString(encoded),
@@ -297,7 +358,7 @@ func (s *Server) getOIDCLogin(w http.ResponseWriter, r *http.Request) {
 		Secure:   auth.SecureRequest(r),
 		MaxAge:   int(flowMaxAge.Seconds()),
 	})
-	http.Redirect(w, r, url, http.StatusFound)
+	return true
 }
 
 // getOIDCCallback finishes the flow and starts a session.
@@ -333,17 +394,45 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.gate.OIDC.Finish(r.Context(), flow,
+	claims, err := s.gate.OIDC.Exchange(r.Context(), flow,
 		r.URL.Query().Get("state"), r.URL.Query().Get("code"))
 	if err != nil {
-		var refused *auth.ErrNotAllowed
-		if errors.As(err, &refused) {
-			s.log.Warn("login refused", "subject", refused.Subject, "reason", "not in an allowed group")
-			s.failLogin(w, r, "your account is not allowed to sign in to this Silt")
+		s.log.Warn("OIDC round trip failed", "error", err, "link", flow.Link)
+		s.failLogin(w, r, "the login could not be completed")
+		return
+	}
+
+	// A link round trip records who just proved themselves and stops there. It
+	// re-checks the session rather than trusting the flow cookie: the cookie
+	// only says a link was started, and starting one is not authority to
+	// finish it.
+	if flow.Link {
+		current, ok := s.identify(r)
+		if !ok || current.Subject != auth.LocalSubject {
+			s.failLogin(w, r, "sign in as the built-in account before linking it")
 			return
 		}
-		s.log.Warn("OIDC login failed", "error", err)
-		s.failLogin(w, r, "the login could not be completed")
+		if err := s.gate.Account.Link(r.Context(), claims.Subject); err != nil {
+			s.log.Error("link account", "error", err)
+			s.failLogin(w, r, "the link could not be saved")
+			return
+		}
+		s.log.Info("built-in account linked to a provider identity", "subject", claims.Display())
+		http.Redirect(w, r, auth.SafeNext(flow.Next), http.StatusFound)
+		return
+	}
+
+	// A linked identity is the built-in account, whatever the group rules say:
+	// an explicit link is a more specific statement than a group membership.
+	var id auth.Identity
+	switch {
+	case s.gate.Account.LinkedTo(claims.Subject):
+		id = auth.Identity{Subject: auth.LocalSubject, Name: claims.Display(), Method: auth.MethodOIDC}
+	case s.gate.OIDC.Allowed(claims):
+		id = auth.Identity{Subject: claims.Subject, Name: claims.Display(), Method: auth.MethodOIDC}
+	default:
+		s.log.Warn("login refused", "subject", claims.Display(), "reason", "not in an allowed group")
+		s.failLogin(w, r, "your account is not allowed to sign in to this Silt")
 		return
 	}
 
@@ -420,4 +509,185 @@ func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
 	clearCookie(w, r, sessionCookie)
 	s.log.Info("all sessions revoked", "subject", id.Subject, "count", removed)
 	writeJSON(w, http.StatusOK, map[string]int64{"revoked": removed})
+}
+
+// --- the built-in account -------------------------------------------------
+
+type passwordRequest struct {
+	Current  string `json:"current,omitempty"`
+	Password string `json:"password"`
+}
+
+func decodeJSON[T any](w http.ResponseWriter, r *http.Request, out *T) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(out); err != nil {
+		writeError(w, http.StatusBadRequest, "body must be JSON")
+		return false
+	}
+	return true
+}
+
+// postSetup claims the built-in account with its first password.
+//
+// Public, because on a fresh install there is no way to authenticate yet — and
+// gated on the account still being unclaimed, so it works exactly once. That
+// is the same first-run window every setup screen has; it is narrowed by
+// refusing every other endpoint until it closes, and it does not exist at all
+// for anyone who set SILT_PASSWORD_HASH.
+func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
+	if s.gate == nil || !s.gate.setupRequired() {
+		writeError(w, http.StatusConflict, "this Silt has already been set up")
+		return
+	}
+
+	var req passwordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.gate.Account.Claim(r.Context(), req.Password); err != nil {
+		var weak *auth.ErrWeakPassword
+		if errors.As(err, &weak) {
+			writeError(w, http.StatusBadRequest, weak.Reason)
+			return
+		}
+		if errors.Is(err, auth.ErrNotClaimable) {
+			writeError(w, http.StatusConflict, "this Silt has already been set up")
+			return
+		}
+		s.log.Error("claim account", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not set the password")
+		return
+	}
+
+	// Signed in immediately: making someone type the password they just chose
+	// is ceremony, and they have already proved they know it.
+	token, err := s.gate.Sessions.Issue(r.Context(), auth.Identity{
+		Subject: auth.LocalSubject, Name: "admin", Method: auth.MethodPassword,
+	})
+	if err != nil {
+		s.log.Error("issue session", "error", err)
+		writeError(w, http.StatusInternalServerError, "the password was set but the session could not start")
+		return
+	}
+	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.log.Info("built-in account claimed", "remote", clientKey(r))
+	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
+}
+
+// putPassword changes the password of the signed-in built-in account.
+func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.identify(r)
+	if !ok || id.Subject != auth.LocalSubject {
+		writeError(w, http.StatusForbidden, "only the built-in account can change its own password")
+		return
+	}
+
+	var req passwordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.gate.Account.ChangePassword(r.Context(), clientKey(r), req.Current, req.Password); err != nil {
+		var weak *auth.ErrWeakPassword
+		if errors.As(err, &weak) {
+			writeError(w, http.StatusBadRequest, weak.Reason)
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Every other session belonged to the old password. Changing it because
+	// you think it leaked should not leave the copy that leaked still working.
+	if removed, err := s.gate.Sessions.RevokeSubject(r.Context(), auth.LocalSubject); err != nil {
+		s.log.Error("revoke sessions after password change", "error", err)
+	} else {
+		s.log.Info("password changed; sessions revoked", "count", removed)
+	}
+	token, err := s.gate.Sessions.Issue(r.Context(), id)
+	if err != nil {
+		s.log.Error("issue session", "error", err)
+		writeError(w, http.StatusInternalServerError, "the password changed but the session could not restart")
+		return
+	}
+	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	writeJSON(w, http.StatusOK, map[string]bool{"changed": true})
+}
+
+type accountStateRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// putAccount turns the built-in account on or off.
+func (s *Server) putAccount(w http.ResponseWriter, r *http.Request) {
+	if s.gate == nil || !s.gate.Account.Available() {
+		writeError(w, http.StatusServiceUnavailable, "the built-in account is disabled by configuration")
+		return
+	}
+	var req accountStateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	// Refusing to lock the owner out is the whole reason this is a handler
+	// rather than a direct call: only this layer knows whether anything else
+	// would still let someone in.
+	if !req.Enabled && !s.gate.OIDC.Enabled() && !s.gate.Proxy.Enabled() {
+		writeError(w, http.StatusConflict,
+			"turning off the built-in account would leave no way to sign in; configure a provider or a reverse proxy first")
+		return
+	}
+	if err := s.gate.Account.SetEnabled(r.Context(), req.Enabled); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !req.Enabled {
+		if _, err := s.gate.Sessions.RevokeSubject(r.Context(), auth.LocalSubject); err != nil {
+			s.log.Error("revoke sessions after disabling the account", "error", err)
+		}
+	}
+	s.log.Info("built-in account state changed", "enabled", req.Enabled)
+	writeJSON(w, http.StatusOK, map[string]bool{"enabled": req.Enabled})
+}
+
+// getLink starts an OpenID Connect round trip whose purpose is to record which
+// provider identity belongs to the built-in account.
+func (s *Server) getLink(w http.ResponseWriter, r *http.Request) {
+	if s.gate == nil || !s.gate.OIDC.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "OpenID Connect is not configured")
+		return
+	}
+	id, ok := s.identify(r)
+	if !ok || id.Subject != auth.LocalSubject {
+		writeError(w, http.StatusForbidden, "sign in as the built-in account to link it")
+		return
+	}
+
+	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), true)
+	if err != nil {
+		s.log.Error("start OIDC link", "error", err)
+		writeError(w, http.StatusInternalServerError, "could not start the link")
+		return
+	}
+	if !s.writeFlowCookie(w, r, flow) {
+		return
+	}
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+// deleteLink forgets the linked provider identity.
+func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
+	if s.gate == nil || !s.gate.Account.Available() {
+		writeError(w, http.StatusServiceUnavailable, "the built-in account is disabled by configuration")
+		return
+	}
+	id, ok := s.identify(r)
+	if !ok || id.Subject != auth.LocalSubject {
+		writeError(w, http.StatusForbidden, "sign in as the built-in account to unlink it")
+		return
+	}
+	if err := s.gate.Account.Link(r.Context(), ""); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not unlink")
+		return
+	}
+	s.log.Info("built-in account unlinked from its provider identity")
+	writeJSON(w, http.StatusOK, map[string]bool{"linked": false})
 }

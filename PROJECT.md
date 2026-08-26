@@ -1240,7 +1240,39 @@ Changed:
     login endpoint is how a phishing link comes to look like it came from the
     real site.
 
-42. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+42. **A fresh install is closed, not open (first-run batch)** — the previous
+    default meant the safe configuration was the one you had to know to ask
+    for, and the unsafe one was what you got by following the quick start. The
+    built-in administrator now exists from first boot with no password, and
+    that state locks the door: every request is refused, and the UI serves only
+    a form asking for one. An unclaimed account that left the API open would
+    make the setup screen decoration.
+
+    The first-run window is real and is narrowed rather than claimed to be
+    closed: nothing else is reachable while it is open, it is logged loudly at
+    startup, and `SILT_PASSWORD_HASH` removes it entirely by claiming the
+    account before the process starts. When it is set, the UI reports the
+    password as the environment's and refuses to change it — declarative
+    configuration should not silently diverge from what the screen says.
+
+    One row, enforced by a CHECK. A table of users would be a user system
+    nobody asked for; the way to have more than one identity is to point Silt
+    at a provider that already manages them. Linking the account to a provider
+    subject is what makes that a migration rather than a switch: sign in there,
+    reach the same account, then turn the password off.
+
+43. **The compose file is short enough to read (first-run batch)** — everything
+    optional moved to `.env.example`, which documents every setting and says
+    which ones need a restart. `env_file` is declared `required: false`, so a
+    missing `.env` is not an error: Silt's defaults are a working install, and
+    copying the example is what you do when you want to change one.
+
+44. **Full file first (first-run batch)** — opening a project's compose files
+    showed the diff. That is the wrong guess: the timeline already answers what
+    changed and links straight to it, so someone who navigated to the files is
+    almost always there to read the file.
+
+45. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

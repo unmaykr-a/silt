@@ -253,7 +253,7 @@ func run() error {
 // safe. None of them stop Silt starting: someone bringing a stack up at 02:00
 // needs the tool that tells them what changed, not a refusal to boot.
 func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slog.Logger) (*api.Gate, error) {
-	password, err := auth.NewPassword(cfg.PasswordHash)
+	account, err := auth.LoadAccount(ctx, db, cfg.PasswordHash, cfg.LocalAccount)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +284,7 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 
 	gate := &api.Gate{
 		Sessions:       auth.NewSessions(db, cfg.SessionTTL, cfg.SessionIdleTTL),
-		Password:       password,
+		Account:        account,
 		Proxy:          proxy,
 		OIDC:           provider,
 		MetricsPublic:  cfg.MetricsPublic,
@@ -294,10 +294,17 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 	switch {
 	case !gate.Enabled():
 		log.Warn("no authentication configured; anyone who can reach this port has full read access",
-			"hint", "set SILT_OIDC_ISSUER, SILT_TRUST_PROXY_AUTH with your reverse proxy, or SILT_PASSWORD_HASH")
+			"hint", "set SILT_LOCAL_ACCOUNT=true, SILT_OIDC_ISSUER, or SILT_TRUST_PROXY_AUTH with your reverse proxy")
+	case account.SetupRequired():
+		// Loud, because there is a real window here: until someone claims the
+		// account, whoever reaches the UI first gets to. Everything else is
+		// refused meanwhile, and SILT_PASSWORD_HASH removes the window
+		// entirely for anyone who would rather not have it.
+		log.Warn("waiting for setup: open Silt and choose a password",
+			"note", "until then every request is refused, and the first person to reach the UI claims the account")
 	default:
 		log.Info("authentication enabled",
-			"oidc", provider.Enabled(), "proxy", proxy.Enabled(), "password", password.Enabled())
+			"oidc", provider.Enabled(), "proxy", proxy.Enabled(), "account", account.Enabled())
 	}
 	if proxy.TrustsAnySource() {
 		log.Warn("forward auth trusts the identity header from any source; anything that can reach this port can claim to be anyone",

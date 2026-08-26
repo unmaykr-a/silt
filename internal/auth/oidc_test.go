@@ -139,7 +139,7 @@ func newOIDC(t *testing.T, p *fakeProvider, mutate func(*auth.OIDCConfig)) *auth
 // login drives a whole flow and returns what Silt made of it.
 func login(t *testing.T, o *auth.OIDC, p *fakeProvider, next string) (auth.Identity, error) {
 	t.Helper()
-	_, flow, err := o.Start(next)
+	_, flow, err := o.Start(next, false)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestOIDCSendsAPKCEChallengeAndVerifier(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
 
-	authURL, flow, err := o.Start("/")
+	authURL, flow, err := o.Start("/", false)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestOIDCSendsAPKCEChallengeAndVerifier(t *testing.T) {
 func TestOIDCRefusesAStateMismatch(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/")
+	_, flow, _ := o.Start("/", false)
 	p.nonce = flow.Nonce
 
 	for _, state := range []string{"", "somebody-elses-state", flow.State + "x"} {
@@ -210,7 +210,7 @@ func TestOIDCRefusesAStateMismatch(t *testing.T) {
 func TestOIDCRefusesANonceMismatch(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/")
+	_, flow, _ := o.Start("/", false)
 	p.nonce = "a-different-login"
 
 	_, err := o.Finish(context.Background(), flow, flow.State, "code")
@@ -222,7 +222,7 @@ func TestOIDCRefusesANonceMismatch(t *testing.T) {
 func TestOIDCRefusesATokenSignedByTheWrongKey(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/")
+	_, flow, _ := o.Start("/", false)
 	p.nonce = flow.Nonce
 
 	// Sign with a key the JWKS does not advertise: exactly what an attacker
@@ -242,7 +242,7 @@ func TestOIDCRefusesAMissingIDToken(t *testing.T) {
 	p := newFakeProvider(t)
 	p.omitIDToken = true
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/")
+	_, flow, _ := o.Start("/", false)
 
 	if _, err := o.Finish(context.Background(), flow, flow.State, "code"); err == nil {
 		t.Error("a token response with no id_token was accepted")
@@ -344,7 +344,7 @@ func TestOIDCFallsBackThroughTheDisplayNames(t *testing.T) {
 func TestOIDCStartSanitisesTheReturnPath(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, err := o.Start("https://evil.example/")
+	_, flow, err := o.Start("https://evil.example/", false)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

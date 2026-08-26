@@ -125,7 +125,15 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"startOIDCLogin":  {method: "GET", url: "/api/auth/login", wantStatus: 503},
 		"finishOIDCLogin": {method: "GET", url: "/api/auth/callback", wantStatus: 503},
 		"getSessions":     {method: "GET", url: "/api/auth/sessions", wantStatus: 200, schema: "SessionCount"},
-		"revokeSessions":  {method: "DELETE", url: "/api/auth/sessions", wantStatus: 200},
+		// The built-in account is off in this fixture, so these report absence.
+		// Their success paths are covered in account_test.go against a fixture
+		// that has one.
+		"setupAccount":      {method: "POST", url: "/api/auth/setup", body: `{"password":"a-long-enough-one"}`, wantStatus: 409},
+		"changePassword":    {method: "PUT", url: "/api/auth/password", body: `{"current":"x","password":"y"}`, wantStatus: 403},
+		"setAccountEnabled": {method: "PUT", url: "/api/auth/account", body: `{"enabled":false}`, wantStatus: 503},
+		"startAccountLink":  {method: "GET", url: "/api/auth/link", wantStatus: 503},
+		"removeAccountLink": {method: "DELETE", url: "/api/auth/link", wantStatus: 503},
+		"revokeSessions":    {method: "DELETE", url: "/api/auth/sessions", wantStatus: 200},
 		// The fixture configures no password, so login reports that it is not
 		// available rather than accepting anything.
 		"login":                {method: "POST", url: "/api/login", body: `{"password":"x"}`, wantStatus: 503},

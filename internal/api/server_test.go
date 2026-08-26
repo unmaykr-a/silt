@@ -133,17 +133,20 @@ func newFixture(t *testing.T) *fixture {
 	// A gate with only a session store: no password, no proxy, no provider, so
 	// authentication is off and the fixture stays open — but the session
 	// endpoints are real rather than reporting themselves unavailable.
-	password, err := auth.NewPassword("")
-	if err != nil {
-		t.Fatalf("NewPassword: %v", err)
-	}
 	proxy, err := auth.NewProxy(false, "", nil)
 	if err != nil {
 		t.Fatalf("NewProxy: %v", err)
 	}
+	// The built-in account is switched off here, so this fixture stays open
+	// and its tests can exercise the rest of the API without signing in. The
+	// account has its own fixture, in account_test.go.
+	account, err := auth.LoadAccount(ctx, db, "", false)
+	if err != nil {
+		t.Fatalf("LoadAccount: %v", err)
+	}
 	server.SetAuth(&api.Gate{
 		Sessions:      auth.NewSessions(db, 720*time.Hour, 0),
-		Password:      password,
+		Account:       account,
 		Proxy:         proxy,
 		MetricsPublic: true,
 	})

@@ -140,6 +140,81 @@
     "proxy+password": "Reverse proxy header, with a password fallback",
   };
 
+  // Account management. Read-only fields sit beside these because the rest of
+  // the section is the boundary; these three are the parts the account owns
+  // and can therefore change about itself.
+  let currentPassword = $state("");
+  let newPassword = $state("");
+  let confirmPassword = $state("");
+  let changing = $state(false);
+  let togglingAccount = $state(false);
+
+  const minimum = $derived(authState?.min_password_length ?? 10);
+  const canChange = $derived(
+    currentPassword !== "" &&
+      newPassword.length >= minimum &&
+      newPassword === confirmPassword,
+  );
+
+  async function refreshAuthState() {
+    try {
+      authState = await api.authState();
+    } catch {
+      // Leave the last good answer on screen; the action's own error already
+      // said what went wrong.
+    }
+  }
+
+  async function changePassword() {
+    changing = true;
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      currentPassword = "";
+      newPassword = "";
+      confirmPassword = "";
+      error = null;
+      notice = "Password changed. Every other signed-in browser was signed out.";
+      await refreshAuthState();
+    } catch (err) {
+      error = (err as Error).message;
+      notice = null;
+    } finally {
+      changing = false;
+    }
+  }
+
+  async function setAccountEnabled(enabled: boolean) {
+    togglingAccount = true;
+    try {
+      await api.setAccountEnabled(enabled);
+      error = null;
+      if (!enabled) {
+        // Disabling it ended this session too, so there is nothing left to
+        // render from here.
+        location.reload();
+        return;
+      }
+      notice = "The built-in account is on again.";
+      await refreshAuthState();
+    } catch (err) {
+      error = (err as Error).message;
+      notice = null;
+    } finally {
+      togglingAccount = false;
+    }
+  }
+
+  async function unlink() {
+    try {
+      await api.unlinkAccount();
+      error = null;
+      notice = "Unlinked. That provider identity no longer reaches this account.";
+      await refreshAuthState();
+    } catch (err) {
+      error = (err as Error).message;
+    }
+  }
+
   async function revokeAll() {
     revoking = true;
     try {
@@ -732,7 +807,112 @@
             )}
           </dl>
 
-          <div class="mt-5">
+          {#if authState?.local_available}
+            <h4 class="mt-8 text-sm font-medium">Built-in account</h4>
+            {#if authState.local_managed}
+              <p class="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground/70">
+                The password comes from <span class="font-mono">SILT_PASSWORD_HASH</span>, so it is
+                not this screen's to change. Unset that variable if you would rather manage it here.
+              </p>
+            {:else if authState.local_enabled}
+              <div class="mt-3 max-w-md space-y-3">
+                <div>
+                  <label class="block text-xs text-muted-foreground" for="current-password">
+                    Current password
+                  </label>
+                  <input
+                    id="current-password"
+                    type="password"
+                    autocomplete="current-password"
+                    bind:value={currentPassword}
+                    class="{input} mt-1"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-muted-foreground" for="new-password">
+                    New password <span class="text-muted-foreground/60">· at least {minimum} characters</span>
+                  </label>
+                  <input
+                    id="new-password"
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={newPassword}
+                    class="{input} mt-1"
+                  />
+                </div>
+                <div>
+                  <label class="block text-xs text-muted-foreground" for="confirm-password">Confirm</label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={confirmPassword}
+                    class="{input} mt-1"
+                  />
+                  {#if confirmPassword !== "" && confirmPassword !== newPassword}
+                    <p class="mt-1 text-xs text-amber-600 dark:text-amber-400">These do not match.</p>
+                  {/if}
+                </div>
+                <Button size="sm" onclick={changePassword} disabled={!canChange || changing}>
+                  {changing ? "Changing…" : "Change password"}
+                </Button>
+                <p class="text-xs leading-relaxed text-muted-foreground/70">
+                  Changing it signs every other browser out, so doing this because you think it
+                  leaked also ends whatever leaked.
+                </p>
+              </div>
+            {:else}
+              <p class="mt-1 max-w-xl text-xs leading-relaxed text-muted-foreground/70">
+                Password sign-in is turned off for this account. It still exists, and a linked
+                provider identity still reaches it.
+              </p>
+            {/if}
+
+            {#if authState.oidc_enabled}
+              <div class="mt-5">
+                {#if authState.local_linked}
+                  <p class="text-xs leading-relaxed text-muted-foreground">
+                    Linked to a provider identity — signing in with it reaches this account,
+                    whatever the group allowlists say.
+                  </p>
+                  <Button variant="outline" size="sm" class="mt-2" onclick={unlink}>Unlink</Button>
+                {:else}
+                  <p class="max-w-xl text-xs leading-relaxed text-muted-foreground">
+                    Link this account to your provider identity, and signing in there reaches the
+                    same account. That is what lets you turn the password off and keep the account.
+                  </p>
+                  <Button variant="outline" size="sm" class="mt-2" onclick={() => api.linkAccount()}>
+                    Link to my provider identity
+                  </Button>
+                {/if}
+              </div>
+            {/if}
+
+            <div class="mt-5">
+              {#if authState.local_enabled}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => setAccountEnabled(false)}
+                  disabled={togglingAccount || (!authState.oidc_enabled && !authState.proxy_enabled)}
+                >
+                  Turn the built-in account off
+                </Button>
+                {#if !authState.oidc_enabled && !authState.proxy_enabled}
+                  <p class="mt-1.5 max-w-xl text-xs text-muted-foreground/70">
+                    Not while it is the only way in. Configure a provider or a reverse proxy first.
+                  </p>
+                {/if}
+              {:else}
+                <Button variant="outline" size="sm" onclick={() => setAccountEnabled(true)} disabled={togglingAccount}>
+                  Turn the built-in account on
+                </Button>
+              {/if}
+            </div>
+          {/if}
+
+          <h4 class="mt-8 text-sm font-medium">Sessions</h4>
+          <div class="mt-3">
             <Button variant="outline" size="sm" onclick={revokeAll} disabled={revoking || !authState?.required}>
               {revoking ? "Signing out…" : "Sign out everywhere"}
             </Button>

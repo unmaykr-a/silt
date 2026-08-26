@@ -627,6 +627,155 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/auth/setup:
+    post:
+      tags: [system]
+      summary: Claim the built-in account with its first password
+      description: |
+        Public, because on a fresh install there is no way to authenticate yet,
+        and gated on the account still being unclaimed, so it works exactly
+        once. Every other endpoint is refused until it succeeds, which is what
+        keeps the setup screen from being decoration.
+
+        Setting `SILT_PASSWORD_HASH` claims the account before Silt starts, and
+        removes this window entirely.
+      operationId: setupAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        "200":
+          description: The password was set and a session started
+        "400":
+          description: The password does not meet the policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Already set up
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/password:
+    put:
+      tags: [system]
+      summary: Change the built-in account's password
+      description: |
+        The current password is required even though the caller is signed in: a
+        session someone walked away from should not be enough to lock its owner
+        out. Every other session is revoked on success, so changing the
+        password because you think it leaked also ends whatever leaked.
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current, password]
+              properties:
+                current: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: Changed, and this session restarted
+        "400":
+          description: The current password is wrong, or the new one is too weak
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: Not signed in as the built-in account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/account:
+    put:
+      tags: [system]
+      summary: Turn the built-in account on or off
+      description: |
+        Refused when it would leave no way to sign in — configure a provider or
+        a reverse proxy first.
+      operationId: setAccountEnabled
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: The new state
+        "409":
+          description: Turning it off would lock everyone out
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: The built-in account is disabled by configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/auth/link:
+    get:
+      tags: [system]
+      summary: Link the built-in account to a provider identity
+      description: |
+        Starts an OpenID Connect round trip whose purpose is to record which
+        provider subject belongs to the built-in account. Afterwards, signing
+        in with that identity reaches the same account — which is what makes it
+        possible to turn the password off and keep the account.
+
+        A linked identity is admitted whatever the group allowlists say: an
+        explicit link is a more specific statement than a group membership.
+      operationId: startAccountLink
+      parameters:
+        - name: next
+          in: query
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to the provider
+        "403":
+          description: Not signed in as the built-in account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: OpenID Connect is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [system]
+      summary: Forget the linked provider identity
+      operationId: removeAccountLink
+      responses:
+        "200":
+          description: Unlinked
+        "403":
+          description: Not signed in as the built-in account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: The built-in account is disabled by configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/auth/sessions:
     get:
       tags: [system]
@@ -1281,7 +1430,9 @@ components:
     AuthState:
       type: object
       required:
-        [required, password_enabled, oidc_enabled, proxy_enabled, authenticated]
+        [required, password_enabled, oidc_enabled, proxy_enabled, authenticated,
+         setup_required, min_password_length, local_available, local_enabled,
+         local_managed, local_linked]
       properties:
         required:
           type: boolean
@@ -1299,6 +1450,25 @@ components:
         method:
           type: string
           enum: [password, oidc, proxy]
+        setup_required:
+          type: boolean
+          description: |
+            The built-in account exists but has no password. The only thing the
+            UI should offer is choosing one, and every other endpoint is
+            refused until it does.
+        min_password_length:
+          type: integer
+          description: So the form can state the rule before it refuses.
+        local_available:
+          type: boolean
+          description: Whether the built-in account exists at all.
+        local_enabled: { type: boolean }
+        local_managed:
+          type: boolean
+          description: The password comes from SILT_PASSWORD_HASH, so the UI must not offer to change it.
+        local_linked:
+          type: boolean
+          description: Whether a provider identity reaches this account.
 
     SessionCount:
       type: object
