@@ -1,6 +1,7 @@
 <script lang="ts">
   import { router, link } from "$lib/router.svelte";
-  import { subscribe, api, type Project } from "$lib/api/client";
+  import { subscribe, api, type Project, type AuthState } from "$lib/api/client";
+  import Login from "$lib/components/Login.svelte";
   import Timeline from "./routes/Timeline.svelte";
   import Project_ from "./routes/Project.svelte";
   import Service from "./routes/Service.svelte";
@@ -14,8 +15,27 @@
   // Bumped on every server-sent event; screens depend on it to refetch.
   let reloadKey = $state(0);
   let theme = $state<"dark" | "light">("dark");
+  let auth = $state<AuthState | null>(null);
+
+  // Gate everything on the auth state so an unauthenticated visitor sees a
+  // login form rather than a page of failed requests.
+  const locked = $derived(auth !== null && auth.required && !auth.authenticated);
+
+  async function refreshAuth() {
+    try {
+      auth = await api.authState();
+    } catch {
+      // If even this fails the server is unreachable; the status dot says so.
+      auth = null;
+    }
+  }
 
   $effect(() => {
+    void refreshAuth();
+  });
+
+  $effect(() => {
+    if (locked) return;
     const controller = new AbortController();
     api.projects(controller.signal).then((p) => (projects = p)).catch(() => {});
 
@@ -61,6 +81,9 @@
   );
 </script>
 
+{#if locked}
+  <Login onAuthenticated={refreshAuth} />
+{:else}
 <div class="min-h-screen bg-background text-foreground">
   <header class="border-b border-border">
     <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-4">
@@ -95,6 +118,17 @@
       </nav>
 
       <div class="ml-auto flex items-center gap-4">
+        {#if auth?.required && auth.password_enabled}
+          <button
+            class="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            onclick={async () => {
+              await api.logout();
+              await refreshAuth();
+            }}
+          >
+            Sign out
+          </button>
+        {/if}
         <button
           class="text-xs text-muted-foreground transition-colors hover:text-foreground"
           onclick={() => (theme = theme === "dark" ? "light" : "dark")}
@@ -131,3 +165,4 @@
     {/if}
   </main>
 </div>
+{/if}

@@ -918,6 +918,7 @@ miserable, and second granularity collides on `UNIQUE (project_id, taken_at)`.
 | `SILT_VACUUM_INTERVAL` | `0` | `0` disables; e.g. `168h` for weekly |
 | `SILT_RETENTION_INTERVAL` | `1h` | How often the retention pass runs |
 | `SILT_HOST_NAME` | `local` | Label for this Docker host in the database |
+| `SILT_BASE_URL` | *(empty)* | Public URL, used to link notifications to the diff |
 | `SILT_KEEP_KEYS` | *(empty)* | Extra env keys kept in cleartext, `*` glob. Adds to the built-in safe list; there is no redact-list |
 | `SILT_NOTIFY_URLS` | *(empty)* | Comma-separated shoutrrr URLs |
 | `SILT_NOTIFY_ON` | `image_id,image_digest,volumes,service_removed` | Change kinds that notify |
@@ -1047,7 +1048,17 @@ Changed:
     around. Note that its interactive primitives depend on `bits-ui` and its
     variants on `tailwind-merge`, so "no runtime dep" in Section 6 is not
     quite right: those add roughly 80 KB to the bundle.
-26. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+26. **Added during M6** — notifications compare against the previous *changed*
+    snapshot rather than the previous snapshot: runtime-only rows sit in
+    between, and diffing against one of those would re-announce the same
+    configuration change. The first change for a project is not announced,
+    since "everything is new" is noise. Session cookies are signed with a key
+    generated at startup, so a restart logs everyone out — acceptable for a
+    single-user tool, and it means no long-lived secret to store. `Secure` is
+    not set on the cookie because Silt is commonly reached over plain HTTP on
+    a LAN, where a cookie that never arrives is worse than one relying on the
+    operator's own network boundary.
+27. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

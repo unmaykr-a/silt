@@ -17,6 +17,7 @@ import (
 	"github.com/unmaykr-a/silt/internal/collect"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/docker"
+	"github.com/unmaykr-a/silt/internal/notify"
 	"github.com/unmaykr-a/silt/internal/redact"
 	"github.com/unmaykr-a/silt/internal/store"
 	"github.com/unmaykr-a/silt/internal/web"
@@ -70,6 +71,30 @@ func run() error {
 	}
 	redactor := redact.New(redactionKey, cfg.KeepKeys)
 
+	notifyFilter, err := notify.ParseFilter(cfg.NotifyOn, cfg.NotifyMinSeverity)
+	if err != nil {
+		return err
+	}
+	notifier, err := notify.New(cfg.NotifyURLs, notifyFilter, log)
+	if err != nil {
+		return err
+	}
+	if notifier != nil {
+		log.Info("notifications enabled", "targets", len(cfg.NotifyURLs),
+			"kinds", cfg.NotifyOn, "min_severity", cfg.NotifyMinSeverity)
+	}
+
+	auth, err := api.NewAuth(cfg.TrustProxyAuth, cfg.AuthHeader, cfg.PasswordHash)
+	if err != nil {
+		return err
+	}
+	if !auth.Enabled() {
+		// Worth saying out loud rather than leaving someone to assume Silt
+		// asks for a password by default.
+		log.Warn("no authentication configured; anyone who can reach this port has full read access",
+			"hint", "set SILT_TRUST_PROXY_AUTH with your reverse proxy, or SILT_PASSWORD_HASH")
+	}
+
 	hub := api.NewHub(log)
 	snapshotter := &collect.Snapshotter{
 		Client:    dc,
@@ -79,6 +104,8 @@ func run() error {
 		HostName:  cfg.HostName,
 		Endpoint:  cfg.DockerHost,
 		Publisher: api.HubPublisher{Hub: hub},
+		Notifier:  notifier,
+		BaseURL:   cfg.BaseURL,
 	}
 
 	retainer := &store.Retainer{
@@ -121,6 +148,7 @@ func run() error {
 
 	apiServer := api.New(log, db, hub, cfg, snapshotter)
 	apiServer.SetVersion(version)
+	apiServer.SetAuth(auth)
 	srv := apiServer.HTTPServer(cfg)
 
 	errc := make(chan error, 1)

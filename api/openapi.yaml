@@ -370,6 +370,77 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/auth:
+    get:
+      tags: [system]
+      summary: Whether authentication is required and satisfied
+      description: |
+        Lets the UI decide whether to render a login form. Never returns the
+        password hash or any credential.
+      operationId: getAuthState
+      responses:
+        "200":
+          description: Auth state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthState" }
+
+  /api/login:
+    post:
+      tags: [system]
+      summary: Exchange the configured password for a session cookie
+      description: |
+        The fallback for installs without an identity provider. Where a reverse
+        proxy asserts identity via `SILT_TRUST_PROXY_AUTH`, this is not needed.
+        Returns 503 when no password is configured.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        "200":
+          description: Authenticated; a session cookie is set
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authenticated]
+                properties:
+                  authenticated: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: Incorrect password
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Password login is not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/logout:
+    post:
+      tags: [system]
+      summary: Clear the session cookie
+      operationId: logout
+      responses:
+        "200":
+          description: Session cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authenticated]
+                properties:
+                  authenticated: { type: boolean }
+
   /api/settings:
     get:
       tags: [system]
@@ -727,6 +798,16 @@ components:
             stored_bytes: { type: integer, format: int64 }
             uncompressed_bytes: { type: integer, format: int64 }
             events: { type: integer, format: int64 }
+
+    AuthState:
+      type: object
+      required: [required, password_enabled, authenticated]
+      properties:
+        required:
+          type: boolean
+          description: Whether any authentication is configured at all.
+        password_enabled: { type: boolean }
+        authenticated: { type: boolean }
 
     PruneResult:
       type: object

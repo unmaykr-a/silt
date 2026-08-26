@@ -112,7 +112,12 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 			method: "GET", url: "/api/projects/1/services/radarr", wantStatus: 200,
 			schema: "ServiceHistory",
 		},
-		"getSettings": {method: "GET", url: "/api/settings", wantStatus: 200, schema: "Settings"},
+		"getSettings":  {method: "GET", url: "/api/settings", wantStatus: 200, schema: "Settings"},
+		"getAuthState": {method: "GET", url: "/api/auth", wantStatus: 200, schema: "AuthState"},
+		// The fixture configures no password, so login reports that it is not
+		// available rather than accepting anything.
+		"login":       {method: "POST", url: "/api/login", body: `{"password":"x"}`, wantStatus: 503},
+		"logout":      {method: "POST", url: "/api/logout", wantStatus: 200},
 		"prune":       {method: "POST", url: "/api/maintenance/prune", wantStatus: 200, schema: "PruneResult"},
 		"getTimeline": {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
 		"ingest": {

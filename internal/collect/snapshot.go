@@ -6,9 +6,12 @@ import (
 	"log/slog"
 
 	"github.com/unmaykr-a/silt/internal/compose"
+	"github.com/unmaykr-a/silt/internal/diff"
 	"github.com/unmaykr-a/silt/internal/docker"
+	"github.com/unmaykr-a/silt/internal/notify"
 	"github.com/unmaykr-a/silt/internal/redact"
 	"github.com/unmaykr-a/silt/internal/store"
+	"github.com/unmaykr-a/silt/internal/store/sqlcgen"
 )
 
 // Trigger values recorded on a snapshot.
@@ -48,6 +51,10 @@ type Snapshotter struct {
 	Endpoint string
 	// Publisher is optional; nil means nothing is broadcast.
 	Publisher Publisher
+	// Notifier is optional; a nil *notify.Sender is a working no-op.
+	Notifier *notify.Sender
+	// BaseURL is used to build links in notifications.
+	BaseURL string
 }
 
 // SnapshotProject snapshots one project by its database id, for
@@ -153,8 +160,69 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 		if s.Publisher != nil {
 			s.Publisher.PublishChange(payload)
 		}
+		s.notifyChange(ctx, projectID, p.Name, result)
 	}
 	return result, nil
+}
+
+// notifyChange diffs the new snapshot against the previous configuration
+// change and sends anything that passes the filter.
+//
+// It compares against the previous CHANGED snapshot rather than the previous
+// snapshot: runtime-only rows sit in between, and diffing against one of those
+// would report the same configuration change again.
+func (s *Snapshotter) notifyChange(ctx context.Context, projectID int64, project string, result store.SnapshotResult) {
+	if s.Notifier == nil {
+		return
+	}
+
+	previous, err := s.Store.RQ.LatestChangedSnapshotsBefore(ctx, sqlcgen.LatestChangedSnapshotsBeforeParams{
+		ProjectID: projectID,
+		Before:    result.TakenAt,
+		MaxRows:   1,
+	})
+	if err != nil || len(previous) == 0 {
+		// The first configuration change for a project has nothing to compare
+		// against; announcing "everything is new" would be noise.
+		return
+	}
+
+	from, err := s.Store.LoadSnapshotModel(ctx, previous[0].ID)
+	if err != nil {
+		s.Log.Error("load previous snapshot for notification", "project", project, "error", err)
+		return
+	}
+	to, err := s.Store.LoadSnapshotModel(ctx, result.ID)
+	if err != nil {
+		s.Log.Error("load snapshot for notification", "project", project, "error", err)
+		return
+	}
+
+	computed := diff.Compute(toDiffInput(from), toDiffInput(to))
+	s.Notifier.Notify(ctx, notify.Change{
+		Project:    project,
+		SnapshotID: result.ID,
+		FromID:     previous[0].ID,
+		Changes:    computed.Changes,
+		BaseURL:    s.BaseURL,
+	})
+}
+
+// toDiffInput adapts a stored snapshot for the diff engine.
+func toDiffInput(m store.SnapshotModel) diff.Input {
+	runtimes := make(map[string]diff.Runtime, len(m.Runtimes))
+	for name, rt := range m.Runtimes {
+		runtimes[name] = diff.Runtime{
+			State:        rt.State,
+			Health:       rt.Health,
+			RestartCount: rt.RestartCount,
+		}
+	}
+	return diff.Input{
+		Side:     diff.Side{SnapshotID: m.Snapshot.ID, TakenAt: m.Snapshot.TakenAt},
+		Project:  m.Project,
+		Runtimes: runtimes,
+	}
 }
 
 // SnapshotAll observes every discovered project.
