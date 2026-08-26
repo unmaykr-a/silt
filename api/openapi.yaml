@@ -104,6 +104,51 @@ paths:
                 items: { $ref: "#/components/schemas/Snapshot" }
         "400": { $ref: "#/components/responses/BadRequest" }
 
+  /api/projects/{id}/services:
+    get:
+      tags: [projects]
+      summary: Service names seen in a project
+      operationId: listProjectServices
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Service names
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/projects/{id}/services/{service}:
+    get:
+      tags: [projects]
+      summary: One service's history
+      description: |
+        Image identity, state and restart counts over time, plus the points at
+        which each environment key's value changed. Environment values are
+        keyed digests unless the key is on the cleartext keep-list, so this
+        answers "when did SECRET_KEY change?" without ever holding the secret.
+      operationId: getServiceHistory
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - name: service
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 200, maximum: 1000 }
+      responses:
+        "200":
+          description: Service history
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServiceHistory" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/projects/{id}/snapshot:
     post:
       tags: [snapshots]
@@ -324,6 +369,38 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /api/settings:
+    get:
+      tags: [system]
+      summary: Effective configuration, read-only
+      description: |
+        Silt is configured by environment variables, so this reports what is in
+        force rather than offering to change it. Secrets are reported as
+        set-or-not and never echoed.
+      operationId: getSettings
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Settings" }
+
+  /api/maintenance/prune:
+    post:
+      tags: [system]
+      summary: Run a retention pass now
+      description: |
+        Uses the configured retention policy. The caller cannot supply its own
+        window: an endpoint that accepted one would be a delete endpoint
+        wearing a different name.
+      operationId: prune
+      responses:
+        "200":
+          description: What the pass removed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PruneResult" }
 
   /healthz:
     get:
@@ -573,6 +650,92 @@ components:
         events:
           type: array
           items: { $ref: "#/components/schemas/Event" }
+
+    ServiceObservation:
+      type: object
+      required: [snapshot_id, taken_at, config_changed, restart_count]
+      properties:
+        snapshot_id: { type: integer, format: int64 }
+        taken_at: { type: integer, format: int64 }
+        config_changed: { type: boolean }
+        image_ref: { type: string }
+        image_id: { type: string }
+        image_digest: { type: string }
+        state: { type: string }
+        health: { type: string }
+        restart_count: { type: integer, format: int64 }
+
+    EnvKeyChange:
+      type: object
+      required: [key, taken_at, redacted, digest, value_len_bucket, first_seen]
+      properties:
+        key: { type: string }
+        taken_at: { type: integer, format: int64 }
+        redacted: { type: boolean }
+        digest:
+          type: string
+          description: Keyed digest of the value, comparable only within this install.
+        value_len_bucket: { type: string, enum: [empty, short, medium, long] }
+        value:
+          type: string
+          description: Present only when the key is on the cleartext keep-list.
+        first_seen: { type: boolean }
+
+    ServiceHistory:
+      type: object
+      required: [project_id, service, observations, env_changes]
+      properties:
+        project_id: { type: integer, format: int64 }
+        service: { type: string }
+        observations:
+          type: array
+          items: { $ref: "#/components/schemas/ServiceObservation" }
+        env_changes:
+          type: array
+          items: { $ref: "#/components/schemas/EnvKeyChange" }
+
+    Settings:
+      type: object
+      required:
+        [version, host_name, docker_host, db_path, snapshot_interval_ms,
+         retention_days, unchanged_retention_days, event_retention_days,
+         retention_interval_ms, vacuum_interval_ms, keep_keys,
+         ingest_configured, log_level, usage]
+      properties:
+        version: { type: string }
+        host_name: { type: string }
+        docker_host: { type: string }
+        db_path: { type: string }
+        snapshot_interval_ms: { type: integer, format: int64 }
+        retention_days: { type: integer }
+        unchanged_retention_days: { type: integer }
+        event_retention_days: { type: integer }
+        retention_interval_ms: { type: integer, format: int64 }
+        vacuum_interval_ms: { type: integer, format: int64 }
+        keep_keys:
+          type: array
+          items: { type: string }
+        ingest_configured:
+          type: boolean
+          description: Whether SILT_INGEST_TOKEN is set. The token itself is never returned.
+        log_level: { type: string }
+        usage:
+          type: object
+          required: [blobs, stored_bytes, uncompressed_bytes, events]
+          properties:
+            blobs: { type: integer, format: int64 }
+            stored_bytes: { type: integer, format: int64 }
+            uncompressed_bytes: { type: integer, format: int64 }
+            events: { type: integer, format: int64 }
+
+    PruneResult:
+      type: object
+      required: [unchanged_snapshots, changed_snapshots, events, blobs]
+      properties:
+        unchanged_snapshots: { type: integer, format: int64 }
+        changed_snapshots: { type: integer, format: int64 }
+        events: { type: integer, format: int64 }
+        blobs: { type: integer, format: int64 }
 
     IngestRequest:
       type: object

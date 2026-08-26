@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -389,15 +388,29 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 		Events:  toEventResponses(events),
 	}
 
-	counts := map[int64]*timelineBucket{}
+	// Zero-fill the whole window. A density strip needs a point for every
+	// bucket, not only the ones with activity: a sparse series leaves the
+	// chart to infer its own x-range, and with one or two points that range
+	// is meaningless.
+	// The +1 covers the partial bucket at the end of the window, which can
+	// push the count one past the cap when the span divides exactly.
+	count := int((to-from)/bucket) + 1
+	if count > maxTimelineBuckets {
+		count = maxTimelineBuckets
+	}
+	buckets := make([]timelineBucket, count)
+	for i := range buckets {
+		buckets[i].Start = from + int64(i)*bucket
+	}
 	at := func(ts int64) *timelineBucket {
-		start := from + ((ts-from)/bucket)*bucket
-		b, ok := counts[start]
-		if !ok {
-			b = &timelineBucket{Start: start}
-			counts[start] = b
+		i := int((ts - from) / bucket)
+		if i < 0 {
+			i = 0
 		}
-		return b
+		if i >= len(buckets) {
+			i = len(buckets) - 1
+		}
+		return &buckets[i]
 	}
 
 	for _, snap := range snaps {
@@ -414,19 +427,16 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out.Buckets = make([]timelineBucket, 0, len(counts))
-	for _, b := range counts {
-		out.Buckets = append(out.Buckets, *b)
-	}
-	sort.Slice(out.Buckets, func(i, j int) bool { return out.Buckets[i].Start < out.Buckets[j].Start })
-
+	out.Buckets = buckets
 	writeJSON(w, http.StatusOK, out)
 }
+
+// maxTimelineBuckets bounds how much work one timeline request can ask for.
+const maxTimelineBuckets = 2000
 
 // resolveBucket honours a caller's bucket but clamps it so no request can ask
 // the server to build an unbounded number of buckets.
 func resolveBucket(r *http.Request, from, to int64) int64 {
-	const maxBuckets = 2000
 	span := to - from
 	if span <= 0 {
 		span = 1
@@ -441,7 +451,7 @@ func resolveBucket(r *http.Request, from, to int64) int64 {
 	if bucket <= 0 {
 		bucket = span / 240 // ~240 buckets across the window by default
 	}
-	if min := span / maxBuckets; bucket < min {
+	if min := span / maxTimelineBuckets; bucket < min {
 		bucket = min
 	}
 	if bucket <= 0 {

@@ -1,35 +1,31 @@
 <script lang="ts">
-  import { api, subscribe, type Project, type Event } from "./lib/api/client";
+  import { router, link } from "$lib/router.svelte";
+  import { subscribe, api, type Project } from "$lib/api/client";
+  import Timeline from "./routes/Timeline.svelte";
+  import Project_ from "./routes/Project.svelte";
+  import Service from "./routes/Service.svelte";
+  import Diff from "./routes/Diff.svelte";
+  import Settings from "./routes/Settings.svelte";
 
   type Status = "connecting" | "live" | "offline";
 
   let status = $state<Status>("connecting");
   let projects = $state<Project[]>([]);
-  let events = $state<Event[]>([]);
-  let error = $state<string | null>(null);
-
-  async function load(signal: AbortSignal) {
-    try {
-      const [p, e] = await Promise.all([api.projects(signal), api.events(10, signal)]);
-      projects = p;
-      events = e;
-      error = null;
-    } catch (err) {
-      if ((err as Error).name === "AbortError") return;
-      error = (err as Error).message;
-    }
-  }
+  // Bumped on every server-sent event; screens depend on it to refetch.
+  let reloadKey = $state(0);
+  let theme = $state<"dark" | "light">("dark");
 
   $effect(() => {
     const controller = new AbortController();
-    void load(controller.signal);
+    api.projects(controller.signal).then((p) => (projects = p)).catch(() => {});
 
-    // Live updates: re-read on any change rather than patching state locally,
-    // which keeps the page correct even if a frame is dropped for a slow client.
     const unsubscribe = subscribe({
       ready: () => (status = "live"),
-      event: () => void load(controller.signal),
-      "snapshot.changed": () => void load(controller.signal),
+      event: () => reloadKey++,
+      "snapshot.changed": () => {
+        reloadKey++;
+        api.projects().then((p) => (projects = p)).catch(() => {});
+      },
     });
 
     return () => {
@@ -39,87 +35,99 @@
     };
   });
 
+  // Dark by default, light available (PROJECT.md Section 9). Stored per
+  // browser; a missing or unreadable value just means the default.
+  $effect(() => {
+    try {
+      const saved = localStorage.getItem("silt.theme");
+      if (saved === "light" || saved === "dark") theme = saved;
+    } catch {
+      // Private windows and blocked site data both throw here.
+    }
+  });
+
+  $effect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    try {
+      localStorage.setItem("silt.theme", theme);
+    } catch {
+      // Non-fatal: the choice just will not persist.
+    }
+  });
+
+  const route = $derived(router.current);
   const dotClass = $derived(
     status === "live" ? "bg-emerald-400" : status === "connecting" ? "bg-zinc-500" : "bg-red-400",
   );
-
-  const serviceCount = $derived(projects.length);
-
-  function severityClass(severity: string): string {
-    if (severity === "error") return "text-red-400";
-    if (severity === "warn") return "text-amber-400";
-    return "text-zinc-500";
-  }
-
-  function relative(ts: number): string {
-    const seconds = Math.round((Date.now() - ts) / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.round(seconds / 3600)}h ago`;
-    return `${Math.round(seconds / 86400)}d ago`;
-  }
 </script>
 
-<main class="min-h-screen bg-zinc-950 px-6 py-16 text-zinc-100">
-  <div class="mx-auto max-w-2xl">
-    <header class="flex items-baseline justify-between">
-      <div>
-        <h1 class="text-4xl font-semibold tracking-tight">Silt</h1>
-        <p class="mt-1 text-sm text-zinc-500">What settled on your stack, and when.</p>
-      </div>
-      <div class="flex items-center gap-2 text-xs text-zinc-500">
-        <span class="size-2 rounded-full {dotClass}" aria-hidden="true"></span>
-        <span>{status}</span>
-      </div>
-    </header>
+<div class="min-h-screen bg-background text-foreground">
+  <header class="border-b border-border">
+    <div class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-4">
+      <a use:link href="/" class="text-lg font-semibold tracking-tight">Silt</a>
 
-    {#if error}
-      <p class="mt-8 rounded border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
-        {error}
-      </p>
+      <nav class="flex items-center gap-4 text-sm">
+        <a
+          use:link
+          href="/"
+          class="underline-offset-4 hover:underline {route.name === 'timeline' ? 'text-foreground' : 'text-muted-foreground'}"
+        >
+          Timeline
+        </a>
+        {#each projects as project (project.id)}
+          <a
+            use:link
+            href="/projects/{project.id}"
+            class="underline-offset-4 hover:underline {(route.name === 'project' || route.name === 'service') && route.projectId === project.id
+              ? 'text-foreground'
+              : 'text-muted-foreground'}"
+          >
+            {project.name}
+          </a>
+        {/each}
+        <a
+          use:link
+          href="/settings"
+          class="underline-offset-4 hover:underline {route.name === 'settings' ? 'text-foreground' : 'text-muted-foreground'}"
+        >
+          Settings
+        </a>
+      </nav>
+
+      <div class="ml-auto flex items-center gap-4">
+        <button
+          class="text-xs text-muted-foreground transition-colors hover:text-foreground"
+          onclick={() => (theme = theme === "dark" ? "light" : "dark")}
+          aria-label="Toggle theme"
+        >
+          {theme === "dark" ? "Light" : "Dark"}
+        </button>
+        <span class="flex items-center gap-1.5 text-xs text-muted-foreground" title="Live update stream">
+          <span class="size-2 rounded-full {dotClass}" aria-hidden="true"></span>
+          {status}
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-5xl px-6 py-8">
+    {#if route.name === "timeline"}
+      <Timeline {reloadKey} />
+    {:else if route.name === "project"}
+      <Project_ projectId={route.projectId} {reloadKey} />
+    {:else if route.name === "service"}
+      <Service projectId={route.projectId} service={route.service} />
+    {:else if route.name === "diff"}
+      <Diff from={route.from} to={route.to} projectId={route.projectId} />
+    {:else if route.name === "settings"}
+      <Settings />
+    {:else}
+      <div class="py-16 text-center">
+        <p class="text-sm text-muted-foreground">No such page: <code>{route.path}</code></p>
+        <a use:link href="/" class="mt-2 inline-block text-sm underline underline-offset-4">
+          Back to the timeline
+        </a>
+      </div>
     {/if}
-
-    <section class="mt-10">
-      <h2 class="text-xs font-medium uppercase tracking-wide text-zinc-500">
-        Projects ({serviceCount})
-      </h2>
-      {#if projects.length === 0}
-        <p class="mt-3 text-sm text-zinc-600">
-          No Compose projects discovered yet.
-        </p>
-      {:else}
-        <ul class="mt-3 divide-y divide-zinc-900 border-y border-zinc-900">
-          {#each projects as project (project.id)}
-            <li class="flex items-baseline justify-between py-3">
-              <span class="font-medium">{project.name}</span>
-              <span class="font-mono text-xs text-zinc-600">{project.working_dir ?? ""}</span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    <section class="mt-10">
-      <h2 class="text-xs font-medium uppercase tracking-wide text-zinc-500">Recent events</h2>
-      {#if events.length === 0}
-        <p class="mt-3 text-sm text-zinc-600">Nothing recorded yet.</p>
-      {:else}
-        <ul class="mt-3 space-y-2">
-          {#each events as event (event.id)}
-            <li class="flex items-baseline gap-3 text-sm">
-              <span class="font-mono text-xs {severityClass(event.severity)}">{event.type}</span>
-              <span class="text-zinc-400">{event.service ?? ""}</span>
-              <span class="ml-auto text-xs text-zinc-600" title={new Date(event.ts).toISOString()}>
-                {relative(event.ts)}
-              </span>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-
-    <p class="mt-12 text-xs text-zinc-700">
-      Timeline, diffs and per-service history arrive in M5.
-    </p>
-  </div>
-</main>
+  </main>
+</div>

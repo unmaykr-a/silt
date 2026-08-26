@@ -74,3 +74,51 @@ JOIN snapshots ON snapshots.id = service_states.snapshot_id
 WHERE service_states.service = ?
 ORDER BY snapshots.taken_at DESC
 LIMIT 1;
+
+-- One service's observations over time, newest first. Powers the Service
+-- screen's image history and restart sparkline.
+-- name: ServiceHistory :many
+SELECT
+  snapshots.id AS snapshot_id,
+  snapshots.taken_at,
+  snapshots.config_changed,
+  service_states.image_ref,
+  service_states.image_id,
+  service_states.image_digest,
+  service_states.state,
+  service_states.health,
+  service_states.restart_count,
+  service_states.inspect_hash
+FROM service_states
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE snapshots.project_id = sqlc.arg(project_id)
+  AND service_states.service = sqlc.arg(service)
+ORDER BY snapshots.taken_at DESC
+LIMIT sqlc.arg(max_rows);
+
+-- Every env key observation for one service, newest first. The handler folds
+-- these into per-key transitions; doing it in SQL would need a window function
+-- per key for no real gain.
+-- name: ServiceEnvHistory :many
+SELECT
+  snapshots.taken_at,
+  env_keys.key,
+  env_keys.value_hmac,
+  env_keys.value_len_bucket,
+  env_keys.redacted,
+  env_keys.value
+FROM env_keys
+JOIN service_states ON service_states.inspect_hash = env_keys.inspect_hash
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE snapshots.project_id = sqlc.arg(project_id)
+  AND service_states.service = sqlc.arg(service)
+ORDER BY snapshots.taken_at DESC, env_keys.key
+LIMIT sqlc.arg(max_rows);
+
+-- Distinct service names seen in a project, for navigation.
+-- name: ProjectServices :many
+SELECT DISTINCT service_states.service
+FROM service_states
+JOIN snapshots ON snapshots.id = service_states.snapshot_id
+WHERE snapshots.project_id = ?
+ORDER BY service_states.service;
