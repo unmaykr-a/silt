@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,19 @@ type fakeProvider struct {
 	lastForm map[string]string
 	// omitIDToken drops the id_token from the response.
 	omitIDToken bool
+	// issuer overrides what the discovery document reports. authentik reports
+	// its issuer with a trailing slash, which is also how it prints it for you
+	// to copy.
+	issuer string
+}
+
+// declaredIssuer is what the discovery document says, which is what go-oidc
+// compares against the string Silt passed it.
+func (p *fakeProvider) declaredIssuer() string {
+	if p.issuer != "" {
+		return p.issuer
+	}
+	return p.URL
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -55,7 +69,7 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{
-			"issuer":                 p.URL,
+			"issuer":                 p.declaredIssuer(),
 			"authorization_endpoint": p.URL + "/authorize",
 			"token_endpoint":         p.URL + "/token",
 			"jwks_uri":               p.URL + "/jwks",
@@ -97,7 +111,7 @@ func (p *fakeProvider) sign(t *testing.T) string {
 		t.Fatalf("signer: %v", err)
 	}
 	claims := map[string]any{
-		"iss":   p.URL,
+		"iss":   p.declaredIssuer(),
 		"aud":   "silt",
 		"exp":   time.Now().Add(time.Hour).Unix(),
 		"iat":   time.Now().Unix(),
@@ -139,7 +153,7 @@ func newOIDC(t *testing.T, p *fakeProvider, mutate func(*auth.OIDCConfig)) *auth
 // login drives a whole flow and returns what Silt made of it.
 func login(t *testing.T, o *auth.OIDC, p *fakeProvider, next string) (auth.Identity, error) {
 	t.Helper()
-	_, flow, err := o.Start(next, false)
+	_, flow, err := o.Start(next, false, "https://silt.example")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -166,7 +180,7 @@ func TestOIDCSendsAPKCEChallengeAndVerifier(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
 
-	authURL, flow, err := o.Start("/", false)
+	authURL, flow, err := o.Start("/", false, "https://silt.example")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -193,7 +207,7 @@ func TestOIDCSendsAPKCEChallengeAndVerifier(t *testing.T) {
 func TestOIDCRefusesAStateMismatch(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/", false)
+	_, flow, _ := o.Start("/", false, "https://silt.example")
 	p.nonce = flow.Nonce
 
 	for _, state := range []string{"", "somebody-elses-state", flow.State + "x"} {
@@ -210,7 +224,7 @@ func TestOIDCRefusesAStateMismatch(t *testing.T) {
 func TestOIDCRefusesANonceMismatch(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/", false)
+	_, flow, _ := o.Start("/", false, "https://silt.example")
 	p.nonce = "a-different-login"
 
 	_, err := o.Finish(context.Background(), flow, flow.State, "code")
@@ -222,7 +236,7 @@ func TestOIDCRefusesANonceMismatch(t *testing.T) {
 func TestOIDCRefusesATokenSignedByTheWrongKey(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/", false)
+	_, flow, _ := o.Start("/", false, "https://silt.example")
 	p.nonce = flow.Nonce
 
 	// Sign with a key the JWKS does not advertise: exactly what an attacker
@@ -242,7 +256,7 @@ func TestOIDCRefusesAMissingIDToken(t *testing.T) {
 	p := newFakeProvider(t)
 	p.omitIDToken = true
 	o := newOIDC(t, p, nil)
-	_, flow, _ := o.Start("/", false)
+	_, flow, _ := o.Start("/", false, "https://silt.example")
 
 	if _, err := o.Finish(context.Background(), flow, flow.State, "code"); err == nil {
 		t.Error("a token response with no id_token was accepted")
@@ -344,7 +358,7 @@ func TestOIDCFallsBackThroughTheDisplayNames(t *testing.T) {
 func TestOIDCStartSanitisesTheReturnPath(t *testing.T) {
 	p := newFakeProvider(t)
 	o := newOIDC(t, p, nil)
-	_, flow, err := o.Start("https://evil.example/", false)
+	_, flow, err := o.Start("https://evil.example/", false, "https://silt.example")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -392,4 +406,99 @@ func errorsAs(err error, target **auth.ErrNotAllowed) bool {
 		err = u.Unwrap()
 	}
 	return false
+}
+
+// authentik publishes its issuer with a trailing slash, and prints it that way
+// for you to copy into the client. go-oidc compares the issuer in the
+// discovery document against the string it was given character for character,
+// so normalising it turned "paste the URL your provider shows you" into a
+// silent discovery failure and a login button that never appeared.
+func TestOIDCAcceptsAnIssuerWithATrailingSlash(t *testing.T) {
+	p := newFakeProvider(t)
+	p.issuer = p.URL + "/"
+	p.claims["preferred_username"] = "andri"
+
+	o, err := auth.NewOIDC(context.Background(), auth.OIDCConfig{
+		Issuer:      p.URL + "/",
+		ClientID:    "silt",
+		RedirectURL: "https://silt.example/api/auth/callback",
+	})
+	if err != nil {
+		t.Fatalf("NewOIDC with a trailing-slash issuer: %v", err)
+	}
+	if !o.Enabled() {
+		t.Fatal("the provider is not enabled")
+	}
+	id, err := login(t, o, p, "/")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	if id.Name != "andri" {
+		t.Errorf("name = %q, want andri", id.Name)
+	}
+}
+
+// With no redirect URL configured, the callback is derived from the request —
+// so a working install does not need SILT_BASE_URL set before it can start.
+func TestOIDCDerivesTheCallbackFromTheRequest(t *testing.T) {
+	p := newFakeProvider(t)
+	o, err := auth.NewOIDC(context.Background(), auth.OIDCConfig{
+		Issuer:   p.URL,
+		ClientID: "silt",
+	})
+	if err != nil {
+		t.Fatalf("NewOIDC without a redirect URL: %v", err)
+	}
+	if o.Configured() {
+		t.Error("the callback reports itself as pinned when nothing was configured")
+	}
+
+	authURL, flow, err := o.Start("/", false, "https://silt.example.lan")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	const want = "https://silt.example.lan/api/auth/callback"
+	if flow.Redirect != want {
+		t.Errorf("derived callback = %q, want %q", flow.Redirect, want)
+	}
+	if !strings.Contains(authURL, url.QueryEscape(want)) {
+		t.Errorf("the authorization URL does not carry the derived callback: %s", authURL)
+	}
+
+	// OAuth requires the exchange to repeat the same redirect_uri.
+	p.nonce = flow.Nonce
+	if _, err := o.Finish(context.Background(), flow, flow.State, "code"); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	if p.lastForm["redirect_uri"] != want {
+		t.Errorf("exchange sent redirect_uri %q, want %q", p.lastForm["redirect_uri"], want)
+	}
+}
+
+// A configured redirect URL wins, because it is what was registered with the
+// provider and a request's Host is not.
+func TestConfiguredRedirectBeatsTheRequest(t *testing.T) {
+	p := newFakeProvider(t)
+	o := newOIDC(t, p, nil)
+	if !o.Configured() {
+		t.Error("a configured callback does not report itself as pinned")
+	}
+	_, flow, err := o.Start("/", false, "https://someone-elses-host.example")
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if flow.Redirect != "https://silt.example/api/auth/callback" {
+		t.Errorf("callback = %q; a request Host overrode the configured URL", flow.Redirect)
+	}
+}
+
+func TestStartWithoutAnyCallbackIsAnError(t *testing.T) {
+	p := newFakeProvider(t)
+	o, err := auth.NewOIDC(context.Background(), auth.OIDCConfig{Issuer: p.URL, ClientID: "silt"})
+	if err != nil {
+		t.Fatalf("NewOIDC: %v", err)
+	}
+	if _, _, err := o.Start("/", false, ""); err == nil {
+		t.Error("Start succeeded with no configured and no derivable callback")
+	}
 }

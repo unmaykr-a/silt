@@ -256,8 +256,12 @@ func TestDisablingTheAccountIsAllowedWhenAProxyCanLetYouIn(t *testing.T) {
 		}
 		g.Proxy = proxy
 	})
-	if code, _ := f.do(t, "POST", "/api/auth/setup", `{"password":"`+goodPassword+`"}`); code != 200 {
-		t.Fatal("setup failed")
+	// A proxy is configured, so claiming the account needs a session — see
+	// TestSetupRequiresASessionWhenAProviderCanLetYouIn.
+	proxied := map[string]string{"X-Remote-User": "andri"}
+	if code, body := status(t, f.client, "POST", f.srv.URL+"/api/auth/setup", proxied,
+		`{"password":"`+goodPassword+`"}`); code != 200 {
+		t.Fatalf("setup = %d %s", code, body)
 	}
 
 	if code, body := f.do(t, "PUT", "/api/auth/account", `{"enabled":false}`); code != 200 {
@@ -320,4 +324,66 @@ func bcryptOf(t *testing.T, password string) string {
 		t.Fatalf("hash: %v", err)
 	}
 	return string(hash)
+}
+
+// With a provider configured, an anonymous stranger must not be able to claim
+// the built-in account: that would be taking an account which bypasses the
+// provider, rather than bootstrapping the only way in.
+func TestSetupRequiresASessionWhenAProviderCanLetYouIn(t *testing.T) {
+	f := newAccountFixture(t, "", func(g *api.Gate) {
+		proxy, err := auth.NewProxy(true, "X-Remote-User", nil)
+		if err != nil {
+			t.Fatalf("NewProxy: %v", err)
+		}
+		g.Proxy = proxy
+	})
+
+	code, body := f.do(t, "POST", "/api/auth/setup", `{"password":"`+goodPassword+`"}`)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("anonymous setup = %d %s, want 401", code, body)
+	}
+	if !f.account.SetupRequired() {
+		t.Fatal("an anonymous request claimed the account despite a proxy being configured")
+	}
+
+	// Signed in the way the install is set up to do, it works.
+	code, body = status(t, f.client, "POST", f.srv.URL+"/api/auth/setup",
+		map[string]string{"X-Remote-User": "andri"}, `{"password":"`+goodPassword+`"}`)
+	if code != 200 {
+		t.Fatalf("setup while signed in = %d %s", code, body)
+	}
+	if f.account.SetupRequired() {
+		t.Error("the account is still unclaimed")
+	}
+}
+
+// And with nothing else configured it stays anonymous, or a fresh install
+// would have no way in at all.
+func TestSetupStaysAnonymousWhenItIsTheOnlyWayIn(t *testing.T) {
+	f := newAccountFixture(t, "")
+	if code, body := f.do(t, "POST", "/api/auth/setup", `{"password":"`+goodPassword+`"}`); code != 200 {
+		t.Fatalf("setup = %d %s, want 200", code, body)
+	}
+}
+
+// The login screen picks its shape from these two, so they have to disagree in
+// exactly the case that matters.
+func TestSetupOnlyIsFalseWhenAProviderExists(t *testing.T) {
+	bare := newAccountFixture(t, "")
+	state := bare.state(t)
+	if state["setup_required"] != true || state["setup_only"] != true {
+		t.Errorf("with nothing else configured: %v, want both true", state)
+	}
+
+	withProxy := newAccountFixture(t, "", func(g *api.Gate) {
+		proxy, err := auth.NewProxy(true, "X-Remote-User", nil)
+		if err != nil {
+			t.Fatalf("NewProxy: %v", err)
+		}
+		g.Proxy = proxy
+	})
+	state = withProxy.state(t)
+	if state["setup_required"] != true || state["setup_only"] != false {
+		t.Errorf("with a proxy configured: %v, want setup_required without setup_only", state)
+	}
 }

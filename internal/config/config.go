@@ -212,9 +212,6 @@ func (c *Config) Validate() error {
 		if c.OIDCClientID == "" {
 			return fmt.Errorf("SILT_OIDC_ISSUER is set, so SILT_OIDC_CLIENT_ID is required")
 		}
-		if c.OIDCRedirectURL == "" && c.BaseURL == "" {
-			return fmt.Errorf("SILT_OIDC_ISSUER is set, so either SILT_OIDC_REDIRECT_URL or SILT_BASE_URL is required to build the callback URL")
-		}
 	}
 	if c.UnchangedRetentionDays > c.RetentionDays && c.RetentionDays > 0 {
 		return fmt.Errorf(

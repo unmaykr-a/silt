@@ -55,16 +55,21 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig) (*OIDC, error) {
 	if cfg.ClientID == "" {
 		return nil, fmt.Errorf("SILT_OIDC_ISSUER is set but SILT_OIDC_CLIENT_ID is empty")
 	}
-	if cfg.RedirectURL == "" {
-		return nil, fmt.Errorf("SILT_OIDC_ISSUER is set but no redirect URL could be determined; set SILT_OIDC_REDIRECT_URL or SILT_BASE_URL")
-	}
-	if _, err := url.Parse(cfg.RedirectURL); err != nil {
-		return nil, fmt.Errorf("SILT_OIDC_REDIRECT_URL %q is not a valid URL: %w", cfg.RedirectURL, err)
+	if cfg.RedirectURL != "" {
+		if _, err := url.Parse(cfg.RedirectURL); err != nil {
+			return nil, fmt.Errorf("SILT_OIDC_REDIRECT_URL %q is not a valid URL: %w", cfg.RedirectURL, err)
+		}
 	}
 
 	discovery, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	provider, err := oidc.NewProvider(discovery, strings.TrimRight(cfg.Issuer, "/"))
+	// The issuer goes to the library exactly as configured, trailing slash and
+	// all. go-oidc compares the issuer in the discovery document against the
+	// string it was given, character for character — and authentik publishes
+	// its issuer with a trailing slash, which is also how it prints it for you
+	// to copy. Normalising it here turned "paste the URL authentik shows you"
+	// into a silent discovery failure.
+	provider, err := oidc.NewProvider(discovery, cfg.Issuer)
 	if err != nil {
 		return nil, fmt.Errorf("discover OpenID Connect provider at %s: %w", cfg.Issuer, err)
 	}
@@ -120,6 +125,11 @@ type Flow struct {
 	// same-origin path before it is ever used, so it cannot become an open
 	// redirect through the login flow.
 	Next string `json:"r"`
+	// Redirect is the callback URL that was sent to the provider. OAuth
+	// requires the exchange to repeat it exactly, and it can be derived from
+	// the request rather than configured, so it is carried rather than
+	// recomputed.
+	Redirect string `json:"u,omitempty"`
 	// Link marks a round trip whose purpose is to record which provider
 	// identity belongs to the local account, rather than to sign anyone in.
 	Link bool `json:"l,omitempty"`
@@ -131,7 +141,26 @@ type Flow struct {
 // costs one hash and closes the case where the authorization code leaks — a
 // proxy log, a Referer header, a shared machine's history — before the
 // exchange happens.
-func (o *OIDC) Start(next string, link bool) (authURL string, flow Flow, err error) {
+// redirect is the callback URL to use, preferring what was configured.
+//
+// Deriving it from the request when nothing is configured is safe: the
+// provider only honours redirect URIs registered with it, so a request
+// carrying a forged Host produces a URL the provider refuses rather than one
+// it redirects to.
+func (o *OIDC) redirect(requestBase string) string {
+	if o.cfg.RedirectURL != "" {
+		return o.cfg.RedirectURL
+	}
+	if requestBase == "" {
+		return ""
+	}
+	return strings.TrimRight(requestBase, "/") + "/api/auth/callback"
+}
+
+// Configured reports whether the callback URL is pinned rather than derived.
+func (o *OIDC) Configured() bool { return o != nil && o.cfg.RedirectURL != "" }
+
+func (o *OIDC) Start(next string, link bool, requestBase string) (authURL string, flow Flow, err error) {
 	state, err := randomString()
 	if err != nil {
 		return "", Flow{}, err
@@ -145,9 +174,15 @@ func (o *OIDC) Start(next string, link bool) (authURL string, flow Flow, err err
 		return "", Flow{}, err
 	}
 
+	callback := o.redirect(requestBase)
+	if callback == "" {
+		return "", Flow{}, fmt.Errorf("no callback URL: set SILT_BASE_URL or SILT_OIDC_REDIRECT_URL")
+	}
+
 	challenge := sha256.Sum256([]byte(verifier))
 	url := o.oauth.AuthCodeURL(state,
 		oidc.Nonce(nonce),
+		oauth2.SetAuthURLParam("redirect_uri", callback),
 		oauth2.SetAuthURLParam("code_challenge", base64.RawURLEncoding.EncodeToString(challenge[:])),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	)
@@ -157,6 +192,7 @@ func (o *OIDC) Start(next string, link bool) (authURL string, flow Flow, err err
 		Verifier: verifier,
 		Next:     SafeNext(next),
 		Link:     link,
+		Redirect: callback,
 	}, nil
 }
 
@@ -201,8 +237,14 @@ func (o *OIDC) Exchange(ctx context.Context, flow Flow, state, code string) (Cla
 		return Claims{}, fmt.Errorf("state mismatch; the login did not start here")
 	}
 
-	token, err := o.oauth.Exchange(ctx, code,
-		oauth2.SetAuthURLParam("code_verifier", flow.Verifier))
+	options := []oauth2.AuthCodeOption{oauth2.SetAuthURLParam("code_verifier", flow.Verifier)}
+	if flow.Redirect != "" {
+		// OAuth requires the exchange to repeat the redirect_uri the
+		// authorization request used, and that one may have been derived from
+		// the request rather than configured.
+		options = append(options, oauth2.SetAuthURLParam("redirect_uri", flow.Redirect))
+	}
+	token, err := o.oauth.Exchange(ctx, code, options...)
 	if err != nil {
 		return Claims{}, fmt.Errorf("exchange authorization code: %w", err)
 	}

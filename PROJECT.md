@@ -1272,7 +1272,25 @@ Changed:
     changed and links straight to it, so someone who navigated to the files is
     almost always there to read the file.
 
-45. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+45. **The issuer is passed verbatim (0.5.1)** — go-oidc compares the issuer in
+    the discovery document against the string it was given, character for
+    character. Silt was trimming the trailing slash first, and authentik both
+    publishes and prints its issuer with one. The result was a provider that
+    simply did not appear on the login screen, with the reason only in the log.
+
+    Two lessons, both applied: normalising someone else's identifier is a
+    guess, and a configured feature that silently does not appear is worse than
+    one that says why. The provider's error now reaches the login screen.
+
+46. **Setup is not always the first thing (0.5.1)** — an unclaimed built-in
+    account locks the door only when it is the only way in. With a provider
+    configured, that provider is the way in, and being forced to invent a local
+    password first is friction with no security behind it. The setup form moves
+    to the settings screen in that case, and the endpoint requires a session:
+    once something else could admit someone, an anonymous claim would be taking
+    an account that bypasses it rather than bootstrapping the only one.
+
+47. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

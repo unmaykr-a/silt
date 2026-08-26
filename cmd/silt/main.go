@@ -277,7 +277,12 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 		AllowedGroups: cfg.OIDCAllowedGroups,
 		AllowedUsers:  cfg.OIDCAllowedUsers,
 	})
+	oidcError := ""
 	if err != nil {
+		// Reported to the UI as well as the log. A provider that quietly does
+		// not appear, when you configured one, sends you looking at your
+		// authentik config rather than at the reason.
+		oidcError = err.Error()
 		log.Error("OpenID Connect is configured but unusable; that login is disabled", "error", err)
 		provider = nil
 	}
@@ -287,6 +292,7 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 		Account:        account,
 		Proxy:          proxy,
 		OIDC:           provider,
+		OIDCError:      oidcError,
 		MetricsPublic:  cfg.MetricsPublic,
 		AllowedOrigins: originsOf(cfg.BaseURL),
 	}
@@ -295,13 +301,18 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 	case !gate.Enabled():
 		log.Warn("no authentication configured; anyone who can reach this port has full read access",
 			"hint", "set SILT_LOCAL_ACCOUNT=true, SILT_OIDC_ISSUER, or SILT_TRUST_PROXY_AUTH with your reverse proxy")
-	case account.SetupRequired():
+	case account.SetupRequired() && !provider.Enabled() && !proxy.Enabled():
 		// Loud, because there is a real window here: until someone claims the
 		// account, whoever reaches the UI first gets to. Everything else is
 		// refused meanwhile, and SILT_PASSWORD_HASH removes the window
 		// entirely for anyone who would rather not have it.
 		log.Warn("waiting for setup: open Silt and choose a password",
 			"note", "until then every request is refused, and the first person to reach the UI claims the account")
+	case account.SetupRequired():
+		// No window here: something else already guards the door, so claiming
+		// the account needs a session rather than being first through it.
+		log.Info("sign in with your provider; the built-in account has no password yet",
+			"note", "set one afterwards under Settings → Security, or leave it unset")
 	default:
 		log.Info("authentication enabled",
 			"oidc", provider.Enabled(), "proxy", proxy.Enabled(), "account", account.Enabled())
@@ -312,6 +323,12 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 	}
 	if cfg.MetricsPublic {
 		log.Warn("/metrics is reachable without authentication and names every project on this host")
+	}
+	if provider.Enabled() && !provider.Configured() {
+		// Derived per request rather than pinned. It works, and it is worth
+		// knowing which URL to register with the provider.
+		log.Info("OpenID Connect callback URL is derived from each request",
+			"hint", "set SILT_BASE_URL to pin it, and register <base>/api/auth/callback with your provider")
 	}
 	return gate, nil
 }
