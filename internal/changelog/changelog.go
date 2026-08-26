@@ -39,6 +39,22 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "0.5.0",
+		Date:    "2026-08-26",
+		Summary: "A closed door on first boot, and a compose file short enough to read.",
+		Entries: []Entry{
+			{Security, "A fresh install is closed, not open. The built-in administrator exists from first boot, and the first thing Silt asks for is a password — until then every request is refused. The old default made the safe configuration the one you had to know to ask for."},
+			{Added, "The built-in account can be renamed nothing and moved nowhere, but it can be managed: change its password, link it to a provider identity so signing in there reaches the same account, or turn it off once something else can let you in."},
+			{Added, "SILT_PASSWORD_HASH now claims the account before Silt starts, which removes the first-run window entirely for anyone managing Silt declaratively. The UI then reports the password as the environment's and does not offer to change it."},
+			{Security, "Changing the password revokes every other session, so doing it because you think one leaked also ends whatever leaked."},
+			{Changed, "The compose file is short enough to read. Everything optional moved to .env, with a documented .env.example covering every setting and saying which ones need a restart."},
+			{Changed, "Opening a project's compose files shows the whole file first. You are usually there to read the compose; the timeline already answers what changed, and links straight to the diff."},
+			{Fixed, "The login screen was half-built: no way to start an OpenID Connect sign-in, and a password box on an install with no password. It now offers exactly what is configured, and says so when the answer is \"your reverse proxy should have done this\"."},
+			{Fixed, "Reloading while signed out flashed the whole application before replacing it with the login form. Silt now waits until it knows whether it is locked."},
+			{Added, "PNG renders of the mark beside the favicon, at 512 and 1024, light and dark, plus a padded tile."},
+		},
+	},
+	{
 		Version: "0.4.0",
 		Date:    "2026-08-26",
 		Summary: "Sign in with your identity provider, and a security pass over everything around it.",

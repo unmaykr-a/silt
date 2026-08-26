@@ -185,6 +185,14 @@ location / {
 
 ## Configuration
 
+Copy `.env.example` to `.env` and uncomment what you need — every setting has a working
+default, so an empty `.env` is a valid one. The compose file itself stays short enough to
+read.
+
+```sh
+cp .env.example .env
+```
+
 Environment variables are the baseline. Most of them can also be changed on the
 Settings screen, which stores the change on top of the environment and applies it
 immediately — no container recreate. Each field there says whether its value is coming
@@ -216,9 +224,16 @@ actually change:
 
 ### Signing in
 
-Three ways, tried in that order. With none of them configured Silt is **open** — the right
-default for something behind your own proxy, and warned about at startup so it is never a
-surprise.
+**A fresh install is closed.** Silt has a built-in administrator from first boot, and the
+first thing it asks for is a password. Until you set one, every request is refused — the
+UI serves only the setup form. Afterwards you can change it, link it to an identity
+provider, or turn it off, all under Settings → Security.
+
+There is a window between the container starting and someone claiming the account, the
+same one every first-run setup has. Set `SILT_PASSWORD_HASH` to claim it before Silt ever
+starts, and the window never exists.
+
+Three ways in, tried in that order:
 
 | Variable | Purpose |
 |---|---|
@@ -229,7 +244,8 @@ surprise.
 | `SILT_OIDC_GROUPS_CLAIM` / `SILT_OIDC_USERNAME_CLAIM` | Default `groups` and `preferred_username`; providers disagree. |
 | `SILT_TRUST_PROXY_AUTH` + `SILT_AUTH_HEADER` | Believe an identity your reverse proxy asserts. |
 | `SILT_TRUSTED_PROXIES` | **Set this** if you use forward auth. See below. |
-| `SILT_PASSWORD_HASH` | A bcrypt hash, as the fallback when you have neither. |
+| `SILT_PASSWORD_HASH` | Claim the built-in account before Silt starts, instead of choosing a password in the UI. |
+| `SILT_LOCAL_ACCOUNT` | `false` removes the built-in account entirely, for an install that authenticates only through a provider. |
 | `SILT_SESSION_TTL` / `SILT_SESSION_IDLE_TTL` | Default 30 days and 7 days. |
 | `SILT_METRICS_PUBLIC` | Leaves `/metrics` reachable without authentication. Off by default. |
 

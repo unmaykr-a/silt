@@ -20,3 +20,6 @@
 .DS_Store
 *.swp
 /web/src/lib/api/schema.d.ts
+
+# Local configuration, copied from .env.example.
+.env

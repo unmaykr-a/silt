@@ -56,6 +56,15 @@ type Host struct {
 	CreatedAt     int64
 }
 
+type LocalAccount struct {
+	ID           int64
+	PasswordHash string
+	Enabled      int64
+	OidcSubject  string
+	CreatedAt    int64
+	UpdatedAt    int64
+}
+
 type Project struct {
 	ID          int64
 	HostID      int64

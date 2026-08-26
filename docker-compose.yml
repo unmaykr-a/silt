@@ -1,4 +1,7 @@
-# Example Silt deployment.
+# Silt: a self-hosted change journal for Docker Compose stacks.
+#
+# Everything optional lives in .env — copy .env.example to .env and uncomment
+# what you need. This file stays short enough to read.
 #
 # The socket proxy is not optional decoration. Mounting /var/run/docker.sock:ro
 # into Silt directly would NOT be a security boundary: read-only applies to the
@@ -15,39 +18,22 @@ services:
     restart: unless-stopped
     environment:
       SILT_DOCKER_HOST: tcp://docker-socket-proxy:2375
-      # SILT_LOG_LEVEL: debug
-      # Extra environment keys to keep readable instead of redacting.
-      # SILT_KEEP_KEYS: MY_APP_REGION,APP_*
-
-      # Capture the compose and .env files themselves, so you can diff them
-      # line by line. This is an allowlist: Silt reads nothing outside it.
-      # Mount the same paths read-only below.
-      # SILT_COMPOSE_ROOTS: /srv,/opt
-
-      # Notifications. Any shoutrrr target: ntfy, Gotify, Discord, email.
-      # Kinds and severity are ANDed.
-      # SILT_NOTIFY_URLS: ntfy://ntfy.sh/my-silt-topic
-      # SILT_NOTIFY_ON: image_id,image_digest,volumes,service_removed
-      # SILT_NOTIFY_MIN_SEVERITY: medium
-      # SILT_BASE_URL: https://silt.example.com
-
-      # External events (Uptime Kuma, cron, Home Assistant). Unset, the
-      # endpoint returns 503 rather than accepting anything.
-      # SILT_INGEST_TOKEN: change-me
-
-      # Authentication. Unset, Silt is open to anyone who can reach the port.
-      # SILT_TRUST_PROXY_AUTH: "true"
-      # SILT_AUTH_HEADER: X-Remote-User
-      # SILT_PASSWORD_HASH: "$$2a$$12$$..."   # note the doubled $ for compose
+    # Everything else. required:false so a missing .env is not an error —
+    # Silt's defaults are a working install, and `cp .env.example .env` is
+    # something you do when you want to change one.
+    env_file:
+      - path: .env
+        required: false
     ports:
-      - "8375:8375"
+      - "${SILT_PORT:-8375}:8375"
     volumes:
       # Silt runs as a non-root user (uid 65532). A named volume gets the
       # ownership right without any chown on the host.
       - silt-data:/data
-      # Mount your compose directories at the same path they have on the host,
-      # so the paths in Compose's own labels resolve. Read-only: Silt never
-      # writes to them.
+      # To diff the compose files themselves, mount the directories they live
+      # in at the same path they have on the host, so the paths in Compose's
+      # own labels resolve. Read-only: Silt never writes to them. Then set
+      # SILT_COMPOSE_ROOTS in .env to the same paths.
       # - /srv:/srv:ro
       # - /opt:/opt:ro
     depends_on:

@@ -22,7 +22,10 @@
   let hashes = $state<Record<number, Record<string, string>>>({});
   let path = $state(initialPath ?? "");
   let snapshots = $state<Snapshot[]>([]);
-  let view = $state("changes");
+  // Full file first. Opening a project's compose is usually "let me read the
+  // compose", not "what changed since last time" — the timeline is already
+  // where changes are answered, and it links straight to the diff.
+  let view = $state("current");
   let error = $state<string | null>(null);
 
   let content = $state("");

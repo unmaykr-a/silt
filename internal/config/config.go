@@ -80,8 +80,17 @@ type Config struct {
 	// "reached the port" — which on a shared Docker network is every other
 	// container on it.
 	TrustedProxies []string `env:"SILT_TRUSTED_PROXIES" envSeparator:","`
-	// PasswordHash is a bcrypt hash for the fallback login.
+	// PasswordHash is a bcrypt hash for the built-in account. Setting it
+	// claims the account before Silt ever starts and takes the password out
+	// of the UI's hands, which is what someone managing Silt declaratively
+	// wants.
 	PasswordHash string `env:"SILT_PASSWORD_HASH"`
+	// LocalAccount enables the built-in administrator. On by default: the
+	// previous default left a fresh install open to anyone who could reach
+	// the port, which made the safe configuration the one you had to know to
+	// ask for. Turn it off for an install that authenticates only through a
+	// provider or a proxy.
+	LocalAccount bool `env:"SILT_LOCAL_ACCOUNT" envDefault:"true"`
 
 	// OIDCIssuer enables OpenID Connect login. Empty disables it.
 	OIDCIssuer string `env:"SILT_OIDC_ISSUER"`

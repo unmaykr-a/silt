@@ -129,6 +129,29 @@ export const api = {
     }),
   logout: () => request<{ authenticated: boolean }>("/api/logout", { method: "POST" }),
   sessions: (signal?: AbortSignal) => get<SessionCount>("/api/auth/sessions", signal),
+  setupAccount: (password: string) =>
+    request<{ authenticated: boolean }>("/api/auth/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    }),
+  changePassword: (current: string, password: string) =>
+    request<{ changed: boolean }>("/api/auth/password", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current, password }),
+    }),
+  setAccountEnabled: (enabled: boolean) =>
+    request<{ enabled: boolean }>("/api/auth/account", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+  unlinkAccount: () => request<{ linked: boolean }>("/api/auth/link", { method: "DELETE" }),
+  /** Link the built-in account to the provider identity you sign in with next. */
+  linkAccount: (next = location.pathname + location.search) => {
+    location.href = `/api/auth/link?next=${encodeURIComponent(next)}`;
+  },
   revokeSessions: () => request<{ revoked: number }>("/api/auth/sessions", { method: "DELETE" }),
   /**
    * Start the OpenID Connect flow.
