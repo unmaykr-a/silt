@@ -1157,7 +1157,37 @@ Changed:
     sidebar is projects and nothing else; and a Projects page lists every stack
     at once for when the sidebar is a scroll rather than a glance.
 
-34. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+34. **Compose files are highlighted and diffed in the browser (post-M6)** —
+    two things the server was never asked for, because neither is a fact Silt
+    records. `internal/web`'s `yaml.ts` is a hand-written tokenizer: it
+    highlights, it does not parse, and nothing downstream depends on it being
+    correct YAML, so a highlighting library and its grammar is a large
+    dependency for one panel. `linediff.ts` is the same LCS the Go side uses,
+    plus a word-level pass over the lines that changed together — which is
+    what turns "this whole line is different" into "this digest is different".
+
+    Both are pure functions with unit tests, which is why `npm run build` now
+    runs them. The tests earned their place immediately: they found `${VAR}`
+    being split into four tokens, a `#` inside a URL being read as a comment
+    start, and a "whole file" context that walked to the maximum safe integer
+    one step at a time and locked the tab.
+
+35. **Display preferences are per-browser, not per-install (post-M6)** — a
+    24-hour clock and a dd/mm/yyyy date are properties of whoever is reading
+    the screen, not of the Docker host. They live in localStorage beside the
+    theme, so two people looking at the same Silt each get their own and
+    neither can change the other's. The same store carries the navigation
+    layout: sections across the top, or stacked in a left rail. Neither is
+    right for everyone, which is what makes it a setting rather than a
+    decision.
+
+36. **The shell is a fixed-height column (post-M6)** — the rail and the content
+    scroll separately. Before this the taller of the two decided the page
+    height, so a forty-project list meant scrolling the whole document to get
+    past it, and the timeline's own scroll position was hostage to how many
+    stacks the host happened to run.
+
+37. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

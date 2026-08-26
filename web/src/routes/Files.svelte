@@ -9,6 +9,8 @@
   import { link } from "$lib/router.svelte";
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
+  import CodeLine from "$lib/components/CodeLine.svelte";
+  import { datetime } from "$lib/format";
   import { Button } from "$lib/components/ui/button";
   import * as Tabs from "$lib/components/ui/tabs";
 
@@ -240,13 +242,13 @@
       {#if view === "changes" && snapshots.length >= 2}
         <select bind:value={fromId} class="rounded-md border border-border bg-background px-2 py-1.5">
           {#each snapshots as s (s.id)}
-            <option value={s.id}>#{s.id} · {new Date(s.taken_at).toLocaleString()}</option>
+            <option value={s.id}>#{s.id} · {datetime(s.taken_at)}</option>
           {/each}
         </select>
         <span class="text-muted-foreground">→</span>
         <select bind:value={toId} class="rounded-md border border-border bg-background px-2 py-1.5">
           {#each snapshots as s (s.id)}
-            <option value={s.id}>#{s.id} · {new Date(s.taken_at).toLocaleString()}</option>
+            <option value={s.id}>#{s.id} · {datetime(s.taken_at)}</option>
           {/each}
         </select>
         <label class="flex items-center gap-2 text-muted-foreground">
@@ -306,7 +308,7 @@
                 >
                   {line.op === "insert" ? "+" : line.op === "delete" ? "−" : " "}
                 </span>
-                <span class="whitespace-pre pr-4">{line.text}</span>
+                <span class="pr-4"><CodeLine text={line.text} /></span>
               </div>
             {/each}
           {/each}
@@ -317,7 +319,7 @@
         {#each content.split("\n") as line, i (i)}
           <div class="flex font-mono text-xs leading-relaxed">
             <span class="w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50">{i + 1}</span>
-            <span class="whitespace-pre pr-4">{line}</span>
+            <span class="pr-4"><CodeLine text={line} /></span>
           </div>
         {/each}
       </div>
@@ -359,7 +361,7 @@
               <span class="w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50">
                 {line.number}
               </span>
-              <span class="min-w-0 flex-1 whitespace-pre pr-4">{line.text}</span>
+              <span class="min-w-0 flex-1 pr-4"><CodeLine text={line.text} /></span>
               {#if line.markable}
                 <span class="shrink-0 px-2 text-[10px] text-muted-foreground/60">{reasonLabel(line)}</span>
                 <!-- Visible rather than hover-only: nothing else signals that
