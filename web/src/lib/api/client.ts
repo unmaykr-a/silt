@@ -226,6 +226,15 @@ export type StreamStatus = "connecting" | "live" | "offline";
 
 export type StreamOptions = {
   /**
+   * Called on every inbound frame, heartbeat included.
+   *
+   * This is what lets the UI say "last heard from Silt 8 seconds ago" on a
+   * host where nothing is changing. Without it, a connection that has quietly
+   * wedged and one that is simply idle look identical, which is exactly how
+   * the indicator managed to lie for so long.
+   */
+  activity?: (at: number) => void;
+  /**
    * Called whenever the connection state changes.
    *
    * Without this the indicator lies. EventSource reports a drop through its
@@ -248,22 +257,38 @@ export function subscribe(
   const report = (s: StreamStatus) => {
     if (!closed) options.status?.(s);
   };
+  const seen = () => {
+    if (!closed) options.activity?.(Date.now());
+  };
   report("connecting");
 
   for (const [name, handler] of Object.entries(handlers)) {
     if (!handler) continue;
     const listener: EventListener = (ev) => {
+      seen();
       try {
         handler(JSON.parse((ev as MessageEvent).data));
       } catch {
-        // A malformed frame should not take down the subscription.
+        // A malformed frame should not take down the subscription. It still
+        // counts as activity: something answered.
       }
     };
     source.addEventListener(name, listener);
     listeners.push([name, listener]);
   }
 
-  const onOpen: EventListener = () => report("live");
+  // Frames Silt sends that carry no payload for a caller, but do prove the
+  // connection is alive. Subscribed unconditionally so activity is reported
+  // whether or not anyone asked for these by name.
+  const onKeepalive: EventListener = () => seen();
+  source.addEventListener("heartbeat", onKeepalive);
+  source.addEventListener("ready", onKeepalive);
+  listeners.push(["heartbeat", onKeepalive], ["ready", onKeepalive]);
+
+  const onOpen: EventListener = () => {
+    seen();
+    report("live");
+  };
   const onError: EventListener = () => {
     // EventSource retries by itself unless it has given up for good, so a
     // CLOSED readyState is the only genuinely terminal case.

@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/unmaykr-a/silt/internal/store"
 )
 
 // The fleet view.
@@ -45,6 +47,13 @@ type overviewProject struct {
 	// containers, counted since each container was created — the number
 	// `docker ps` shows, not a rate.
 	MaxRestartCount int `json:"max_restart_count"`
+	// RestartedAt is when the stack last actually restarted, or absent if it
+	// never has. RecentRestarts says whether that is recent enough to still
+	// count as something to look at: Docker's counter never resets, so a
+	// single blip months ago would otherwise pin a stack to the attention
+	// list forever.
+	RestartedAt    int64 `json:"restarted_at,omitempty"`
+	RecentRestarts bool  `json:"recent_restarts"`
 
 	Drift bool `json:"drift"`
 	// Attention is computed here rather than in the browser so the API and the
@@ -99,6 +108,10 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One clock for the whole response, so two projects cannot land on
+	// opposite sides of the restart window inside a single render.
+	now := store.Now()
+
 	out := overviewResponse{Projects: make([]overviewProject, 0, len(rows))}
 	for _, p := range rows {
 		item := overviewProject{
@@ -119,6 +132,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 			Crashed:         p.Crashed,
 			OOMKilled:       p.OOMKilled,
 			MaxRestartCount: p.MaxRestartCount,
+			RestartedAt:     p.RestartedAt,
+			RecentRestarts:  p.RestartsAreRecent(now),
 			Drift:           p.Drift,
 			Attention:       p.Attention(),
 		}
@@ -143,7 +158,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		if p.Drift {
 			out.Totals.Drift++
 		}
-		if p.MaxRestartCount > 0 {
+		if p.RestartsAreRecent(now) {
 			out.Totals.Restarts++
 		}
 		if p.Attention() {

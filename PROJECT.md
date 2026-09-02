@@ -620,6 +620,7 @@ GET  /api/timeline?from=&to=&project=&bucket=  -- merged, bucketed snapshots + e
 GET  /api/search?q=                        -- projects, services, env keys, files, events
 GET  /api/overview                         -- every project with its current state
 GET  /api/audit?before=&limit=             -- who changed Silt itself
+SSE  heartbeat                             -- named, every 20s, so idle != wedged
 GET  /api/stream                           -- SSE: snapshot.changed, event
 POST /api/ingest                           -- generic external event webhook
 GET  /healthz  /readyz  /metrics
@@ -1526,7 +1527,56 @@ Changed:
     actor at all rather than inventing "admin", which would read as a real
     account on a Silt where anyone who can reach the port is one.
 
-66. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+66. **"Already covered by the docker event" was not (0.10.0)** — the
+    collector broadcast only on `ConfigChanged`, with a comment reasoning that
+    runtime changes are covered by the Docker events that caused them. True
+    when the UI showed configuration. False from 0.7.0, when the project
+    screens began showing running counts, unhealthy and restarting.
+
+    Wrong in two independent ways. **Ordering**: the Docker event is published
+    the instant it arrives, but the snapshot it triggers is written after the
+    two-second coalescing window — a browser refetching on that event reads
+    the state from *before* the change, and nothing ever tells it to look
+    again. **Coverage**: the interval sweep emits no Docker event at all, so a
+    health flip it found was invisible until reload.
+
+    The rule is now `shouldBroadcast(result)`, named and tested, because
+    getting it wrong is invisible: the page simply shows yesterday and nobody
+    notices until they reload. A touched snapshot stays silent — on an idle
+    host of forty projects that would be one message per project per interval
+    to say nothing happened.
+
+67. **A keep-alive nobody can see (0.10.0)** — the SSE heartbeat was a comment
+    frame. That does stop a proxy culling an idle connection, which was the
+    job, but EventSource discards comments without telling anyone. So a live
+    connection with nothing happening and one that had quietly wedged looked
+    identical from the browser, which is the same blind spot that let the
+    indicator lie in 0.9.0. It is a named event now, and the menu reports both
+    "last heard from Silt" and "last change" — an idle host is silent about
+    changes for hours and must still be able to prove it is being watched.
+
+68. **A restart is news for a day (0.10.0)** — Docker's `restart_count` never
+    resets, so a container that blipped once three months ago and has been up
+    ever since kept its stack in the attention list forever. A list that is
+    permanently non-empty is one people stop reading.
+
+    The window needs no history query and no counter arithmetic. For a
+    container with restarts, `started_at` *is* the moment of its last one — it
+    has been up continuously since — so the age of that timestamp says whether
+    the count still means anything. Containers that never restarted contribute
+    nothing, or one long-running stack would make every restart look ancient.
+    The raw count stays true and stays on screen in grey; the service page is
+    where you go to ask about the past.
+
+69. **One segmented control, and it slides (0.10.0)** — there were four
+    hand-rolled ones, each moving its highlight by simply appearing somewhere
+    else. A marker that jumps gives no sense of which way you went. It is one
+    absolutely-positioned element measured from the selected button, because
+    only one element can animate between two positions, and it is hidden until
+    measured — sliding in from 0,0 on first paint reads as a glitch rather
+    than as motion. `motion-reduce` turns it off.
+
+70. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

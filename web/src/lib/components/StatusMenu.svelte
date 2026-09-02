@@ -2,6 +2,7 @@
   import { api, type AuthState, type StreamStatus, type VersionInfo } from "$lib/api/client";
   import { theme, type Theme } from "$lib/theme.svelte";
   import Menu from "./Menu.svelte";
+  import Segmented from "./Segmented.svelte";
   import SiltMark from "./SiltMark.svelte";
   import Timestamp from "./Timestamp.svelte";
 
@@ -20,6 +21,8 @@
   let {
     status,
     since,
+    lastFrameAt,
+    lastChangeAt,
     auth,
     onSignOut,
     onShowChangelog,
@@ -27,6 +30,10 @@
     status: StreamStatus;
     /** When the current status began, so "live" can say for how long. */
     since: number;
+    /** When Silt last said anything at all, heartbeat included. */
+    lastFrameAt: number;
+    /** When Silt last said something had changed. Zero if not yet. */
+    lastChangeAt: number;
     auth: AuthState | null;
     onSignOut: () => void;
     onShowChangelog: () => void;
@@ -97,11 +104,34 @@
         <div class="min-w-0">
           <p class="text-sm">{headline}</p>
           <p class="mt-0.5 text-xs text-muted-foreground">{detail}</p>
-          {#if status === "live"}
-            <p class="mt-0.5 text-xs text-muted-foreground/70">
-              connected <Timestamp ts={since} />
-            </p>
-          {/if}
+          <!-- Two different questions, and the second is why this is here at
+               all. An idle host is silent about changes for hours; without a
+               "last heard from" line there is no way to tell that apart from a
+               connection that has quietly stopped, which is precisely how the
+               indicator managed to lie. Silt sends a heartbeat every 20s, so
+               this figure should never read older than that. -->
+          <dl class="mt-1.5 space-y-0.5 text-xs text-muted-foreground/70">
+            {#if status === "live"}
+              <div class="flex gap-1.5">
+                <dt>connected</dt>
+                <dd><Timestamp ts={since} /></dd>
+              </div>
+            {/if}
+            <div class="flex gap-1.5">
+              <dt>last heard from Silt</dt>
+              <dd><Timestamp ts={lastFrameAt} /></dd>
+            </div>
+            <div class="flex gap-1.5">
+              <dt>last change</dt>
+              <dd>
+                {#if lastChangeAt}
+                  <Timestamp ts={lastChangeAt} />
+                {:else}
+                  none since this page opened
+                {/if}
+              </dd>
+            </div>
+          </dl>
         </div>
       </div>
     </div>
@@ -111,21 +141,12 @@
          light-or-dark forever is what the toggle silently did. -->
     <div class="border-b border-border px-3 py-2.5">
       <p class="mb-1.5 text-xs text-muted-foreground">Theme</p>
-      <div class="flex rounded-md border border-border" role="group" aria-label="Theme">
-        {#each THEMES as option (option.value)}
-          <button
-            type="button"
-            onclick={() => theme.set(option.value)}
-            aria-pressed={theme.value === option.value}
-            class="flex-1 px-2 py-1.5 text-xs transition-colors first:rounded-l-md last:rounded-r-md
-                   {theme.value === option.value
-              ? 'bg-secondary text-secondary-foreground'
-              : 'text-muted-foreground hover:text-foreground'}"
-          >
-            {option.label}
-          </button>
-        {/each}
-      </div>
+      <Segmented
+        label="Theme"
+        options={THEMES}
+        value={theme.value}
+        onchange={(next) => theme.set(next)}
+      />
     </div>
 
     <!-- Version. The release leads; the build stamp is what you quote in a

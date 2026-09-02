@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/unmaykr-a/silt/internal/compose"
 	"github.com/unmaykr-a/silt/internal/store"
@@ -261,3 +262,81 @@ func TestOverviewDeliberatelyStoppedWantsNoAttention(t *testing.T) {
 }
 
 func intp(v int) *int { return &v }
+
+// Docker's restart counter never resets, so without a window a single blip
+// months ago pins its stack to the attention list forever — and a list that is
+// permanently non-empty is one people stop reading.
+func TestOverviewRestartsGoStale(t *testing.T) {
+	now := store.Now()
+	day := (24 * time.Hour).Milliseconds()
+
+	cases := []struct {
+		name          string
+		restarts      int
+		startedAt     int64
+		wantRecent    bool
+		wantAttention bool
+	}{
+		{
+			name: "restarted an hour ago",
+			// A container with restart_count > 0 has been up since its last
+			// restart, so started_at is when that restart happened.
+			restarts: 3, startedAt: now - day/24, wantRecent: true, wantAttention: true,
+		},
+		{
+			name:     "restarted a week ago and stable since",
+			restarts: 3, startedAt: now - 7*day, wantRecent: false, wantAttention: false,
+		},
+		{
+			name:     "restarted just inside the window",
+			restarts: 1, startedAt: now - day + 60_000, wantRecent: true, wantAttention: true,
+		},
+		{
+			name:     "restarted just outside it",
+			restarts: 1, startedAt: now - day - 60_000, wantRecent: false, wantAttention: false,
+		},
+		{
+			name: "never restarted, deployed long ago",
+			// started_at is old, but it is a deploy time, not a restart.
+			restarts: 0, startedAt: now - 90*day, wantRecent: false, wantAttention: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, r := openTestStore(t)
+			id := newProject(t, db)
+			writeSnap(t, db, id, observation(t, r, serviceOpts{
+				state: "running", health: "healthy",
+				restartCount: tc.restarts, startedAt: tc.startedAt,
+			}))
+
+			got := overviewOf(t, db, "media")
+			if got.RestartsAreRecent(now) != tc.wantRecent {
+				t.Errorf("recent = %v, want %v (count %d, started %d ago)",
+					got.RestartsAreRecent(now), tc.wantRecent, got.MaxRestartCount, now-got.RestartedAt)
+			}
+			if got.Attention() != tc.wantAttention {
+				t.Errorf("attention = %v, want %v", got.Attention(), tc.wantAttention)
+			}
+			// The raw count stays true whatever the window says; the service
+			// page is where you go to ask about the past.
+			if got.MaxRestartCount != tc.restarts {
+				t.Errorf("count = %d, want %d", got.MaxRestartCount, tc.restarts)
+			}
+		})
+	}
+}
+
+// A container that has never restarted must not contribute its deploy time,
+// or one long-running stack would make every restart look ancient.
+func TestOverviewRestartedAtIgnoresContainersThatNeverRestarted(t *testing.T) {
+	db, r := openTestStore(t)
+	id := newProject(t, db)
+	writeSnap(t, db, id, observation(t, r, serviceOpts{
+		state: "running", restartCount: 0, startedAt: store.Now() - 1000,
+	}))
+	if got := overviewOf(t, db, "media"); got.RestartedAt != 0 {
+		t.Errorf("restarted_at = %d for a container that never restarted", got.RestartedAt)
+	}
+}

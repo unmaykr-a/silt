@@ -5,6 +5,7 @@
   import Empty from "$lib/components/Empty.svelte";
   import { clockTime, datetime, dateOnly, relative } from "$lib/format";
   import { clock } from "$lib/clock.svelte";
+  import Segmented from "$lib/components/Segmented.svelte";
 
   let { reloadKey, projects: knownProjects }: { reloadKey: number; projects: Project[] } = $props();
 
@@ -188,22 +189,17 @@
 
 <div class="space-y-4">
   <div class="flex flex-wrap items-center gap-2">
-    <div class="flex rounded-md border border-border">
-      {#each RANGES as range (range.label)}
-        <button
-          class="px-2.5 py-1.5 text-xs transition-colors first:rounded-l-md last:rounded-r-md
-                 {!zoom && rangeMs === range.ms
-            ? 'bg-secondary text-secondary-foreground'
-            : 'text-muted-foreground hover:text-foreground'}"
-          onclick={() => {
-            zoom = null;
-            rangeMs = range.ms;
-          }}
-        >
-          {range.label}
-        </button>
-      {/each}
-    </div>
+    <!-- While a window is dragged out on the strip, no range is the selected
+         one: the marker would otherwise claim a range that is not in effect. -->
+    <Segmented
+      label="Time range"
+      value={zoom ? "" : String(rangeMs)}
+      options={RANGES.map((r) => ({ value: String(r.ms), label: r.label }))}
+      onchange={(next) => {
+        zoom = null;
+        rangeMs = Number(next);
+      }}
+    />
 
     {#if zoom}
       <button

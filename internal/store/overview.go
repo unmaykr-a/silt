@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // The fleet view: every project on a host, with enough state to answer "which
@@ -65,11 +66,19 @@ type ProjectOverview struct {
 
 	// MaxRestartCount is the highest restart count among the stack's
 	// containers, as Docker reports it: restarts since that container was
-	// created. It is not a rate and not a window — a container recreated by
-	// `up` starts again at zero, so any "restarts in the last day" derived
-	// from these counters would go negative exactly when a stack was
+	// created. It is not a rate — a container recreated by `up` starts again
+	// at zero, so a "restarts in the last day" derived by subtracting two
+	// observations of this counter would go negative exactly when a stack was
 	// redeployed.
 	MaxRestartCount int
+	// RestartedAt is when the stack last actually restarted, or zero if it
+	// never has.
+	//
+	// For a container with restart_count > 0, Docker's started_at *is* the
+	// moment of its last restart: it has been up continuously since then. So
+	// the age of that timestamp says whether the count still means anything,
+	// with no history query and no counter arithmetic to go wrong.
+	RestartedAt int64
 
 	// Drift means the compose files on disk differ from the ones that were in
 	// place the last time the running configuration actually changed: someone
@@ -98,7 +107,30 @@ type ProjectOverview struct {
 // that will land at the next unrelated restart, hours or weeks later.
 func (p ProjectOverview) Attention() bool {
 	return p.Unhealthy > 0 || p.Crashed > 0 || p.OOMKilled > 0 ||
-		p.Restarting > 0 || p.Drift || p.MaxRestartCount > 0
+		p.Restarting > 0 || p.Drift || p.RestartsAreRecent(Now())
+}
+
+// RestartWindow is how long a restart stays interesting.
+//
+// A container that restarted once and has been up ever since is not a problem
+// to go and look at; it was one, briefly, and it recovered. Docker's counter
+// never resets, so without a window a single blip three months ago pins its
+// stack to the attention list forever — and a list that is permanently
+// non-empty is one people stop reading.
+//
+// A day is the line: long enough that a restart during the night is still
+// waiting for you in the morning, short enough that last week is history. The
+// full count and every restart Silt has seen remain on the service page, which
+// is where you go when you are asking about the past rather than about now.
+const RestartWindow = 24 * time.Hour
+
+// RestartsAreRecent reports whether this stack's restarts are recent enough to
+// still count as something to look at.
+func (p ProjectOverview) RestartsAreRecent(now int64) bool {
+	if p.MaxRestartCount == 0 || p.RestartedAt == 0 {
+		return false
+	}
+	return now-p.RestartedAt < RestartWindow.Milliseconds()
 }
 
 // Overview reads every project on a host with its current state.
@@ -203,7 +235,7 @@ func (s *Store) overviewServiceCounts(ctx context.Context, ids []int64, bySnapsh
 			args[i] = id
 		}
 		query := `
-			SELECT snapshot_id, state, health, restart_count, exit_code, oom_killed
+			SELECT snapshot_id, state, health, restart_count, exit_code, oom_killed, started_at
 			FROM service_states
 			WHERE snapshot_id IN (?` + strings.Repeat(",?", len(batch)-1) + `)`
 
@@ -223,9 +255,9 @@ func (s *Store) scanServiceCounts(ctx context.Context, query string, args []any,
 
 	for rows.Next() {
 		var snapshotID, restarts, oomKilled int64
-		var exitCode sql.NullInt64
+		var exitCode, startedAt sql.NullInt64
 		var state, health string
-		if err := rows.Scan(&snapshotID, &state, &health, &restarts, &exitCode, &oomKilled); err != nil {
+		if err := rows.Scan(&snapshotID, &state, &health, &restarts, &exitCode, &oomKilled, &startedAt); err != nil {
 			return fmt.Errorf("scan service count: %w", err)
 		}
 		p := bySnapshot[snapshotID]
@@ -265,6 +297,12 @@ func (s *Store) scanServiceCounts(ctx context.Context, query string, args []any,
 
 		if int(restarts) > p.MaxRestartCount {
 			p.MaxRestartCount = int(restarts)
+		}
+		// The latest restart in the stack. Only containers that have actually
+		// restarted contribute: for the rest, started_at is when they were
+		// deployed, which says nothing about restarts.
+		if restarts > 0 && startedAt.Valid && startedAt.Int64 > p.RestartedAt {
+			p.RestartedAt = startedAt.Int64
 		}
 	}
 	return rows.Err()

@@ -5,6 +5,26 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.10.0 — 2026-09-02
+
+Live updates actually arrive, restarts stop mattering forever, and things move.
+
+### Added
+
+- The status menu says when Silt was last heard from, and when it last reported a change. Two different questions: an idle host is silent about changes for hours and should still be able to prove it is being watched.
+- Each project has its own activity graph, over 24 hours to 90 days. The fleet timeline answers what happened on the host; standing on a project and having to go back and filter to ask it about the one stack in front of you was the gap.
+- Selection markers slide. Time ranges, project sort, theme and the new project range all share one segmented control whose highlight moves between options instead of appearing somewhere else — a marker that jumps gives no sense of which way you went.
+
+### Changed
+
+- The keep-alive frame is a named event rather than an SSE comment. A comment stops proxies closing an idle connection, which was its job, but browsers discard it without telling anyone — so a live-but-quiet connection and a wedged one looked identical, which is how the indicator managed to lie.
+- Restarts stop counting after a day. Docker's counter never resets, so one blip three months ago pinned its stack to the attention list forever, and a list that is permanently non-empty is one people stop reading. The count is still shown, in grey, with when it last happened; the service page keeps the full history.
+
+### Fixed
+
+- Live updates did not reach the project screens. Silt broadcast only when a project's *configuration* changed, on the reasoning that a runtime change is already covered by the Docker event that caused it. That held while the UI showed configuration; it stopped holding when the project screens started showing running counts, unhealthy and restarting. It was wrong twice: the Docker event goes out immediately but the snapshot it triggers is written two seconds later, so a browser refetching on it read the state from before the change — and the interval sweep emits no Docker event at all. Silt now broadcasts after any snapshot it actually wrote.
+- A service page never live-updated at all; it was the one screen the refresh key was not wired into.
+
 ## 0.9.0 — 2026-09-02
 
 A header with two controls instead of five, and a record of who changed Silt.
