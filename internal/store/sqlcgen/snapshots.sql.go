@@ -77,8 +77,9 @@ func (q *Queries) InsertEnvKey(ctx context.Context, arg InsertEnvKeyParams) erro
 const insertServiceState = `-- name: InsertServiceState :exec
 INSERT INTO service_states (
   snapshot_id, service, container_id, container_name, image_ref, image_id,
-  image_digest, image_created_at, state, health, restart_count, started_at, inspect_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  image_digest, image_created_at, state, health, restart_count, started_at, inspect_hash,
+  exit_code, oom_killed
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertServiceStateParams struct {
@@ -95,6 +96,8 @@ type InsertServiceStateParams struct {
 	RestartCount   int64
 	StartedAt      *int64
 	InspectHash    sql.NullString
+	ExitCode       sql.NullInt64
+	OomKilled      int64
 }
 
 func (q *Queries) InsertServiceState(ctx context.Context, arg InsertServiceStateParams) error {
@@ -112,6 +115,8 @@ func (q *Queries) InsertServiceState(ctx context.Context, arg InsertServiceState
 		arg.RestartCount,
 		arg.StartedAt,
 		arg.InspectHash,
+		arg.ExitCode,
+		arg.OomKilled,
 	)
 	return err
 }
@@ -292,7 +297,7 @@ func (q *Queries) ListEnvKeys(ctx context.Context, snapshotID int64) ([]EnvKey, 
 }
 
 const listServiceStates = `-- name: ListServiceStates :many
-SELECT id, snapshot_id, service, container_id, container_name, image_ref, image_id, image_digest, image_created_at, state, health, restart_count, started_at, inspect_hash FROM service_states WHERE snapshot_id = ? ORDER BY service
+SELECT id, snapshot_id, service, container_id, container_name, image_ref, image_id, image_digest, image_created_at, state, health, restart_count, started_at, inspect_hash, exit_code, oom_killed FROM service_states WHERE snapshot_id = ? ORDER BY service
 `
 
 func (q *Queries) ListServiceStates(ctx context.Context, snapshotID int64) ([]ServiceState, error) {
@@ -319,6 +324,8 @@ func (q *Queries) ListServiceStates(ctx context.Context, snapshotID int64) ([]Se
 			&i.RestartCount,
 			&i.StartedAt,
 			&i.InspectHash,
+			&i.ExitCode,
+			&i.OomKilled,
 		); err != nil {
 			return nil, err
 		}
@@ -517,6 +524,8 @@ SELECT
   service_states.state,
   service_states.health,
   service_states.restart_count,
+  service_states.exit_code,
+  service_states.oom_killed,
   service_states.inspect_hash
 FROM service_states
 JOIN snapshots ON snapshots.id = service_states.snapshot_id
@@ -542,6 +551,8 @@ type ServiceHistoryRow struct {
 	State         string
 	Health        string
 	RestartCount  int64
+	ExitCode      sql.NullInt64
+	OomKilled     int64
 	InspectHash   sql.NullString
 }
 
@@ -566,6 +577,8 @@ func (q *Queries) ServiceHistory(ctx context.Context, arg ServiceHistoryParams) 
 			&i.State,
 			&i.Health,
 			&i.RestartCount,
+			&i.ExitCode,
+			&i.OomKilled,
 			&i.InspectHash,
 		); err != nil {
 			return nil, err

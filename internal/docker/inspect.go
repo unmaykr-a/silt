@@ -65,6 +65,16 @@ type RuntimeState struct {
 	Health        string
 	RestartCount  int
 	StartedAt     *int64 // unix ms
+
+	// ExitCode is why a container is not running, and is the difference
+	// between "you stopped this" and "this died". Docker reports it for a
+	// running container too, as the code of the previous run, so it is only
+	// meaningful once State is exited or dead — the store records it as NULL
+	// otherwise rather than storing a number that means nothing.
+	ExitCode *int
+	// OOMKilled distinguishes the most common cause of a 137 from a plain
+	// SIGKILL, which are the same exit code and very different problems.
+	OOMKilled bool
 }
 
 // Inspect reads one container and returns the normalised subset.
@@ -216,6 +226,14 @@ func normaliseInspect(raw container.InspectResponse) Inspected {
 		out.Runtime.RestartCount = raw.RestartCount
 		if raw.State.Health != nil {
 			out.Runtime.Health = raw.State.Health.Status
+		}
+		// Only for a container that has actually stopped. While one is
+		// running, Docker still reports the previous run's exit code, and
+		// showing that as the current state is worse than showing nothing.
+		if raw.State.Status == "exited" || raw.State.Status == "dead" {
+			code := raw.State.ExitCode
+			out.Runtime.ExitCode = &code
+			out.Runtime.OOMKilled = raw.State.OOMKilled
 		}
 		if t, err := time.Parse(time.RFC3339Nano, raw.State.StartedAt); err == nil && !t.IsZero() {
 			ms := t.UnixMilli()

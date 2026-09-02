@@ -36,6 +36,8 @@ type serviceOpts struct {
 	health       string
 	restartCount int
 	startedAt    int64
+	exitCode     *int
+	oomKilled    bool
 }
 
 func observation(t *testing.T, r *redact.Redactor, opts serviceOpts) compose.Observation {
@@ -66,6 +68,8 @@ func observation(t *testing.T, r *redact.Redactor, opts serviceOpts) compose.Obs
 					Health:       opts.health,
 					RestartCount: opts.restartCount,
 					StartedAt:    &started,
+					ExitCode:     opts.exitCode,
+					OOMKilled:    opts.oomKilled,
 				},
 			},
 		}},

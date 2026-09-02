@@ -3,6 +3,7 @@
   import { link } from "$lib/router.svelte";
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
+  import type { StateKey } from "$lib/servicestate";
 
   // The fleet view.
   //
@@ -13,7 +14,18 @@
   // apply. Everything else is secondary to that.
   let { reloadKey }: { reloadKey: number } = $props();
 
-  type Lens = "all" | "attention" | "unhealthy" | "stopped" | "drift" | "restarts";
+  // One lens per failure mode, because they are different failure modes.
+  // "not running" used to cover all of them, which meant a container someone
+  // stopped on purpose and a container in a crash loop were the same filter.
+  type Lens =
+    | "all"
+    | "attention"
+    | "unhealthy"
+    | "crashed"
+    | "restarting"
+    | "stopped"
+    | "drift"
+    | "restarts";
 
   let data = $state<Overview | null>(null);
   let error = $state<string | null>(null);
@@ -49,21 +61,34 @@
         return p.attention;
       case "unhealthy":
         return p.unhealthy > 0;
+      case "crashed":
+        return p.crashed > 0 || p.oom_killed > 0;
+      case "restarting":
+        return p.restarting > 0;
       case "stopped":
         return p.stopped > 0;
       case "drift":
         return p.drift;
       case "restarts":
-        return p.restarts > 0;
+        return p.max_restart_count > 0;
       default:
         return true;
     }
   }
 
-  // Severity order for the default sort: the thing that is actually broken
-  // outranks the thing that merely will be.
+  // Severity order. A container that is up and answering wrongly outranks one
+  // that crashed, which outranks a loop, which outranks an edit nobody has
+  // applied. A container stopped on purpose scores nothing at all: it is a
+  // state, not a fault, and sorting it above a healthy stack would be noise.
   function weight(p: ProjectOverview): number {
-    return p.unhealthy * 1000 + p.stopped * 100 + (p.drift ? 10 : 0) + (p.restarts > 0 ? 1 : 0);
+    return (
+      p.unhealthy * 10_000 +
+      p.oom_killed * 5_000 +
+      p.crashed * 1_000 +
+      p.restarting * 100 +
+      (p.drift ? 10 : 0) +
+      (p.max_restart_count > 0 ? 1 : 0)
+    );
   }
 
   const shown = $derived.by(() => {
@@ -90,19 +115,88 @@
 
   const stats = $derived.by(() => {
     if (!totals) return [];
+    // Each chip names one thing. "Not running" covered four of them and so
+    // named none of them. Counts are containers except where the label says
+    // stacks: drift and restart history belong to a project, not a container.
     return [
-      { key: "attention" as Lens, label: "need attention", count: totals.attention, tone: "amber" },
+      { key: "attention" as Lens, label: "stacks need attention", count: totals.attention, tone: "amber" },
       { key: "unhealthy" as Lens, label: "unhealthy", count: totals.unhealthy, tone: "red" },
-      { key: "stopped" as Lens, label: "not running", count: totals.stopped, tone: "red" },
-      { key: "restarts" as Lens, label: "restarting", count: totals.restarts, tone: "amber" },
-      { key: "drift" as Lens, label: "unapplied edits", count: totals.drift, tone: "sky" },
+      { key: "crashed" as Lens, label: "crashed", count: totals.crashed, tone: "orange" },
+      { key: "restarting" as Lens, label: "restarting", count: totals.restarting, tone: "amber" },
+      // Grey and last: a container someone stopped is a state, not a fault.
+      { key: "stopped" as Lens, label: "stopped", count: totals.stopped - totals.crashed, tone: "zinc" },
+      { key: "drift" as Lens, label: "stacks with unapplied edits", count: totals.drift, tone: "sky" },
     ].filter((s) => s.count > 0);
   });
 
+  // What is wrong with this stack, as separate badges rather than one number.
+  // Colour comes from the shared vocabulary so a badge here and a dot on the
+  // service page mean the same thing.
+  type Badge = { label: string; title: string; class: string };
+
+  function badges(p: ProjectOverview): Badge[] {
+    const out: Badge[] = [];
+    const chip = (key: StateKey, label: string, title: string) => {
+      const tone = {
+        unhealthy: "bg-red-500/10 text-red-600 dark:text-red-400",
+        oom: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
+        crashed: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+        restarting: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        stopped: "bg-secondary text-muted-foreground",
+        paused: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+        starting: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+        running: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        unknown: "bg-secondary text-muted-foreground",
+      }[key];
+      out.push({ label, title, class: tone });
+    };
+
+    if (p.unhealthy > 0) {
+      chip("unhealthy", `${p.unhealthy} unhealthy`, "Running, but failing a healthcheck.");
+    }
+    if (p.oom_killed > 0) {
+      chip("oom", `${p.oom_killed} OOM-killed`, "Killed by the kernel for exceeding a memory limit.");
+    }
+    // An OOM kill is already counted as crashed; showing both would double-count.
+    const crashed = p.crashed - p.oom_killed;
+    if (crashed > 0) {
+      chip("crashed", `${crashed} crashed`, "Stopped with a non-zero exit code. Nobody asked it to.");
+    }
+    if (p.restarting > 0) {
+      chip("restarting", `${p.restarting} restarting`, "In a restart loop, or coming back up.");
+    }
+    // Deliberately last and deliberately grey: a container someone stopped is
+    // a state, not a fault.
+    const stopped = p.stopped - p.crashed;
+    if (stopped > 0) {
+      chip("stopped", `${stopped} stopped`, "Exited cleanly. Nothing went wrong.");
+    }
+    if (p.paused > 0) {
+      chip("paused", `${p.paused} paused`, "Suspended with docker pause.");
+    }
+    if (p.max_restart_count > 0) {
+      chip(
+        "restarting",
+        `${p.max_restart_count} restarts`,
+        "Highest restart count in this stack, since the container was created.",
+      );
+    }
+    if (p.drift) {
+      out.push({
+        label: "unapplied edit",
+        title: "A compose file on disk differs from the one that was applied.",
+        class: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+      });
+    }
+    return out;
+  }
+
   const toneClass: Record<string, string> = {
     red: "text-red-600 dark:text-red-400",
+    orange: "text-orange-600 dark:text-orange-400",
     amber: "text-amber-600 dark:text-amber-400",
     sky: "text-sky-600 dark:text-sky-400",
+    zinc: "text-muted-foreground",
   };
 </script>
 
@@ -219,43 +313,30 @@
               {/if}
             </div>
 
-            <!-- The state line: running counts first, then only the badges
-                 that are non-zero. A row of zeroes reads as noise and hides
-                 the one card that is not fine. -->
-            <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <!-- The state line. Each failure mode gets its own badge and its
+                 own colour: an unhealthy container is running and answering
+                 wrongly, a crashed one is not running, and a container someone
+                 stopped is neither. One red count for all three said nothing.
+                 Only non-zero badges are drawn — a row of zeroes is noise that
+                 hides the one card that is not fine. -->
+            <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
               {#if project.services === 0}
                 <span class="text-muted-foreground">no containers observed</span>
               {:else}
                 <span
-                  class="font-mono tabular-nums {project.stopped > 0
-                    ? 'text-red-600 dark:text-red-400'
-                    : 'text-emerald-600 dark:text-emerald-400'}"
+                  class="mr-1 font-mono tabular-nums {project.running === project.services
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-muted-foreground'}"
+                  title="{project.running} of {project.services} containers running"
                 >
                   {project.running}/{project.services}
                 </span>
-                <span class="text-muted-foreground">running</span>
               {/if}
-              {#if project.unhealthy > 0}
-                <span class="rounded bg-red-500/10 px-1.5 py-0.5 text-[11px] text-red-600 dark:text-red-400">
-                  {project.unhealthy} unhealthy
+              {#each badges(project) as badge (badge.label)}
+                <span class="rounded px-1.5 py-0.5 text-[11px] {badge.class}" title={badge.title}>
+                  {badge.label}
                 </span>
-              {/if}
-              {#if project.restarts > 0}
-                <span
-                  class="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-600 dark:text-amber-400"
-                  title="Highest restart count in this stack, since the container was created"
-                >
-                  {project.restarts} restarts
-                </span>
-              {/if}
-              {#if project.drift}
-                <span
-                  class="rounded bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-600 dark:text-sky-400"
-                  title="A compose file on disk differs from the one that was applied"
-                >
-                  unapplied edit
-                </span>
-              {/if}
+              {/each}
             </div>
 
             {#if project.working_dir}

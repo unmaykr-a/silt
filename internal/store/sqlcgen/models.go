@@ -103,6 +103,8 @@ type ServiceState struct {
 	RestartCount   int64
 	StartedAt      *int64
 	InspectHash    sql.NullString
+	ExitCode       sql.NullInt64
+	OomKilled      int64
 }
 
 type Session struct {

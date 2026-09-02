@@ -1218,6 +1218,13 @@ components:
         health: { type: string }
         restart_count: { type: integer, format: int64 }
         started_at: { type: integer, format: int64 }
+        exit_code:
+          type: integer
+          format: int64
+          description: >-
+            Present only when this container had stopped. Absent means "did not
+            exit", not "exited cleanly".
+        oom_killed: { type: boolean }
 
     SnapshotDetail:
       allOf:
@@ -1338,6 +1345,19 @@ components:
         state: { type: string }
         health: { type: string }
         restart_count: { type: integer, format: int64 }
+        exit_code:
+          type: integer
+          format: int64
+          description: >-
+            Present only for an observation where the container had stopped.
+            Absent means "did not exit", not "exited cleanly" — Docker reports
+            the previous run's code while a container is up, and rendering that
+            as the current state says the wrong thing about a healthy service.
+        oom_killed:
+          type: boolean
+          description: >-
+            The kernel killed it for memory. Its own field because an OOM kill
+            and a `docker kill` are both exit code 137.
 
     EnvKeyChange:
       type: object
@@ -1372,7 +1392,8 @@ components:
       type: object
       required:
         [id, name, archived, last_seen_at, services, running, stopped,
-         unhealthy, restarts, drift, attention]
+         restarting, paused, starting, unhealthy, crashed, oom_killed,
+         max_restart_count, drift, attention]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -1390,14 +1411,36 @@ components:
         snapshot_id: { type: integer, format: int64 }
         services: { type: integer }
         running: { type: integer }
-        stopped: { type: integer }
+        stopped:
+          type: integer
+          description: >-
+            Containers that are exited or dead. Kept apart from restarting and
+            paused: a container someone stopped on purpose and a container in a
+            crash loop have nothing in common except that neither is running.
+        restarting: { type: integer, description: Crash-looping, or coming back up. }
+        paused: { type: integer, description: Deliberately suspended. }
+        starting:
+          type: integer
+          description: >-
+            Created, or running with a healthcheck that has not passed yet.
         unhealthy:
           type: integer
           description: >-
-            Containers reporting an unhealthy healthcheck. A container with no
-            healthcheck reports an empty health and is not counted: that is not
-            the same as failing one.
-        restarts:
+            Running containers whose healthcheck is failing — the process is up
+            and answering wrongly, which is not the same failure as not running
+            at all. A container with no healthcheck reports an empty health and
+            is not counted: that is not the same as failing one.
+        crashed:
+          type: integer
+          description: >-
+            Stopped containers with a non-zero exit code — the ones nobody
+            asked to stop.
+        oom_killed:
+          type: integer
+          description: >-
+            Containers the kernel killed for memory. Not derivable from the
+            exit code: an OOM kill and a `docker kill` are both 137.
+        max_restart_count:
           type: integer
           description: >-
             The highest restart count among the stack's containers, since each
@@ -1410,17 +1453,27 @@ components:
         attention: { type: boolean }
 
     OverviewTotals:
+      description: >-
+        Container counts and project counts in one object. Which is which is
+        stated per field, because a mixed set where the reader has to guess is
+        how a dashboard starts lying.
       type: object
-      required: [projects, services, running, stopped, unhealthy, drift, restarts, attention]
+      required:
+        [projects, services, running, stopped, restarting, paused, unhealthy,
+         crashed, oom_killed, drift, restarts, attention]
       properties:
         projects: { type: integer }
-        services: { type: integer }
-        running: { type: integer }
-        stopped: { type: integer }
-        unhealthy: { type: integer }
+        services: { type: integer, description: Containers across every project. }
+        running: { type: integer, description: Containers. }
+        stopped: { type: integer, description: Containers. }
+        restarting: { type: integer, description: Containers. }
+        paused: { type: integer, description: Containers. }
+        unhealthy: { type: integer, description: Containers. }
+        crashed: { type: integer, description: Containers. }
+        oom_killed: { type: integer, description: Containers. }
         drift: { type: integer, description: Projects with outstanding drift. }
-        restarts: { type: integer, description: Projects with at least one restarting container. }
-        attention: { type: integer }
+        restarts: { type: integer, description: Projects with at least one container that has restarted. }
+        attention: { type: integer, description: Projects. }
 
     Overview:
       type: object

@@ -123,6 +123,12 @@ The Projects screen is the fleet view, not a directory. Each stack shows what is
 what is unhealthy, what has been restarting, and what was edited but never applied; the
 counts above the grid are filters, and the broken stacks come first.
 
+Each failure mode is its own colour and its own word, because they are different
+problems: an **unhealthy** container is running and answering wrongly, a **crashed** one
+stopped with a code nobody asked for, **OOM-killed** means the kernel took it for memory,
+and **restarting** is a loop. A container you stopped yourself is grey and is not counted
+as a fault — colouring a deliberate stop red is how a dashboard teaches you to ignore red.
+
 **Unapplied edits** are the one Silt is uniquely placed to catch. Editing a compose file
 and forgetting to `up` breaks nothing today — it lands hours or weeks later at the next
 unrelated restart. Silt compares the files on disk against the ones in place the last time

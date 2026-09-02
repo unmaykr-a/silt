@@ -33,8 +33,9 @@ SELECT COUNT(*) FROM snapshots WHERE project_id = ?;
 -- name: InsertServiceState :exec
 INSERT INTO service_states (
   snapshot_id, service, container_id, container_name, image_ref, image_id,
-  image_digest, image_created_at, state, health, restart_count, started_at, inspect_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  image_digest, image_created_at, state, health, restart_count, started_at, inspect_hash,
+  exit_code, oom_killed
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: ListServiceStates :many
 SELECT * FROM service_states WHERE snapshot_id = ? ORDER BY service;
@@ -88,6 +89,8 @@ SELECT
   service_states.state,
   service_states.health,
   service_states.restart_count,
+  service_states.exit_code,
+  service_states.oom_killed,
   service_states.inspect_hash
 FROM service_states
 JOIN snapshots ON snapshots.id = service_states.snapshot_id
