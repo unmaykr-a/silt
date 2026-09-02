@@ -25,6 +25,9 @@ export type PruneResult = components["schemas"]["PruneResult"];
 export type ProjectModel = components["schemas"]["ProjectModel"];
 export type AuthState = components["schemas"]["AuthState"];
 export type SearchResults = components["schemas"]["SearchResults"];
+export type Overview = components["schemas"]["Overview"];
+export type ProjectOverview = components["schemas"]["ProjectOverview"];
+export type NotifyTestResults = components["schemas"]["NotifyTestResults"];
 export type SessionCount = components["schemas"]["SessionCount"];
 export type ComposeFile = components["schemas"]["ComposeFile"];
 export type FileContent = components["schemas"]["FileContent"];
@@ -91,6 +94,7 @@ export const api = {
   events: (limit = 100, signal?: AbortSignal) => get<Event[]>(`/api/events?limit=${limit}`, signal),
   search: (query: string, signal?: AbortSignal) =>
     get<SearchResults>(`/api/search?q=${encodeURIComponent(query)}`, signal),
+  overview: (signal?: AbortSignal) => get<Overview>("/api/overview", signal),
   timeline: (opts: { from?: number; to?: number; project?: number; bucket?: string } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.from) q.set("from", String(opts.from));
@@ -123,6 +127,8 @@ export const api = {
   takeSnapshot: (projectId: number) =>
     request<{ status: string }>(`/api/projects/${projectId}/snapshot`, { method: "POST" }),
   prune: () => request<PruneResult>("/api/maintenance/prune", { method: "POST" }),
+  testNotifications: () =>
+    request<NotifyTestResults>("/api/settings/notifications/test", { method: "POST" }),
   authState: (signal?: AbortSignal) => get<AuthState>("/api/auth", signal),
   login: (password: string) =>
     request<{ authenticated: boolean }>("/api/login", {

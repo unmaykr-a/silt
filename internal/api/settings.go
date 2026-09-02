@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -294,4 +295,56 @@ func (s *Server) getVersion(w http.ResponseWriter, _ *http.Request) {
 		Release:  changelog.Current(),
 		Releases: changelog.Releases,
 	})
+}
+
+// testNotifications sends one message to each configured target.
+//
+// A shoutrrr URL is fire-and-forget: it is wrong until something tries to send,
+// and the only thing that tries to send is the change that mattered. This makes
+// the failure discoverable at the moment someone configures it.
+//
+// It reaches out to hosts named in the configuration, so it needs a session —
+// but it adds no capability a signed-in operator did not already have. The
+// targets are the ones already in the settings; nothing in the request chooses
+// where the message goes, which is what keeps it from being a way to make Silt
+// fetch arbitrary URLs.
+func (s *Server) testNotifications(w http.ResponseWriter, r *http.Request) {
+	urls := s.conf().NotifyURLs
+	if len(urls) == 0 {
+		writeJSON(w, http.StatusOK, notifyTestResponse{Results: []notifyTestResult{}})
+		return
+	}
+
+	// One target can take up to notify.TestTimeout, and they run in order, so
+	// the request deadline has to allow for all of them.
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(len(urls))*notify.TestTimeout+5*time.Second)
+	defer cancel()
+
+	out := notifyTestResponse{Results: []notifyTestResult{}}
+	for _, result := range notify.Test(ctx, urls) {
+		if !result.OK {
+			out.Failed++
+		}
+		out.Results = append(out.Results, notifyTestResult{
+			Index:  result.Index,
+			Target: result.Target,
+			OK:     result.OK,
+			Error:  result.Error,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type notifyTestResult struct {
+	Index  int    `json:"index"`
+	Target string `json:"target"`
+	OK     bool   `json:"ok"`
+	// Error is masked: a provider's message routinely quotes the request URL,
+	// and a shoutrrr URL is a credential.
+	Error string `json:"error,omitempty"`
+}
+
+type notifyTestResponse struct {
+	Results []notifyTestResult `json:"results"`
+	Failed  int                `json:"failed"`
 }

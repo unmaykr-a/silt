@@ -117,6 +117,18 @@ written, so a hidden value is never stored rather than stored and later conceale
 applies only to future captures: earlier snapshots hold a digest, not the value, so there
 is nothing there to uncover.
 
+## What needs attention
+
+The Projects screen is the fleet view, not a directory. Each stack shows what is running,
+what is unhealthy, what has been restarting, and what was edited but never applied; the
+counts above the grid are filters, and the broken stacks come first.
+
+**Unapplied edits** are the one Silt is uniquely placed to catch. Editing a compose file
+and forgetting to `up` breaks nothing today — it lands hours or weeks later at the next
+unrelated restart. Silt compares the files on disk against the ones in place the last time
+the running configuration actually changed, so the warning stays up until you apply it
+rather than scrolling off the timeline.
+
 ## Finding things
 
 Press `/` anywhere. One box searches projects, services, environment variable *names*,
@@ -150,6 +162,12 @@ SILT_BASE_URL: https://silt.example.com   # makes notifications link to the diff
 Kinds and severity are **ANDed**: a change must be of a listed kind *and* meet the
 threshold. Either alone lets through far more than you want — a host running Watchtower
 produces image changes constantly.
+
+A shoutrrr URL has no feedback loop: it is wrong until something tries to send, and the
+only thing that tries to send is the change that mattered. **Send a test** under
+Settings → Notifications reports each target separately, so you find out now rather than
+during the outage. Failures are masked — providers quote the request URL back at you, and
+a shoutrrr URL is a credential.
 
 ## External events
 

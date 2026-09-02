@@ -39,6 +39,19 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "0.7.0",
+		Date:    "2026-09-02",
+		Summary: "The Projects screen says what needs you.",
+		Entries: []Entry{
+			{Changed, "Projects was a card per stack carrying its name and when it was last seen — on a host running forty of them, forty cards all saying \"2m ago\". Each card now says what is running, what is unhealthy, what has been restarting, and what was edited but never applied, and the default order puts the broken ones first."},
+			{Added, "A summary strip above the grid, where every count is a filter. Seeing \"3 unhealthy\" and then having to hunt for which three was the thing this screen was worst at."},
+			{Added, "Unapplied compose edits are a state, not just an event. Silt has always recorded config.drift when a file changed without the stack changing, but the event scrolls off the timeline while the file stays un-applied. The Projects screen answers whether it is still true, by comparing the files on disk against the ones in place at the last actual change."},
+			{Added, "A \"send a test\" button for notification targets. A shoutrrr URL is wrong until something tries to send, and the only thing that tries to send is the change that mattered — so the first proof that notifications work used to be the outage they were configured for. Each target is reported separately, because the useful answer is which one is broken."},
+			{Security, "Notification test failures are masked before they are shown. Providers quote the request URL back in their error text and a shoutrrr URL is a credential, so every fragment of the target is stripped from the message before it reaches the screen."},
+			{Fixed, "Truncating a message for a notification cut on bytes rather than characters, which could split a multi-byte character into replacement glyphs."},
+		},
+	},
+	{
 		Version: "0.6.0",
 		Date:    "2026-09-02",
 		Summary: "Find anything, and a service page worth opening.",

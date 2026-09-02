@@ -907,6 +907,45 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SearchResults" }
 
+  /api/overview:
+    get:
+      tags: [read]
+      summary: Every project on a host, with its current state
+      description: |
+        The fleet view. One request answers what the Projects screen could not:
+        across every stack on this host, what is down, what is unhealthy, what
+        has been restarting, and what was edited but never applied. Asking per
+        project would be forty-seven requests to render one screen.
+
+        `restarts` is the highest restart count among the stack's containers, as
+        Docker reports it — restarts since each container was created, not a
+        rate. A container recreated by `up` starts again at zero, so any
+        "restarts in the last day" derived from these counters would go negative
+        exactly when a stack was redeployed.
+
+        `drift` compares the compose files on disk against the ones in place the
+        last time the running configuration actually changed. It is derived
+        rather than read off the `config.drift` event, because the event answers
+        "did this happen" and scrolls away, while the question here is "is it
+        still true".
+
+        `attention` is computed server-side so the totals and the rows cannot
+        come to disagree about what counts as a problem. Archived projects are
+        listed but excluded from the totals: a stack removed from the host
+        months ago is not something to go and look at.
+      operationId: overview
+      parameters:
+        - name: host
+          in: query
+          schema: { type: integer, format: int64 }
+          description: Defaults to the only host.
+      responses:
+        "200":
+          description: Every project, summarised
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Overview" }
+
   /api/settings:
     get:
       tags: [system]
@@ -978,6 +1017,32 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /api/settings/notifications/test:
+    post:
+      tags: [system]
+      summary: Send a test message to every configured notification target
+      description: |
+        A shoutrrr URL is fire-and-forget: it is wrong until something tries to
+        send, and the only thing that tries to send is the change that mattered.
+        This makes the failure discoverable when someone configures it rather
+        than during the outage it was configured for.
+
+        Nothing in the request chooses where the message goes — the targets are
+        the ones already in the settings — so this is not a way to make Silt
+        fetch an arbitrary URL.
+
+        Each target is reported separately, by position, because two different
+        targets can mask to the same string and the whole value of this is
+        saying *which* one is broken. Error text is masked: providers routinely
+        quote the request URL back, and a shoutrrr URL is a credential.
+      operationId: testNotifications
+      responses:
+        "200":
+          description: One result per configured target
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotifyTestResults" }
 
   /api/version:
     get:
@@ -1302,6 +1367,94 @@ components:
         env_changes:
           type: array
           items: { $ref: "#/components/schemas/EnvKeyChange" }
+
+    ProjectOverview:
+      type: object
+      required:
+        [id, name, archived, last_seen_at, services, running, stopped,
+         unhealthy, restarts, drift, attention]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        working_dir: { type: string }
+        archived: { type: boolean }
+        last_seen_at: { type: integer, format: int64 }
+        last_changed_at:
+          type: integer
+          format: int64
+          description: >-
+            When the running configuration last actually changed, which on a
+            stack observed every five minutes is a different question from when
+            it was last seen. Absent when nothing has changed since Silt first
+            saw the project, or when that snapshot has been pruned.
+        snapshot_id: { type: integer, format: int64 }
+        services: { type: integer }
+        running: { type: integer }
+        stopped: { type: integer }
+        unhealthy:
+          type: integer
+          description: >-
+            Containers reporting an unhealthy healthcheck. A container with no
+            healthcheck reports an empty health and is not counted: that is not
+            the same as failing one.
+        restarts:
+          type: integer
+          description: >-
+            The highest restart count among the stack's containers, since each
+            container was created. Not a rate.
+        drift:
+          type: boolean
+          description: >-
+            The compose files on disk differ from the ones in place the last
+            time the running configuration changed.
+        attention: { type: boolean }
+
+    OverviewTotals:
+      type: object
+      required: [projects, services, running, stopped, unhealthy, drift, restarts, attention]
+      properties:
+        projects: { type: integer }
+        services: { type: integer }
+        running: { type: integer }
+        stopped: { type: integer }
+        unhealthy: { type: integer }
+        drift: { type: integer, description: Projects with outstanding drift. }
+        restarts: { type: integer, description: Projects with at least one restarting container. }
+        attention: { type: integer }
+
+    Overview:
+      type: object
+      required: [projects, totals]
+      properties:
+        projects:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectOverview" }
+        totals: { $ref: "#/components/schemas/OverviewTotals" }
+
+    NotifyTestResult:
+      type: object
+      required: [index, target, ok]
+      properties:
+        index:
+          type: integer
+          description: >-
+            The target's position in the configured list, so the screen can
+            point at the row that failed even though two targets can mask to
+            the same text.
+        target: { type: string, description: Masked. }
+        ok: { type: boolean }
+        error:
+          type: string
+          description: Masked; providers quote the request URL back at you.
+
+    NotifyTestResults:
+      type: object
+      required: [results, failed]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/NotifyTestResult" }
+        failed: { type: integer }
 
     SearchResults:
       type: object

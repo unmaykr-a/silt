@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { api, type Settings, type SettingsPatch, type PruneResult, type AuthState } from "$lib/api/client";
+  import {
+    api,
+    type Settings,
+    type SettingsPatch,
+    type PruneResult,
+    type AuthState,
+    type NotifyTestResults,
+  } from "$lib/api/client";
   import { bytes, duration, sampleDate } from "$lib/format";
   import { prefs, type Clock, type DateStyle, type Layout, type TimeStamps } from "$lib/prefs.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -52,6 +59,30 @@
   // Write-only fields. They are never returned by the API, so they start empty
   // every time and only travel when someone types into them.
   let notifyUrls = $state("");
+
+  // Sending a test message.
+  //
+  // A shoutrrr URL is wrong until something tries to send, and the only thing
+  // that tries to send is the change that mattered. Without this the first
+  // proof that notifications work is the outage they were configured for.
+  type NotifyTest = { results: NotifyTestResults["results"]; failed: number };
+  let notifyTest = $state<NotifyTest | null>(null);
+  let notifyTesting = $state(false);
+  let notifyTestError = $state<string | null>(null);
+
+  async function sendTestNotification() {
+    notifyTesting = true;
+    notifyTest = null;
+    notifyTestError = null;
+    try {
+      const out = await api.testNotifications();
+      notifyTest = { results: out.results, failed: out.failed };
+    } catch (err) {
+      notifyTestError = (err as Error).message;
+    } finally {
+      notifyTesting = false;
+    }
+  }
   let ingestToken = $state("");
 
   // A non-null starting value rather than null: every control below lives in a
@@ -696,6 +727,54 @@
                 placeholder="gotify://gotify.example.com/AppToken&#10;discord://token@id"
                 class="{input} font-mono text-xs"
               ></textarea>
+
+              {#if (settings?.effective.notify_targets.length ?? 0) > 0}
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onclick={sendTestNotification}
+                    disabled={notifyTesting}
+                    class="rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-secondary/60 disabled:opacity-50"
+                  >
+                    {notifyTesting ? "Sending…" : "Send a test"}
+                  </button>
+                  <span class="text-[11px] text-muted-foreground">
+                    Tests what is saved, not what is typed above.
+                  </span>
+                </div>
+              {/if}
+
+              {#if notifyTestError}
+                <p class="mt-2 text-xs text-red-600 dark:text-red-400">{notifyTestError}</p>
+              {/if}
+              {#if notifyTest}
+                <ul class="mt-2 space-y-1">
+                  {#each notifyTest.results as result (result.index)}
+                    <!-- The reason sits under its target rather than beside
+                         it: a provider error is long enough to wrap, and a
+                         wrapped one reads as belonging to nothing. -->
+                    <li class="text-xs">
+                      <div class="flex items-baseline gap-2">
+                        <span
+                          class={result.ok
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-red-600 dark:text-red-400"}
+                        >
+                          {result.ok ? "sent" : "failed"}
+                        </span>
+                        <span class="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                          {result.target}
+                        </span>
+                      </div>
+                      {#if result.error}
+                        <p class="ml-1 border-l border-border pl-2.5 text-[11px] text-muted-foreground">
+                          {result.error}
+                        </p>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
             {/snippet}
             {@render field(
               "notify_urls",

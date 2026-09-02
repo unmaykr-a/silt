@@ -618,6 +618,7 @@ GET  /api/diff?from={id}&to={id}
 GET  /api/events?from=&to=&project=&service=&type=&severity=&limit=
 GET  /api/timeline?from=&to=&project=&bucket=  -- merged, bucketed snapshots + events
 GET  /api/search?q=                        -- projects, services, env keys, files, events
+GET  /api/overview                         -- every project with its current state
 GET  /api/stream                           -- SSE: snapshot.changed, event
 POST /api/ingest                           -- generic external event webhook
 GET  /healthz  /readyz  /metrics
@@ -721,6 +722,10 @@ Six screens. Keep it boring and fast.
    keys, manual prune/GC buttons.
 6. **Search** — one box, reachable from anywhere with `/`. Projects, services,
    environment variable *names*, compose file paths and event text. Never values.
+
+The **Projects** screen is the fleet view rather than a directory: what is running, what
+is unhealthy, what has been restarting, what was edited but never applied, with every
+count above the grid acting as a filter and the broken stacks first by default.
 
 Dark mode by default, light mode available. Every timestamp shows relative ("3h ago") with
 the absolute UTC/local value on hover.
@@ -1349,7 +1354,52 @@ Changed:
     testable: preferences live in a `.svelte.ts` rune module that the
     plugin-free vitest config cannot compile.
 
-53. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+53. **Drift is a state, not an event (0.7.0)** — Silt has recorded
+    `config.drift` since M2.5: a compose file changed and the running stack did
+    not. As an event it answers "did this happen" and then scrolls away, while
+    the file stays un-applied for weeks.
+
+    The first attempt at a durable version read the latest snapshot's own
+    `files_changed` flag, which is wrong in a way that only shows up later: the
+    next unrelated container restart writes a snapshot with `files_changed=0`
+    and the warning silently disappears. The predicate that holds is a
+    comparison of two files fingerprints — the current one against that of the
+    last snapshot where the running configuration actually changed. There is a
+    test that fails against the flag-reading version with exactly that symptom.
+
+54. **The Projects screen was a directory (0.7.0)** — a card per stack with its
+    name and when it was last seen. On a host running forty-seven of them that
+    is forty-seven cards all saying "2m ago", which answers nothing anyone came
+    to ask. It now leads with state, and every count in the summary strip is a
+    filter rather than a decoration: reading "3 unhealthy" and then hunting for
+    which three was the specific thing it was worst at.
+
+    `attention` is computed server-side. Had the browser decided it, the badge
+    count and the row highlight would eventually disagree about what a problem
+    is, and the one that is wrong would be the one someone trusts.
+
+55. **Restart counts are not a rate (0.7.0)** — the tempting metric is
+    "restarts in the last 24 hours", derived from the difference between two
+    observations of `restart_count`. It goes negative exactly when a stack is
+    redeployed, because `up` recreates the container and the counter starts
+    again at zero. What is reported instead is the highest current count in the
+    stack — the number `docker ps` shows — and the label says so.
+
+56. **A notification target is wrong until something sends (0.7.0)** — a
+    shoutrrr URL has no feedback loop. It is a string with a token in it, and
+    the first thing that tries it is the change that mattered; Silt logs the
+    failure, which helps whoever is reading logs at 03:10 and nobody else.
+    There is now a button, and it reports each target separately rather than
+    one verdict for the list, because the useful answer is *which* one.
+
+    Two things fell out of building it. Errors are masked: providers quote the
+    request URL back at you — gotify hands the app token straight back — so
+    every fragment of the target is stripped from the message before it is
+    rendered, since an error is a thing people paste into issues. And a test
+    that plants a token in each of four provider URLs and checks it never
+    appears in the output caught the gotify leak on the first run.
+
+57. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't
