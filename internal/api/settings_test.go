@@ -265,3 +265,68 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+func TestNotificationTestWithNoTargetsSucceedsWithNothing(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.post(t, "/api/settings/notifications/test", "", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("test = %d %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Results []struct{} `json:"results"`
+		Failed  int        `json:"failed"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	if len(out.Results) != 0 || out.Failed != 0 {
+		t.Errorf("results = %+v, want empty", out)
+	}
+	// A null here is `results.map is not a function` in the browser.
+	if !strings.Contains(string(body), `"results":[]`) {
+		t.Errorf("results is not an empty array: %s", body)
+	}
+}
+
+// Configure a target that cannot work, and check the failure comes back
+// attributed and masked rather than as a bare 500.
+func TestNotificationTestReportsAFailingTarget(t *testing.T) {
+	f := newFixture(t)
+
+	const target = "gotify://gotify.invalid/AppTokenSECRET"
+	resp, body := f.do(t, http.MethodPut, "/api/settings",
+		`{"notify_urls":["`+target+`"]}`, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT settings = %d %s", resp.StatusCode, body)
+	}
+
+	resp, body = f.post(t, "/api/settings/notifications/test", "", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("test = %d %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Results []struct {
+			Index  int    `json:"index"`
+			Target string `json:"target"`
+			OK     bool   `json:"ok"`
+			Error  string `json:"error"`
+		} `json:"results"`
+		Failed int `json:"failed"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	if len(out.Results) != 1 {
+		t.Fatalf("results = %d, want 1: %s", len(out.Results), body)
+	}
+	if out.Results[0].OK || out.Failed != 1 {
+		t.Errorf("an unreachable target reported success: %+v", out)
+	}
+	if out.Results[0].Error == "" {
+		t.Error("a failure with no reason is not worth showing")
+	}
+	// The response goes to a browser and from there into issues and chats.
+	if strings.Contains(string(body), "AppTokenSECRET") {
+		t.Errorf("response leaks the target's token: %s", body)
+	}
+}

@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.listEvents)
 	mux.HandleFunc("GET /api/timeline", s.getTimeline)
 	mux.HandleFunc("GET /api/search", s.search)
+	mux.HandleFunc("GET /api/overview", s.overview)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("POST /api/ingest", s.ingest)
 	mux.HandleFunc("GET /api/auth", s.getAuthState)
@@ -123,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("DELETE /api/settings", s.deleteSettings)
+	mux.HandleFunc("POST /api/settings/notifications/test", s.testNotifications)
 	mux.HandleFunc("GET /api/version", s.getVersion)
 	mux.HandleFunc("POST /api/maintenance/prune", s.postPrune)
 

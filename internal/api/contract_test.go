@@ -155,6 +155,8 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"prune":               {method: "POST", url: "/api/maintenance/prune", wantStatus: 200, schema: "PruneResult"},
 		"getTimeline":         {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
 		"search":              {method: "GET", url: "/api/search?q=radarr", wantStatus: 200, schema: "SearchResults"},
+		"overview":            {method: "GET", url: "/api/overview", wantStatus: 200, schema: "Overview"},
+		"testNotifications":   {method: "POST", url: "/api/settings/notifications/test", wantStatus: 200, schema: "NotifyTestResults"},
 		"ingest": {
 			method: "POST", url: "/api/ingest", body: `{"type":"contract.test"}`,
 			headers: auth, wantStatus: 202,

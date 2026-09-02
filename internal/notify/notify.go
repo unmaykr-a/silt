@@ -188,14 +188,21 @@ func format(c Change, matched []diff.Change) (title, body string) {
 
 // truncate keeps a digest-length value readable in a push notification.
 func truncate(s string) string {
-	const max = 40
-	if len(s) <= max {
-		if s == "" {
-			return "(none)"
-		}
+	if s == "" {
+		return "(none)"
+	}
+	return truncateTo(s, 40)
+}
+
+// truncateTo cuts on runes, not bytes. Slicing a string by byte offset splits
+// whatever multi-byte character straddles the cut into replacement characters,
+// and a provider's error message is not guaranteed to be ASCII.
+func truncateTo(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	return string(runes[:max]) + "…"
 }
 
 // Enabled reports whether this sender has any targets. Nil-safe, so a caller
