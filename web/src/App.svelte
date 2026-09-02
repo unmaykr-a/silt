@@ -5,10 +5,12 @@
   import Login from "$lib/components/Login.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import SiltMark from "$lib/components/SiltMark.svelte";
+  import SearchBox from "$lib/components/SearchBox.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import VersionButton from "$lib/components/VersionButton.svelte";
   import Timeline from "./routes/Timeline.svelte";
   import Projects from "./routes/Projects.svelte";
+  import Search from "./routes/Search.svelte";
   import Project_ from "./routes/Project.svelte";
   import Service from "./routes/Service.svelte";
   import Diff from "./routes/Diff.svelte";
@@ -112,7 +114,9 @@
   // In the top layout the rail is project navigation, so it has nothing to add
   // on the two screens that are not about a project. In the side layout it is
   // the navigation, so it is always there.
-  const showRail = $derived(side || (route.name !== "settings" && route.name !== "projects"));
+  const showRail = $derived(
+    side || (route.name !== "settings" && route.name !== "projects" && route.name !== "search"),
+  );
 </script>
 
 {#snippet navIcon(name: string)}
@@ -206,7 +210,8 @@
         </nav>
       {/if}
 
-      <div class="ml-auto flex items-center gap-1 text-xs">
+      <div class="ml-auto flex items-center gap-1.5 text-xs">
+        <SearchBox />
         <span
           class="mr-1 hidden items-center gap-1.5 text-muted-foreground sm:flex"
           title="Live update stream"
@@ -253,6 +258,8 @@
             <Timeline {reloadKey} {projects} />
           {:else if route.name === "projects"}
             <Projects {reloadKey} />
+          {:else if route.name === "search"}
+            <Search query={route.query} />
           {:else if route.name === "project"}
             <Project_ projectId={route.projectId} {reloadKey} />
           {:else if route.name === "service"}

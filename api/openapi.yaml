@@ -874,6 +874,39 @@ paths:
                 properties:
                   authenticated: { type: boolean }
 
+  /api/search:
+    get:
+      tags: [read]
+      summary: Search projects, services, environment keys, files and events
+      description: |
+        A host running forty stacks has no other way to answer "when did
+        anything about radarr change?" — the alternative is opening projects one
+        at a time until you find it.
+
+        A substring match, not a wildcard pattern: the terms people type contain
+        `_` and `%`, and there is nothing to escape. A query shorter than two
+        characters returns nothing, because one character matches most of the
+        database and answers nothing.
+
+        Environment *values* are never searched. They are keyed digests, and the
+        cleartext ones are on the keep-list precisely because they are not
+        secrets worth hunting for.
+
+        Each category is capped independently, so a term matching a thousand
+        events still shows the one project it matched.
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          description: The term. Shorter than two characters returns nothing.
+      responses:
+        "200":
+          description: What matched, by category
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResults" }
+
   /api/settings:
     get:
       tags: [system]
@@ -1269,6 +1302,66 @@ components:
         env_changes:
           type: array
           items: { $ref: "#/components/schemas/EnvKeyChange" }
+
+    SearchResults:
+      type: object
+      required: [query, projects, services, env_keys, files, events, total]
+      properties:
+        query: { type: string }
+        projects:
+          type: array
+          items:
+            type: object
+            required: [id, name, last_seen_at, archived]
+            properties:
+              id: { type: integer, format: int64 }
+              name: { type: string }
+              working_dir: { type: string }
+              last_seen_at: { type: integer, format: int64 }
+              archived: { type: boolean }
+        services:
+          type: array
+          items:
+            type: object
+            required: [service, project_id, project_name, last_seen_at]
+            properties:
+              service: { type: string }
+              project_id: { type: integer, format: int64 }
+              project_name: { type: string }
+              last_seen_at: { type: integer, format: int64 }
+        env_keys:
+          type: array
+          items:
+            type: object
+            required: [key, project_id, project_name, service, last_seen_at, readable]
+            properties:
+              key: { type: string }
+              project_id: { type: integer, format: int64 }
+              project_name: { type: string }
+              service: { type: string }
+              last_seen_at: { type: integer, format: int64 }
+              readable:
+                type: boolean
+                description: |
+                  At least one observation of this key was kept in cleartext,
+                  which is what the keep-list decides. The value itself is not
+                  returned here.
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, project_id, project_name, last_seen_at]
+            properties:
+              path: { type: string }
+              project_id: { type: integer, format: int64 }
+              project_name: { type: string }
+              last_seen_at: { type: integer, format: int64 }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+        total:
+          type: integer
+          description: Across every category, so the UI can say "nothing" without inspecting five lists.
 
     SettingsValues:
       type: object

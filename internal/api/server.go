@@ -105,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/diff", s.getDiff)
 	mux.HandleFunc("GET /api/events", s.listEvents)
 	mux.HandleFunc("GET /api/timeline", s.getTimeline)
+	mux.HandleFunc("GET /api/search", s.search)
 	mux.HandleFunc("GET /api/stream", s.stream)
 	mux.HandleFunc("POST /api/ingest", s.ingest)
 	mux.HandleFunc("GET /api/auth", s.getAuthState)

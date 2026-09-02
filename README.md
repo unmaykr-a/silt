@@ -117,6 +117,24 @@ written, so a hidden value is never stored rather than stored and later conceale
 applies only to future captures: earlier snapshots hold a digest, not the value, so there
 is nothing there to uncover.
 
+## Finding things
+
+Press `/` anywhere. One box searches projects, services, environment variable *names*,
+compose file paths and event text, and links straight to whichever of those you meant.
+
+Environment **values** are not searchable — not the redacted ones, and not by anyone
+signed in. Silt goes to some trouble not to store a recoverable secret; a search that
+matched values would hand back a way to confirm a guess one query at a time.
+
+Wildcards are literal: `rada_r` does not match `radarr`. A search box that quietly
+reinterprets what you typed is worse than one that finds nothing.
+
+A diff can leave Silt, too. On the structured view, **Copy** and **Download** give you
+Markdown to paste into an issue. On the YAML view they give you a real unified diff —
+`patch -p1` and `git apply` both take it, and applying it turns the older compose
+document into the newer one. Timestamps in an export are ISO 8601 rather than your chosen
+format, because the file is going somewhere your preferences don't follow.
+
 ## Notifications
 
 Set `SILT_NOTIFY_URLS` to any [shoutrrr](https://containrrr.dev/shoutrrr/) target — ntfy,

@@ -617,6 +617,7 @@ GET  /api/snapshots/{id}/compose           -- effective, redacted; ?format=yaml|
 GET  /api/diff?from={id}&to={id}
 GET  /api/events?from=&to=&project=&service=&type=&severity=&limit=
 GET  /api/timeline?from=&to=&project=&bucket=  -- merged, bucketed snapshots + events
+GET  /api/search?q=                        -- projects, services, env keys, files, events
 GET  /api/stream                           -- SSE: snapshot.changed, event
 POST /api/ingest                           -- generic external event webhook
 GET  /healthz  /readyz  /metrics
@@ -703,7 +704,7 @@ endpoint returns 503, not 200 — fail closed.
 
 ## 9. UI
 
-Five screens. Keep it boring and fast.
+Six screens. Keep it boring and fast.
 
 1. **Timeline** (home) — horizontal density strip (uPlot) over a filterable event/change
    feed. Filters: host, project, service, change kind, severity, time range. Live via SSE.
@@ -718,6 +719,8 @@ Five screens. Keep it boring and fast.
    what), restart sparkline, env key change history from `env_keys`.
 5. **Settings** — retention, notification targets and filters, ingest token, keep-list
    keys, manual prune/GC buttons.
+6. **Search** — one box, reachable from anywhere with `/`. Projects, services,
+   environment variable *names*, compose file paths and event text. Never values.
 
 Dark mode by default, light mode available. Every timestamp shows relative ("3h ago") with
 the absolute UTC/local value on hover.
@@ -1290,7 +1293,63 @@ Changed:
     once something else could admit someone, an anonymous claim would be taking
     an account that bypasses it rather than bootstrapping the only one.
 
-47. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+47. **Search matches keys, never values (0.6.0)** — the obvious next feature on
+    a host with forty-odd projects is a search box, and the obvious mistake is
+    to let it reach environment values. Silt goes to real trouble not to store
+    a secret in cleartext; a search that matched the ones it *did* keep would
+    turn a UI convenience into a way to confirm a guessed value one query at a
+    time. So `env_keys.value` is not searched at all, and there is a test that
+    fails if it ever is.
+
+    Two smaller decisions came with it. Wildcards are literal: `rada_r` does
+    not match `radarr`, because a search box that quietly reinterprets what you
+    typed is worse than one that finds nothing. And the term is matched with
+    `instr(lower(col), ?)` rather than `LIKE`, which sidesteps escaping
+    entirely — there is no metacharacter to escape.
+
+48. **`internal/store/search.go` is hand-written (0.6.0)** — the third time
+    sqlc's SQLite grammar has decided a batch. It rejects `ESCAPE`, it cannot
+    parse `sqlc.arg()` inside `lower()`, and — the one that cost real time —
+    given `LIMIT ?` after a construct it did not understand, it emitted `LIM`
+    into the generated Go instead of failing. That compiles. It fails at
+    runtime, where the handler logged the error and returned an empty result,
+    which looks exactly like "nothing matched".
+
+    The rule the repo now follows: sqlc for the queries it can generate, hand-
+    written SQL in the same package for the ones it cannot, with a comment
+    saying which limit was hit. Silent truncation is worse than a build error,
+    so a generated query that looks wrong gets read, not trusted.
+
+49. **The service page is a history, not a log (0.6.0)** — it listed
+    observations, which is what the database has rather than what anyone came
+    to find out. The question is almost always "when did this image change, and
+    what changed with it". So: current state first, then one row per *image*
+    with how long it held, and a link from each to the diff that introduced it.
+    Finding that diff by hand meant going back to the project and matching
+    timestamps.
+
+50. **A digest and an image ID are different claims (0.6.0)** — a locally built
+    image has no registry digest, and the page was falling back to the image ID
+    under a "Digest" label. They are not interchangeable: one identifies the
+    image on any host, the other only on this one. The label now names which of
+    the two is on screen.
+
+51. **An export that claims to be a diff has to be one (0.6.0)** — the first
+    version emitted every line with a `-`/`+`/space prefix and no `@@` headers.
+    It read fine and `patch` refused it, which is the worst combination: a file
+    named `.diff` that no tool accepts. It now emits real hunks with three lines
+    of context, and the check is not that it looks right — it is that applying
+    it to the older snapshot's YAML reproduces the newer one byte for byte.
+
+52. **Exports are ISO 8601, not the viewer's format (0.6.0)** — a diff copied as
+    Markdown or downloaded as a unified diff leaves the browser that rendered
+    it. dd/mm/yyyy is right on screen, where the reader chose it, and ambiguous
+    in a file pasted into someone else's issue tracker. The export module
+    therefore has no dependency on the preferences at all, which also keeps it
+    testable: preferences live in a `.svelte.ts` rune module that the
+    plugin-free vitest config cannot compile.
+
+53. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

@@ -5,6 +5,24 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.6.0 — 2026-09-02
+
+Find anything, and a service page worth opening.
+
+### Added
+
+- Search across every project, service, environment key, compose file and event. Press / from anywhere. On a host with forty-odd stacks, remembering which project a container belongs to was the slowest part of using Silt.
+- Search matches environment variable names, never their values. A redacted value is not searchable by anyone, including whoever is signed in.
+- A diff can leave Silt: Markdown from the structured view for pasting into an issue, and from the YAML view a real unified diff that patch(1) and git apply both accept — applying it turns the older compose document into the newer one. A change no longer has to travel as a screenshot.
+
+### Changed
+
+- The service page was a list of observations; it is now a history. What the service is right now, every image it has run with how long it held, a link from each change straight to the diff that introduced it, restarts over time, and the environment keys that changed.
+
+### Fixed
+
+- A locally built image has no registry digest, and its image ID was being labelled as one. The two are different claims and the page now says which it is showing.
+
 ## 0.5.1 — 2026-08-26
 
 OpenID Connect actually works with authentik.

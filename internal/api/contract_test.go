@@ -154,6 +154,7 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"deleteRedactionRule": {method: "DELETE", url: "/api/projects/1/redaction-rules/999", wantStatus: 404},
 		"prune":               {method: "POST", url: "/api/maintenance/prune", wantStatus: 200, schema: "PruneResult"},
 		"getTimeline":         {method: "GET", url: "/api/timeline", wantStatus: 200, schema: "Timeline"},
+		"search":              {method: "GET", url: "/api/search?q=radarr", wantStatus: 200, schema: "SearchResults"},
 		"ingest": {
 			method: "POST", url: "/api/ingest", body: `{"type":"contract.test"}`,
 			headers: auth, wantStatus: 202,
