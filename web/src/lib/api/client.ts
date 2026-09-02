@@ -24,6 +24,7 @@ export type Release = components["schemas"]["Release"];
 export type PruneResult = components["schemas"]["PruneResult"];
 export type ProjectModel = components["schemas"]["ProjectModel"];
 export type AuthState = components["schemas"]["AuthState"];
+export type SearchResults = components["schemas"]["SearchResults"];
 export type SessionCount = components["schemas"]["SessionCount"];
 export type ComposeFile = components["schemas"]["ComposeFile"];
 export type FileContent = components["schemas"]["FileContent"];
@@ -88,6 +89,8 @@ export const api = {
   diff: (from: number, to: number, signal?: AbortSignal) =>
     get<Diff>(`/api/diff?from=${from}&to=${to}`, signal),
   events: (limit = 100, signal?: AbortSignal) => get<Event[]>(`/api/events?limit=${limit}`, signal),
+  search: (query: string, signal?: AbortSignal) =>
+    get<SearchResults>(`/api/search?q=${encodeURIComponent(query)}`, signal),
   timeline: (opts: { from?: number; to?: number; project?: number; bucket?: string } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.from) q.set("from", String(opts.from));

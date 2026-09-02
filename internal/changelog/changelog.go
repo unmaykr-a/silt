@@ -39,6 +39,18 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "0.6.0",
+		Date:    "2026-09-02",
+		Summary: "Find anything, and a service page worth opening.",
+		Entries: []Entry{
+			{Added, "Search across every project, service, environment key, compose file and event. Press / from anywhere. On a host with forty-odd stacks, remembering which project a container belongs to was the slowest part of using Silt."},
+			{Added, "Search matches environment variable names, never their values. A redacted value is not searchable by anyone, including whoever is signed in."},
+			{Changed, "The service page was a list of observations; it is now a history. What the service is right now, every image it has run with how long it held, a link from each change straight to the diff that introduced it, restarts over time, and the environment keys that changed."},
+			{Added, "A diff can leave Silt: Markdown from the structured view for pasting into an issue, and from the YAML view a real unified diff that patch(1) and git apply both accept — applying it turns the older compose document into the newer one. A change no longer has to travel as a screenshot."},
+			{Fixed, "A locally built image has no registry digest, and its image ID was being labelled as one. The two are different claims and the page now says which it is showing."},
+		},
+	},
+	{
 		Version: "0.5.1",
 		Date:    "2026-08-26",
 		Summary: "OpenID Connect actually works with authentik.",
