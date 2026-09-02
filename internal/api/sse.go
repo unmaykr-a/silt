@@ -121,10 +121,16 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case <-ticker.C:
-			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
-				return
-			}
-			if err := rc.Flush(); err != nil {
+			// A named event rather than an SSE comment.
+			//
+			// A comment keeps proxies from closing an idle connection, which
+			// was the whole job, but EventSource discards it without telling
+			// anyone — so a browser could not distinguish a live connection
+			// with nothing happening from one that had quietly wedged. It
+			// still does the proxy job, and now the page can say how long ago
+			// it last heard anything, which is the only honest way to show
+			// "nothing has changed".
+			if err := writeSSE(w, rc, "heartbeat", map[string]any{"at": time.Now().UnixMilli()}); err != nil {
 				return
 			}
 		}

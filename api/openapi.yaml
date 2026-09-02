@@ -1464,7 +1464,7 @@ components:
       required:
         [id, name, archived, last_seen_at, services, running, stopped,
          restarting, paused, starting, unhealthy, crashed, oom_killed,
-         max_restart_count, drift, attention]
+         max_restart_count, recent_restarts, drift, attention]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
@@ -1516,6 +1516,20 @@ components:
           description: >-
             The highest restart count among the stack's containers, since each
             container was created. Not a rate.
+        restarted_at:
+          type: integer
+          format: int64
+          description: >-
+            When the stack last actually restarted, absent if it never has. For
+            a container with restarts, Docker's started_at is the moment of its
+            last one — it has been up continuously since.
+        recent_restarts:
+          type: boolean
+          description: >-
+            Whether those restarts are recent enough to still count as
+            something to look at. Docker's counter never resets, so without a
+            window a single blip months ago pins a stack to the attention list
+            forever.
         drift:
           type: boolean
           description: >-
@@ -1543,7 +1557,7 @@ components:
         crashed: { type: integer, description: Containers. }
         oom_killed: { type: integer, description: Containers. }
         drift: { type: integer, description: Projects with outstanding drift. }
-        restarts: { type: integer, description: Projects with at least one container that has restarted. }
+        restarts: { type: integer, description: Projects whose containers restarted recently. }
         attention: { type: integer, description: Projects. }
 
     Overview:

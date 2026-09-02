@@ -153,8 +153,7 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 	}
 
 	// A configuration change is the thing Silt exists to record, so it earns
-	// both an event row and a live broadcast. Runtime-only changes are already
-	// covered by the docker events that caused them.
+	// an event row of its own and a notification.
 	if result.ConfigChanged {
 		payload := map[string]any{
 			"snapshot_id": result.ID,
@@ -175,10 +174,41 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 		}); err != nil {
 			s.Log.Error("record snapshot event", "project", p.Name, "error", err)
 		}
-		if s.Publisher != nil {
-			s.Publisher.PublishChange(payload)
-		}
 		s.notifyChange(ctx, projectID, p.Name, result)
+	}
+
+	// Broadcast whenever a snapshot was actually written, not only when the
+	// configuration changed.
+	//
+	// This used to fire on ConfigChanged alone, on the reasoning that a
+	// runtime change is "already covered by the docker events that caused it".
+	// That held while the UI only showed configuration. It stopped holding
+	// when the project screens started showing runtime state — running counts,
+	// unhealthy, restarting — and it was wrong in two ways at once.
+	//
+	// Ordering: the docker event is broadcast the moment it arrives, but the
+	// snapshot it triggers is written after the coalescing window. A browser
+	// refetching on that event reads the state from *before* the change, and
+	// nothing ever told it to look again. The reported symptom was seeing an
+	// update on a project only after a reload.
+	//
+	// Coverage: the interval sweep produces no docker event at all, so a
+	// health flip or a restart found by the sweep was invisible until reload.
+	//
+	// A touched snapshot is deliberately silent: nothing changed, so there is
+	// nothing to refetch, and on an idle host of forty projects that would be
+	// a broadcast per project per interval saying so.
+	if s.Publisher != nil && shouldBroadcast(result) {
+		s.Publisher.PublishChange(map[string]any{
+			"snapshot_id":     result.ID,
+			"project_id":      projectID,
+			"project":         p.Name,
+			"trigger":         trigger,
+			"taken_at":        result.TakenAt,
+			"config_changed":  result.ConfigChanged,
+			"runtime_changed": result.RuntimeChanged,
+			"files_changed":   result.FilesChanged,
+		})
 	}
 
 	// A file that changed without the running configuration changing is
@@ -313,4 +343,22 @@ func (s *Snapshotter) baseURL() string {
 		return s.BaseURLFn()
 	}
 	return s.BaseURL
+}
+
+// shouldBroadcast reports whether a written snapshot is worth telling connected
+// clients about.
+//
+// A named rule rather than a condition inline, because getting it wrong is
+// invisible: the UI simply shows yesterday's state and nobody notices until
+// they reload. See the call site for the two ways the old ConfigChanged-only
+// version was wrong.
+func shouldBroadcast(r store.SnapshotResult) bool {
+	// Touched means the observation matched the previous snapshot exactly.
+	// Nothing changed, so there is nothing to refetch — and on an idle host of
+	// forty projects, broadcasting it would be one message per project per
+	// interval to say so.
+	if r.Touched {
+		return false
+	}
+	return r.ConfigChanged || r.RuntimeChanged || r.FilesChanged
 }

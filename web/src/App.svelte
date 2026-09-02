@@ -34,6 +34,13 @@
   // outside the reactive graph.
   let lastStatus: StreamStatus = "connecting";
 
+  // When Silt last said anything at all, heartbeat included, and when it last
+  // said something had changed. Two different questions: an idle host is
+  // silent about changes for hours and should still be able to prove it is
+  // being watched.
+  let lastFrameAt = $state(Date.now());
+  let lastChangeAt = $state(0);
+
   function setStatus(next: StreamStatus) {
     if (next !== lastStatus) {
       lastStatus = next;
@@ -92,8 +99,12 @@
 
     const unsubscribe = subscribe(
       {
-        event: bump,
+        event: () => {
+          lastChangeAt = Date.now();
+          bump();
+        },
         "snapshot.changed": () => {
+          lastChangeAt = Date.now();
           bump();
           api.projects().then((p) => (projects = p)).catch(() => {});
         },
@@ -104,6 +115,7 @@
         // a closed laptop lid all left a green dot over a page that had
         // stopped updating.
         status: setStatus,
+        activity: (at) => (lastFrameAt = at),
       },
     );
 
@@ -262,6 +274,8 @@
         <StatusMenu
           {status}
           since={statusSince}
+          {lastFrameAt}
+          {lastChangeAt}
           {auth}
           onSignOut={signOut}
           onShowChangelog={() => (changelogOpen = true)}
@@ -287,7 +301,7 @@
           {:else if route.name === "project"}
             <Project_ projectId={route.projectId} {reloadKey} />
           {:else if route.name === "service"}
-            <Service projectId={route.projectId} service={route.service} />
+            <Service projectId={route.projectId} service={route.service} {reloadKey} />
           {:else if route.name === "files"}
             <Files projectId={route.projectId} initialPath={route.path} />
           {:else if route.name === "diff"}

@@ -1,13 +1,36 @@
 <script lang="ts">
-  import { api, type Project, type Snapshot, type SnapshotDetail } from "$lib/api/client";
+  import {
+    api,
+    type Project,
+    type Snapshot,
+    type SnapshotDetail,
+    type Timeline,
+  } from "$lib/api/client";
   import { link, router } from "$lib/router.svelte";
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
   import { shortDigest, duration } from "$lib/format";
   import { serviceState } from "$lib/servicestate";
   import { Button } from "$lib/components/ui/button";
+  import DensityStrip from "$lib/components/DensityStrip.svelte";
+  import Segmented from "$lib/components/Segmented.svelte";
 
   let { projectId, reloadKey }: { projectId: number; reloadKey: number } = $props();
+
+  // This project's own activity, on the same strip the timeline uses. The
+  // fleet timeline answers "what happened on this host"; standing on a project
+  // page and having to go back and filter to answer it for the one stack in
+  // front of you was the gap.
+  let projectTimeline = $state<Timeline | null>(null);
+  let rangeLabel = $state("604800000");
+  const rangeMs = $derived(Number(rangeLabel));
+
+  const RANGES = [
+    { value: "86400000", label: "24h" },
+    { value: "604800000", label: "7d" },
+    { value: "2592000000", label: "30d" },
+    { value: "7776000000", label: "90d" },
+  ];
 
   let project = $state<Project | null>(null);
   let snapshots = $state<Snapshot[]>([]);
@@ -35,6 +58,20 @@
         if ((err as Error).name !== "AbortError") error = (err as Error).message;
       }
     })();
+    return () => controller.abort();
+  });
+
+  // Separate from the main fetch: changing the range should redraw the strip
+  // without refetching the snapshot list and its detail behind it.
+  $effect(() => {
+    const key = [projectId, rangeMs, reloadKey];
+    void key;
+    const controller = new AbortController();
+    const to = Date.now();
+    api
+      .timeline({ project: projectId, from: to - rangeMs, to }, controller.signal)
+      .then((t) => (projectTimeline = t))
+      .catch(() => {});
     return () => controller.abort();
   });
 
@@ -98,6 +135,16 @@
         </Button>
       </div>
     </header>
+
+    <section>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Activity</h3>
+        <Segmented label="Range" size="xs" bind:value={rangeLabel} options={RANGES} />
+      </div>
+      <div class="mt-3">
+        <DensityStrip timeline={projectTimeline} />
+      </div>
+    </section>
 
     <section>
       <h3 class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Services</h3>

@@ -6,14 +6,18 @@
   import { shortDigest, datetime, duration } from "$lib/format";
   import { serviceState, stateLegend, type StateKey } from "$lib/servicestate";
 
-  let { projectId, service }: { projectId: number; service: string } = $props();
+  let {
+    projectId,
+    service,
+    reloadKey,
+  }: { projectId: number; service: string; reloadKey: number } = $props();
 
   let history = $state<ServiceHistory | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
 
   $effect(() => {
-    const key = [projectId, service];
+    const key = [projectId, service, reloadKey];
     void key;
     const controller = new AbortController();
     loading = true;

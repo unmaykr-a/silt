@@ -123,6 +123,11 @@ The Projects screen is the fleet view, not a directory. Each stack shows what is
 what is unhealthy, what has been restarting, and what was edited but never applied; the
 counts above the grid are filters, and the broken stacks come first.
 
+Restarts stop counting after a day. Docker's counter never resets, so one blip three
+months ago would pin its stack to the attention list forever — and a list that is
+permanently non-empty is one you stop reading. The count stays visible in grey with when
+it last happened, and the service page keeps the full history.
+
 Each failure mode is its own colour and its own word, because they are different
 problems: an **unhealthy** container is running and answering wrongly, a **crashed** one
 stopped with a code nobody asked for, **OOM-killed** means the kernel took it for memory,

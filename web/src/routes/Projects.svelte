@@ -3,6 +3,8 @@
   import { link } from "$lib/router.svelte";
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
+  import Segmented from "$lib/components/Segmented.svelte";
+  import { relative } from "$lib/format";
   import type { StateKey } from "$lib/servicestate";
 
   // The fleet view.
@@ -70,7 +72,7 @@
       case "drift":
         return p.drift;
       case "restarts":
-        return p.max_restart_count > 0;
+        return p.recent_restarts;
       default:
         return true;
     }
@@ -87,7 +89,7 @@
       p.crashed * 1_000 +
       p.restarting * 100 +
       (p.drift ? 10 : 0) +
-      (p.max_restart_count > 0 ? 1 : 0)
+      (p.recent_restarts ? 1 : 0)
     );
   }
 
@@ -123,6 +125,7 @@
       { key: "unhealthy" as Lens, label: "unhealthy", count: totals.unhealthy, tone: "red" },
       { key: "crashed" as Lens, label: "crashed", count: totals.crashed, tone: "orange" },
       { key: "restarting" as Lens, label: "restarting", count: totals.restarting, tone: "amber" },
+      { key: "restarts" as Lens, label: "stacks restarted today", count: totals.restarts, tone: "amber" },
       // Grey and last: a container someone stopped is a state, not a fault.
       { key: "stopped" as Lens, label: "stopped", count: totals.stopped - totals.crashed, tone: "zinc" },
       { key: "drift" as Lens, label: "stacks with unapplied edits", count: totals.drift, tone: "sky" },
@@ -174,12 +177,18 @@
     if (p.paused > 0) {
       chip("paused", `${p.paused} paused`, "Suspended with docker pause.");
     }
+    // A restart matters while it is recent. Docker's counter never resets, so
+    // a single blip months ago would otherwise wear the same amber badge
+    // forever — and a badge that is always on is one nobody reads. The stale
+    // form is grey and says when, because "it restarted, but a fortnight ago"
+    // is still worth knowing when you are looking at this stack.
     if (p.max_restart_count > 0) {
-      chip(
-        "restarting",
-        `${p.max_restart_count} restarts`,
-        "Highest restart count in this stack, since the container was created.",
-      );
+      const when = p.restarted_at ? ` Last restarted ${relative(p.restarted_at)}.` : "";
+      if (p.recent_restarts) {
+        chip("restarting", `${p.max_restart_count} restarts`, `Restarted recently.${when}`);
+      } else {
+        chip("stopped", `${p.max_restart_count} restarts`, `Stable since.${when}`);
+      }
     }
     if (p.drift) {
       out.push({
@@ -223,17 +232,15 @@
         aria-label="Filter projects"
         class="w-44 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-ring"
       />
-      <div class="flex rounded-md border border-border">
-        {#each [["attention", "Attention"], ["recent", "Recent"], ["name", "Name"]] as [value, label] (value)}
-          <button
-            class="px-3 py-1.5 text-xs transition-colors first:rounded-l-md last:rounded-r-md
-                   {sort === value ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground hover:text-foreground'}"
-            onclick={() => (sort = value as typeof sort)}
-          >
-            {label}
-          </button>
-        {/each}
-      </div>
+      <Segmented
+        label="Sort projects"
+        bind:value={sort}
+        options={[
+          { value: "attention", label: "Attention", title: "Broken stacks first" },
+          { value: "recent", label: "Recent", title: "Most recently seen first" },
+          { value: "name", label: "Name", title: "Alphabetical" },
+        ]}
+      />
       {#if archivedCount > 0}
         <label class="flex items-center gap-2 text-xs text-muted-foreground">
           <input type="checkbox" bind:checked={showArchived} class="accent-emerald-500" />
