@@ -28,6 +28,8 @@ export type SearchResults = components["schemas"]["SearchResults"];
 export type Overview = components["schemas"]["Overview"];
 export type ProjectOverview = components["schemas"]["ProjectOverview"];
 export type NotifyTestResults = components["schemas"]["NotifyTestResults"];
+export type AuditLog = components["schemas"]["AuditLog"];
+export type AuditEntry = components["schemas"]["AuditEntry"];
 export type SessionCount = components["schemas"]["SessionCount"];
 export type ComposeFile = components["schemas"]["ComposeFile"];
 export type FileContent = components["schemas"]["FileContent"];
@@ -95,6 +97,7 @@ export const api = {
   search: (query: string, signal?: AbortSignal) =>
     get<SearchResults>(`/api/search?q=${encodeURIComponent(query)}`, signal),
   overview: (signal?: AbortSignal) => get<Overview>("/api/overview", signal),
+  audit: (limit = 100, signal?: AbortSignal) => get<AuditLog>(`/api/audit?limit=${limit}`, signal),
   timeline: (opts: { from?: number; to?: number; project?: number; bucket?: string } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.from) q.set("from", String(opts.from));
@@ -212,11 +215,40 @@ export type StreamEvent = "ready" | "event" | "snapshot.changed";
  * EventSource reconnects on its own, so there is no retry logic here; the
  * server's `ready` event marks each successful (re)connection.
  */
+/**
+ * Whether the event stream is actually carrying events.
+ *
+ * `connecting` covers both the first attempt and EventSource's own automatic
+ * retry after a drop, because from the reader's side they are the same thing:
+ * not live yet.
+ */
+export type StreamStatus = "connecting" | "live" | "offline";
+
+export type StreamOptions = {
+  /**
+   * Called whenever the connection state changes.
+   *
+   * Without this the indicator lies. EventSource reports a drop through its
+   * `error` event and reconnects on its own, and neither shows up as a named
+   * server event — so a subscription that only listened for named events went
+   * green on the first `ready` and stayed green through a server restart, a
+   * network drop, and a laptop lid closing.
+   */
+  status?: (s: StreamStatus) => void;
+};
+
 export function subscribe(
   handlers: Partial<Record<StreamEvent, (data: unknown) => void>>,
+  options: StreamOptions = {},
 ): () => void {
   const source = new EventSource("/api/stream");
   const listeners: Array<[string, EventListener]> = [];
+  let closed = false;
+
+  const report = (s: StreamStatus) => {
+    if (!closed) options.status?.(s);
+  };
+  report("connecting");
 
   for (const [name, handler] of Object.entries(handlers)) {
     if (!handler) continue;
@@ -231,7 +263,18 @@ export function subscribe(
     listeners.push([name, listener]);
   }
 
+  const onOpen: EventListener = () => report("live");
+  const onError: EventListener = () => {
+    // EventSource retries by itself unless it has given up for good, so a
+    // CLOSED readyState is the only genuinely terminal case.
+    report(source.readyState === EventSource.CLOSED ? "offline" : "connecting");
+  };
+  source.addEventListener("open", onOpen);
+  source.addEventListener("error", onError);
+  listeners.push(["open", onOpen], ["error", onError]);
+
   return () => {
+    closed = true;
     for (const [name, listener] of listeners) source.removeEventListener(name, listener);
     source.close();
   };

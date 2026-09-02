@@ -207,6 +207,7 @@ func (s *Server) takeSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "snapshot failed")
 		return
 	}
+	s.audit(r, store.AuditSnapshotForced, map[string]any{"project_id": id})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "taken"})
 }
 

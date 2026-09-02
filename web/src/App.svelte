@@ -1,13 +1,13 @@
 <script lang="ts">
   import { router, link } from "$lib/router.svelte";
-  import { subscribe, api, type Project, type AuthState } from "$lib/api/client";
+  import { subscribe, api, type Project, type AuthState, type StreamStatus } from "$lib/api/client";
   import { prefs } from "$lib/prefs.svelte";
   import Login from "$lib/components/Login.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import SiltMark from "$lib/components/SiltMark.svelte";
   import SearchBox from "$lib/components/SearchBox.svelte";
-  import ThemeToggle from "$lib/components/ThemeToggle.svelte";
-  import VersionButton from "$lib/components/VersionButton.svelte";
+  import StatusMenu from "$lib/components/StatusMenu.svelte";
+  import Changelog from "$lib/components/Changelog.svelte";
   import Timeline from "./routes/Timeline.svelte";
   import Projects from "./routes/Projects.svelte";
   import Search from "./routes/Search.svelte";
@@ -17,9 +17,31 @@
   import Files from "./routes/Files.svelte";
   import Settings from "./routes/Settings.svelte";
 
-  type Status = "connecting" | "live" | "offline";
+  let status = $state<StreamStatus>("connecting");
+  // When the current status began, so the menu can say how long it has been
+  // live rather than only that it is.
+  let statusSince = $state(Date.now());
 
-  let status = $state<Status>("connecting");
+  // Deliberately a plain variable, not $state.
+  //
+  // setStatus is called synchronously while the subscription effect is being
+  // set up. Reading a rune there would make the effect depend on it, and the
+  // very next line writes it — so the effect re-runs, tears down the
+  // EventSource, opens another, reports "connecting" again, and loops. The
+  // symptom was a status stuck on "Reconnecting…" over a server that was
+  // answering perfectly, and a page opening a new stream several times a
+  // second. Comparison state that a subscription callback touches must stay
+  // outside the reactive graph.
+  let lastStatus: StreamStatus = "connecting";
+
+  function setStatus(next: StreamStatus) {
+    if (next !== lastStatus) {
+      lastStatus = next;
+      statusSince = Date.now();
+    }
+    status = next;
+  }
+  let changelogOpen = $state(false);
   let projects = $state<Project[]>([]);
   // Bumped on every server-sent event; screens depend on it to refetch.
   let reloadKey = $state(0);
@@ -68,27 +90,36 @@
       }, 400);
     };
 
-    const unsubscribe = subscribe({
-      ready: () => (status = "live"),
-      event: bump,
-      "snapshot.changed": () => {
-        bump();
-        api.projects().then((p) => (projects = p)).catch(() => {});
+    const unsubscribe = subscribe(
+      {
+        event: bump,
+        "snapshot.changed": () => {
+          bump();
+          api.projects().then((p) => (projects = p)).catch(() => {});
+        },
       },
-    });
+      {
+        // The connection reports itself now. It used to go live on the first
+        // `ready` frame and stay there: a server restart, a dropped network or
+        // a closed laptop lid all left a green dot over a page that had
+        // stopped updating.
+        status: setStatus,
+      },
+    );
 
     return () => {
       controller.abort();
       if (pending) clearTimeout(pending);
       unsubscribe();
-      status = "offline";
     };
   });
 
   const route = $derived(router.current);
-  const dotClass = $derived(
-    status === "live" ? "bg-emerald-400" : status === "connecting" ? "bg-zinc-500" : "bg-red-400",
-  );
+
+  async function signOut() {
+    await api.logout();
+    await refreshAuth();
+  }
 
   // The top-level destinations. A project screen still counts as Projects, so
   // the navigation keeps telling you where you are once you have drilled in.
@@ -190,58 +221,51 @@
         class="mr-2 flex items-center gap-2 text-[15px] font-semibold tracking-tight {side ? 'w-[13.5rem]' : ''}"
       >
         <SiltMark size={17} marker="#34d399" />
-        Silt
+        <!-- The mark alone identifies Silt; the word is what does not fit. -->
+        <span class="hidden sm:inline">Silt</span>
       </a>
 
       {#if !side}
+        <!-- Icons only below sm. The mark, three labelled links, a search box
+             and the status button do not fit a 390px header, and the overflow
+             was invisible until opening the menu scrolled the page sideways to
+             bring the menu into view. Hiding the nav outright was the other
+             option and a worse one: on Settings and Projects there is no rail
+             in this layout, so a phone would have had no navigation at all. -->
         <nav class="flex items-center gap-0.5" aria-label="Sections">
           {#each SECTIONS as section (section.href)}
             <a
               use:link
               href={section.href}
               onclick={() => (navOpen = false)}
-              class="rounded-md px-2.5 py-1.5 text-sm transition-colors {isActive(section.matches)
+              title={section.label}
+              aria-label={section.label}
+              class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors sm:px-2.5
+                     {isActive(section.matches)
                 ? 'bg-secondary text-secondary-foreground'
                 : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
             >
-              {section.label}
+              <span class="sm:hidden">{@render navIcon(section.icon)}</span>
+              <span class="hidden sm:inline">{section.label}</span>
             </a>
           {/each}
         </nav>
       {/if}
 
+      <!-- Search stays out here: it is the one control in this corner you
+           reach for constantly, and `/` has to hit something visible.
+           Everything else — connection, version, theme, identity, sign out —
+           is behind one button. Five controls of five shapes at the same
+           weight was a row of widgets, not a header. -->
       <div class="ml-auto flex items-center gap-1.5 text-xs">
         <SearchBox />
-        <span
-          class="mr-1 hidden items-center gap-1.5 text-muted-foreground sm:flex"
-          title="Live update stream"
-        >
-          <span class="size-2 rounded-full {dotClass}" aria-hidden="true"></span>
+        <StatusMenu
           {status}
-        </span>
-        <VersionButton />
-        <ThemeToggle />
-        {#if auth?.required && auth.method && auth.method !== "proxy"}
-          <button
-            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
-            onclick={async () => {
-              await api.logout();
-              await refreshAuth();
-            }}
-            title={auth.subject ? `Signed in as ${auth.subject}` : "Sign out"}
-          >
-            {#if auth.subject}
-              <span class="hidden max-w-32 truncate sm:inline">{auth.subject}</span>
-            {/if}
-            Sign out
-          </button>
-        {:else if auth?.subject}
-          <!-- Forward auth: the proxy decides, so there is no session for Silt
-               to end. Showing who you are is still worth it. -->
-          <span class="hidden max-w-40 truncate px-2 text-muted-foreground sm:inline" title="Identity asserted by your reverse proxy">
-            {auth.subject}
-          </span>
-        {/if}
+          since={statusSince}
+          {auth}
+          onSignOut={signOut}
+          onShowChangelog={() => (changelogOpen = true)}
+        />
       </div>
     </header>
 
@@ -281,5 +305,9 @@
         </div>
       </main>
     </div>
+
+    <!-- Mounted at the shell rather than inside the menu, so opening it does
+         not depend on the menu staying open. -->
+    <Changelog bind:open={changelogOpen} />
   </div>
 {/if}

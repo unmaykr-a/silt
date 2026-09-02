@@ -49,6 +49,7 @@ type Overrides struct {
 	RetentionDays          *int      `json:"retention_days,omitempty"`
 	UnchangedRetentionDays *int      `json:"unchanged_retention_days,omitempty"`
 	EventRetentionDays     *int      `json:"event_retention_days,omitempty"`
+	AuditRetentionDays     *int      `json:"audit_retention_days,omitempty"`
 	RetentionIntervalMS    *int64    `json:"retention_interval_ms,omitempty"`
 	VacuumIntervalMS       *int64    `json:"vacuum_interval_ms,omitempty"`
 	KeepKeys               *[]string `json:"keep_keys,omitempty"`
@@ -68,6 +69,7 @@ var Fields = []string{
 	"retention_days",
 	"unchanged_retention_days",
 	"event_retention_days",
+	"audit_retention_days",
 	"retention_interval_ms",
 	"vacuum_interval_ms",
 	"keep_keys",
@@ -90,6 +92,9 @@ func (o Overrides) apply(base config.Config) config.Config {
 	}
 	if o.UnchangedRetentionDays != nil {
 		c.UnchangedRetentionDays = *o.UnchangedRetentionDays
+	}
+	if o.AuditRetentionDays != nil {
+		c.AuditRetentionDays = *o.AuditRetentionDays
 	}
 	if o.EventRetentionDays != nil {
 		c.EventRetentionDays = *o.EventRetentionDays
@@ -137,6 +142,7 @@ func (o Overrides) Set() map[string]bool {
 	mark("retention_days", o.RetentionDays != nil)
 	mark("unchanged_retention_days", o.UnchangedRetentionDays != nil)
 	mark("event_retention_days", o.EventRetentionDays != nil)
+	mark("audit_retention_days", o.AuditRetentionDays != nil)
 	mark("retention_interval_ms", o.RetentionIntervalMS != nil)
 	mark("vacuum_interval_ms", o.VacuumIntervalMS != nil)
 	mark("keep_keys", o.KeepKeys != nil)
@@ -330,6 +336,9 @@ func merge(current, patch Overrides) Overrides {
 	if patch.UnchangedRetentionDays != nil {
 		out.UnchangedRetentionDays = patch.UnchangedRetentionDays
 	}
+	if patch.AuditRetentionDays != nil {
+		out.AuditRetentionDays = patch.AuditRetentionDays
+	}
 	if patch.EventRetentionDays != nil {
 		out.EventRetentionDays = patch.EventRetentionDays
 	}
@@ -375,6 +384,8 @@ func clearFields(o Overrides, names []string) Overrides {
 			o.UnchangedRetentionDays = nil
 		case "event_retention_days":
 			o.EventRetentionDays = nil
+		case "audit_retention_days":
+			o.AuditRetentionDays = nil
 		case "retention_interval_ms":
 			o.RetentionIntervalMS = nil
 		case "vacuum_interval_ms":

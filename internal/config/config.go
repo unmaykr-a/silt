@@ -43,6 +43,11 @@ type Config struct {
 	// EventRetentionDays is separate because event volume exceeds snapshot
 	// volume by orders of magnitude.
 	EventRetentionDays int `env:"SILT_EVENT_RETENTION_DAYS" envDefault:"90"`
+	// AuditRetentionDays covers the administrative trail: who changed Silt's
+	// own settings, who signed in, who ran a prune. Kept far longer than
+	// events because the table is tiny — a row per administrative action, not
+	// per observation — and its entire value is how far back it reaches.
+	AuditRetentionDays int `env:"SILT_AUDIT_RETENTION_DAYS" envDefault:"730"`
 	// VacuumInterval of 0 disables vacuuming.
 	VacuumInterval time.Duration `env:"SILT_VACUUM_INTERVAL" envDefault:"0"`
 	// RetentionInterval is how often the retention pass runs.
@@ -174,6 +179,7 @@ func (c *Config) Validate() error {
 		"SILT_RETENTION_DAYS":           c.RetentionDays,
 		"SILT_UNCHANGED_RETENTION_DAYS": c.UnchangedRetentionDays,
 		"SILT_EVENT_RETENTION_DAYS":     c.EventRetentionDays,
+		"SILT_AUDIT_RETENTION_DAYS":     c.AuditRetentionDays,
 	} {
 		if days < 0 {
 			return fmt.Errorf("%s must not be negative, got %d", name, days)

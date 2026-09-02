@@ -4,14 +4,29 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 SQLC_VERSION ?= v1.31.1
 
-.PHONY: check build web run test fmt tidy clean docker sqlc changelog
+.PHONY: check fmtcheck build web run test fmt tidy clean docker sqlc changelog
 
 ## check: the gate every milestone must pass
-check:
+##
+## It runs what CI runs, in CI's order. It used to skip gofmt, which CI
+## enforces as its own step — so `make check` passed locally and CI failed on
+## a stray blank line. A local gate that does not match the remote one is
+## worse than no local gate, because it is trusted.
+check: fmtcheck
 	$(GO) build ./...
 	$(GO) vet ./...
 	$(GO) test ./...
 	$(NPM) --prefix web run build
+
+## fmtcheck: fail if anything needs gofmt (CI runs this same command)
+fmtcheck:
+	@unformatted=$$(gofmt -l ./cmd ./internal); \
+	if [ -n "$$unformatted" ]; then \
+		echo "These files need gofmt:"; \
+		echo "$$unformatted"; \
+		echo "Run: make fmt"; \
+		exit 1; \
+	fi
 
 ## web: build the frontend into the Go embed directory
 web:

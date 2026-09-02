@@ -20,6 +20,14 @@ type RetentionPolicy struct {
 	// volume by orders of magnitude, so it gets its own dial rather than
 	// inheriting the long snapshot tier.
 	Events time.Duration
+	// Audit keeps rows in audit_log.
+	//
+	// Its own dial, and by default a long one. The administrative trail is
+	// tiny — a row per settings change, not per observation — and it is the
+	// one table whose value is entirely in how far back it goes. Inheriting
+	// the event tier would throw away the answer to "who changed this" after
+	// a fortnight to save a few kilobytes.
+	Audit time.Duration
 }
 
 // PruneStats reports one retention pass.
@@ -27,6 +35,7 @@ type PruneStats struct {
 	UnchangedSnapshots int64
 	ChangedSnapshots   int64
 	Events             int64
+	Audit              int64
 	Blobs              int64
 }
 
@@ -58,6 +67,14 @@ func (s *Store) Prune(ctx context.Context, policy RetentionPolicy, now time.Time
 				return fmt.Errorf("prune events: %w", err)
 			}
 			stats.Events = n
+		}
+
+		if policy.Audit > 0 {
+			n, err := q.PruneAudit(ctx, now.Add(-policy.Audit).UnixMilli())
+			if err != nil {
+				return fmt.Errorf("prune audit log: %w", err)
+			}
+			stats.Audit = n
 		}
 
 		// GC must run after the deletes and inside the same transaction, and

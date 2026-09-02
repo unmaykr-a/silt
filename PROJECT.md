@@ -619,6 +619,7 @@ GET  /api/events?from=&to=&project=&service=&type=&severity=&limit=
 GET  /api/timeline?from=&to=&project=&bucket=  -- merged, bucketed snapshots + events
 GET  /api/search?q=                        -- projects, services, env keys, files, events
 GET  /api/overview                         -- every project with its current state
+GET  /api/audit?before=&limit=             -- who changed Silt itself
 GET  /api/stream                           -- SSE: snapshot.changed, event
 POST /api/ingest                           -- generic external event webhook
 GET  /healthz  /readyz  /metrics
@@ -978,6 +979,30 @@ miserable, and second granularity collides on `UNIQUE (project_id, taken_at)`.
 5. Show HN last, once the first round of issues is closed.
 
 ---
+
+### More than one person (planned, not built)
+
+Silt is built for one operator, and says so: `local_account` has a `CHECK (id = 1)`
+because a table of users would be a user system nobody asked for. That holds. What does
+not hold in a larger environment is everything *around* identity, and the parts worth
+building are these, in order:
+
+1. **An activity trail** — *shipped in 0.9.0.* Who changed a setting, ran a prune, signed
+   in, was refused. It is the first question anyone asks the moment a second person can
+   sign in, and it cannot be answered retroactively, which is why it came first.
+2. **Read-only vs administrator.** Silt is already read-only against Docker; the split
+   that matters is between reading the journal and changing Silt's own configuration.
+   The natural key is an OIDC group — `SILT_OIDC_ADMIN_GROUPS` alongside the existing
+   allowlist — with everyone else able to read every screen and change nothing but their
+   own appearance preferences. No roles table: the provider already manages groups, and
+   duplicating them here would be two sources of truth that agree until they do not.
+3. **Per-project visibility.** The harder one, and the one to resist until somebody asks.
+   It means an authorisation check on every read path rather than one at the door, and it
+   changes what search may return — a search that reveals the *names* of projects you
+   cannot open is a leak that looks like a feature.
+
+None of this needs a user table. Identity keeps coming from the provider; Silt keeps
+recording who it was at the time.
 
 ## 15. What changed from the first draft
 
@@ -1441,7 +1466,67 @@ Changed:
     exited 0 and later exited 137 would be indistinguishable from the first
     stop and get touched onto the existing snapshot rather than recorded.
 
-60. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+60. **Five controls in one corner is a row of widgets, not a header
+    (0.9.0)** — search, a status dot, a version button, a theme toggle and a
+    sign-out button, five shapes at one weight. Four of them are things you
+    check occasionally and change more rarely, which is what a menu is for.
+    Search stays outside because it is the one you reach for constantly and
+    `/` has to land on something visible.
+
+    Collapsing them was not only tidying: inside the menu each has room to say
+    what it means. "offline" became "Not receiving updates — this page may be
+    out of date"; the version gained its build stamp as selectable text,
+    because that is the string that goes in a bug report.
+
+61. **The live indicator lied (0.9.0)** — it went green on the first `ready`
+    frame and stayed green through a server restart, a dropped network and a
+    closed laptop lid. `subscribe()` only listened for *named* server events,
+    and a connection dropping is not one: EventSource reports it through its
+    own `error` event and reconnects by itself. Neither was observed.
+
+    An indicator that cannot go backwards is worse than no indicator, because
+    a stale page and a live one look identical and one of them is trusted.
+
+62. **Reading state in a subscription callback re-entered the effect
+    (0.9.0)** — the first fix for the above set status through a callback that
+    compared against the current value. That read runs synchronously while the
+    effect is being set up, so the effect took a dependency on the thing it
+    was about to write: it re-ran, tore down the EventSource, opened another,
+    and looped several times a second. The symptom was a status stuck on
+    "Reconnecting…" over a server answering perfectly.
+
+    The rule: comparison state a subscription callback touches stays outside
+    the reactive graph. A plain `let`, not a rune.
+
+63. **One clock, not one per timestamp (0.9.0)** — every `<Timestamp>` owned a
+    30-second `setInterval`. Fine for a handful; the timeline renders a few
+    hundred, each waking on its own phase, so the page updated as a ripple.
+    One reference-counted ticker that stops when nothing is reading it.
+
+    Its lifecycle lives in a plain `.ts` beside the rune module, because the
+    vitest config has no Svelte plugin and cannot import a `.svelte.ts` — the
+    same split `diffexport.ts` needed, now a pattern rather than a workaround.
+
+64. **A local gate that does not match CI (0.9.0)** — `make check` skipped the
+    gofmt step CI runs separately, so it passed locally and CI failed on a
+    stray blank line. That is worse than having no local gate, because the
+    local one is trusted. `make check` now depends on `make fmtcheck`, which
+    runs CI's exact command.
+
+65. **Silt journals itself (0.9.0)** — see Section 14. The trail records what
+    changed and never what it changed to: the settings screen holds an ingest
+    token and notification URLs, and this is a table built to be read. There
+    is a test that plants sentinel secrets, changes those settings, and fails
+    if either appears in the audit response — verified against a deliberately
+    careless version that recorded the patch, which it caught.
+
+    `actor` is a display string, not a foreign key. Identity comes from three
+    unrelated places and none of them is a row Silt owns, so what is recorded
+    is who it was at the time. An install with no authentication records no
+    actor at all rather than inventing "admin", which would read as a real
+    account on a Silt where anyone who can reach the port is one.
+
+66. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

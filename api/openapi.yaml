@@ -946,6 +946,44 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Overview" }
 
+  /api/audit:
+    get:
+      tags: [system]
+      summary: What people did to Silt itself
+      description: |
+        Silt records what changed on the host. This is the same question asked
+        about Silt: who edited retention, who ran a prune that deleted history,
+        who signed in and failed.
+
+        On a single-operator install the answer is always "me", which is why it
+        did not exist. The moment a second person can sign in it is the first
+        question anyone asks, and it cannot be answered retroactively.
+
+        Deliberately narrow: one row per action that changes state or grants
+        access, never one row per page view. `detail` says what changed and
+        never what it changed to — the settings screen holds an ingest token
+        and notification URLs, and this is a table built to be read.
+
+        `actor` is a display string rather than a reference. Identity comes
+        from three unrelated places — the built-in account, an OIDC subject, a
+        header from a trusted proxy — and none is a row Silt owns, so what is
+        recorded is who it was at the time.
+      operationId: listAudit
+      parameters:
+        - name: before
+          in: query
+          schema: { type: integer, format: int64 }
+          description: Return entries older than this timestamp, for paging.
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200":
+          description: The trail, newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditLog" }
+
   /api/settings:
     get:
       tags: [system]
@@ -1388,6 +1426,39 @@ components:
           type: array
           items: { $ref: "#/components/schemas/EnvKeyChange" }
 
+    AuditEntry:
+      type: object
+      required: [id, ts, action, ok]
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: integer, format: int64 }
+        actor:
+          type: string
+          description: >-
+            Who did it, as they were named at the time. Empty when Silt acted
+            on its own, or when no authentication is configured — inventing an
+            actor there would read as a real account.
+        method:
+          type: string
+          description: How they were identified.
+          enum: [local, oidc, proxy, system]
+        action: { type: string }
+        ok: { type: boolean, description: False for an action that was refused. }
+        detail:
+          type: object
+          additionalProperties: true
+          description: What changed. Never what it changed to.
+        remote: { type: string }
+
+    AuditLog:
+      type: object
+      required: [entries, total]
+      properties:
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEntry" }
+        total: { type: integer, format: int64 }
+
     ProjectOverview:
       type: object
       required:
@@ -1573,14 +1644,15 @@ components:
       type: object
       required:
         [snapshot_interval_ms, retention_days, unchanged_retention_days,
-         event_retention_days, retention_interval_ms, vacuum_interval_ms,
-         keep_keys, base_url, log_level, notify_targets, notify_on,
-         notify_min_severity, ingest_configured]
+         event_retention_days, audit_retention_days, retention_interval_ms,
+         vacuum_interval_ms, keep_keys, base_url, log_level, notify_targets,
+         notify_on, notify_min_severity, ingest_configured]
       properties:
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }
         unchanged_retention_days: { type: integer }
         event_retention_days: { type: integer }
+        audit_retention_days: { type: integer }
         retention_interval_ms: { type: integer, format: int64 }
         vacuum_interval_ms: { type: integer, format: int64 }
         keep_keys:
@@ -1667,6 +1739,7 @@ components:
         retention_days: { type: integer }
         unchanged_retention_days: { type: integer }
         event_retention_days: { type: integer }
+        audit_retention_days: { type: integer }
         retention_interval_ms: { type: integer, format: int64 }
         vacuum_interval_ms: { type: integer, format: int64 }
         keep_keys:

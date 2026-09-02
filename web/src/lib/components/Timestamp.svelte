@@ -1,6 +1,7 @@
 <script lang="ts">
   import { relative, absolute, datetime } from "$lib/format";
   import { prefs } from "$lib/prefs.svelte";
+  import { clock } from "$lib/clock.svelte";
 
   // Every timestamp shows one form with the other on hover (PROJECT.md
   // Section 9). Which one leads is the reader's choice: relative reads faster
@@ -9,17 +10,16 @@
   // else; the server stores UTC milliseconds.
   let { ts, class: className = "" }: { ts: number; class?: string } = $props();
 
-  // Re-render periodically so "3m ago" does not go stale on an idle page.
-  let now = $state(Date.now());
-  $effect(() => {
-    if (prefs.timestamps !== "relative") return;
-    const id = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(id);
-  });
-
   const showRelative = $derived(prefs.timestamps === "relative");
-  const label = $derived(showRelative ? relative(ts, now) : datetime(ts));
-  const hover = $derived(showRelative ? absolute(ts) : relative(ts, now));
+
+  // Re-render periodically so "3m ago" does not go stale on an idle page. The
+  // clock is shared: this component renders a few hundred times on the
+  // timeline, and a few hundred private timers doing the same thing is the
+  // same behaviour for a great deal more work.
+  $effect(() => clock.subscribe());
+
+  const label = $derived(showRelative ? relative(ts, clock.now) : datetime(ts));
+  const hover = $derived(showRelative ? absolute(ts) : relative(ts, clock.now));
 </script>
 
 <time datetime={new Date(ts).toISOString()} title={hover} class={className}>

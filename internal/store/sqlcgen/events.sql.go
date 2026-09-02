@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const countAudit = `-- name: CountAudit :one
+SELECT COUNT(*) FROM audit_log
+`
+
+func (q *Queries) CountAudit(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countAudit)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countEvents = `-- name: CountEvents :one
 SELECT COUNT(*) FROM events
 `
@@ -19,6 +30,34 @@ func (q *Queries) CountEvents(ctx context.Context) (int64, error) {
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const insertAudit = `-- name: InsertAudit :exec
+INSERT INTO audit_log (ts, actor, method, action, ok, detail, remote)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertAuditParams struct {
+	Ts     int64
+	Actor  string
+	Method string
+	Action string
+	Ok     int64
+	Detail string
+	Remote string
+}
+
+func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
+	_, err := q.db.ExecContext(ctx, insertAudit,
+		arg.Ts,
+		arg.Actor,
+		arg.Method,
+		arg.Action,
+		arg.Ok,
+		arg.Detail,
+		arg.Remote,
+	)
+	return err
 }
 
 const insertEvent = `-- name: InsertEvent :one
@@ -68,6 +107,50 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (Event
 		&i.Payload,
 	)
 	return i, err
+}
+
+const listAudit = `-- name: ListAudit :many
+SELECT id, ts, actor, method, "action", ok, detail, remote FROM audit_log
+WHERE ts < ?1
+ORDER BY ts DESC, id DESC
+LIMIT ?2
+`
+
+type ListAuditParams struct {
+	Before  int64
+	MaxRows int64
+}
+
+func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]AuditLog, error) {
+	rows, err := q.db.QueryContext(ctx, listAudit, arg.Before, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditLog{}
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Ts,
+			&i.Actor,
+			&i.Method,
+			&i.Action,
+			&i.Ok,
+			&i.Detail,
+			&i.Remote,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEvents = `-- name: ListEvents :many
@@ -135,4 +218,16 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]Event
 		return nil, err
 	}
 	return items, nil
+}
+
+const pruneAudit = `-- name: PruneAudit :execrows
+DELETE FROM audit_log WHERE ts < ?1
+`
+
+func (q *Queries) PruneAudit(ctx context.Context, cutoff int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, pruneAudit, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

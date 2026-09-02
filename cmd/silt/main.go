@@ -144,6 +144,7 @@ func run() error {
 					Changed:   config.Days(c.RetentionDays),
 					Unchanged: config.Days(c.UnchangedRetentionDays),
 					Events:    config.Days(c.EventRetentionDays),
+					Audit:     config.Days(c.AuditRetentionDays),
 				},
 				Interval: c.RetentionInterval,
 				Vacuum:   c.VacuumInterval,
