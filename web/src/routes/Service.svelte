@@ -4,6 +4,7 @@
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
   import { shortDigest, datetime, duration } from "$lib/format";
+  import { serviceState, stateLegend, type StateKey } from "$lib/servicestate";
 
   let { projectId, service }: { projectId: number; service: string } = $props();
 
@@ -74,21 +75,30 @@
   // Health and state over the same window as the restarts, so the two read
   // together: a service that restarted four times and is now unhealthy is one
   // story, not two facts on separate rows.
-  const stateRun = $derived(observations.map((o) => ({ state: o.state, health: o.health })).reverse());
+  const stateRun = $derived(observations.map((o) => serviceState(o)).reverse());
 
-  function stateColour(state?: string, health?: string): string {
-    if (health === "unhealthy") return "bg-red-500";
-    if (health === "starting") return "bg-amber-500";
-    if (state === "running") return health === "healthy" ? "bg-emerald-500" : "bg-emerald-500/60";
-    if (state === "restarting") return "bg-amber-500";
-    if (state === "exited" || state === "dead") return "bg-red-500/70";
-    return "bg-zinc-400/40 dark:bg-zinc-600";
-  }
+  // Colour and wording come from the shared vocabulary rather than from here:
+  // this file used to paint an unhealthy container bg-red-500 and a stopped
+  // one bg-red-500/70, two shades of one red at the eight pixels a timeline
+  // mark gets, which made the strip unreadable for the exact question it is
+  // for.
+  const currentState = $derived(current ? serviceState(current) : null);
 
-  function stateLabel(o: ServiceObservation): string {
-    const parts = [o.state, o.health].filter(Boolean);
-    return parts.length > 0 ? parts.join(" · ") : "unknown";
-  }
+  // Which distinct states this service has actually been in, so the legend
+  // explains the marks on screen instead of the full catalogue.
+  //
+  // Ordered by the shared severity list rather than by when each first
+  // appeared: a legend that reshuffles itself between two services is one you
+  // have to re-read every time.
+  const legendShown = $derived.by(() => {
+    const seen = new Map<StateKey, ReturnType<typeof serviceState>>();
+    for (const o of observations) {
+      const s = serviceState(o);
+      if (!seen.has(s.key)) seen.set(s.key, s);
+    }
+    const order = stateLegend.map((e) => e.key);
+    return [...seen.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  });
 
   const envChanges = $derived(history?.env_changes ?? []);
 </script>
@@ -101,9 +111,9 @@
     <div class="mt-1 flex flex-wrap items-baseline gap-3">
       <h2 class="text-2xl font-semibold tracking-tight">{service}</h2>
       {#if current}
-        <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span class="size-2 rounded-full {stateColour(current.state, current.health)}"></span>
-          {stateLabel(current)}
+        <span class="inline-flex items-center gap-1.5 text-xs" title={currentState?.detail}>
+          <span class="size-2 rounded-full {currentState?.dot}"></span>
+          <span class={currentState?.text}>{currentState?.label}</span>
         </span>
       {/if}
     </div>
@@ -229,15 +239,21 @@
            story rather than two facts on separate rows. -->
       <div class="mt-2 flex h-2 gap-px overflow-hidden rounded-sm" aria-label="state over time">
         {#each stateRun as point, i (i)}
-          <div
-            class="flex-1 {stateColour(point.state, point.health)}"
-            title="{[point.state, point.health].filter(Boolean).join(' · ') || 'unknown'}"
-          ></div>
+          <div class="flex-1 {point.dot}" title="{point.label} — {point.detail}"></div>
         {/each}
       </div>
-      <p class="mt-1 text-[11px] text-muted-foreground/60">
-        Oldest to newest, one mark per observation.
-      </p>
+      <!-- A legend of only the states this service has actually been in. A
+           strip of coloured marks with no key is decoration, and the full
+           catalogue for a service that has only ever run is noise. -->
+      <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {#each legendShown as entry (entry.key)}
+          <span class="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title={entry.detail}>
+            <span class="size-1.5 rounded-full {entry.dot}"></span>
+            {entry.label}
+          </span>
+        {/each}
+        <span class="text-[11px] text-muted-foreground/60">oldest to newest, one mark per observation</span>
+      </div>
     </section>
 
     <section>

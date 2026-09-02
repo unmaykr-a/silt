@@ -39,7 +39,7 @@ func withFiles(obs compose.Observation, content string) compose.Observation {
 func TestOverviewCountsServiceStates(t *testing.T) {
 	db, r := openTestStore(t)
 	id := newProject(t, db)
-	writeSnap(t, db, id, observation(t, r, serviceOpts{state: "exited", health: "unhealthy", restartCount: 4}))
+	writeSnap(t, db, id, observation(t, r, serviceOpts{state: "exited", restartCount: 4, exitCode: intp(137)}))
 
 	got := overviewOf(t, db, "media")
 	if got.Services != 1 {
@@ -48,14 +48,17 @@ func TestOverviewCountsServiceStates(t *testing.T) {
 	if got.Running != 0 || got.Stopped != 1 {
 		t.Errorf("running/stopped = %d/%d, want 0/1", got.Running, got.Stopped)
 	}
-	if got.Unhealthy != 1 {
-		t.Errorf("unhealthy = %d, want 1", got.Unhealthy)
+	if got.Crashed != 1 {
+		t.Errorf("crashed = %d, want 1", got.Crashed)
 	}
-	if got.Restarts != 4 {
-		t.Errorf("restarts = %d, want 4", got.Restarts)
+	if got.Unhealthy != 0 {
+		t.Errorf("unhealthy = %d; a stopped container is not an unhealthy one", got.Unhealthy)
+	}
+	if got.MaxRestartCount != 4 {
+		t.Errorf("max restart count = %d, want 4", got.MaxRestartCount)
 	}
 	if !got.Attention() {
-		t.Error("a stopped, unhealthy, restarting stack does not want attention")
+		t.Error("a crashed stack does not want attention")
 	}
 }
 
@@ -177,3 +180,84 @@ func TestOverviewIncludesAProjectWithNoSnapshots(t *testing.T) {
 		t.Error("a project Silt has not snapshotted yet is not a problem to look at")
 	}
 }
+
+// The distinction the counts exist for: an unhealthy container is running and
+// answering wrongly, a stopped one is not running at all, and a restarting one
+// is in a crash loop. Rolling them into a single "not running" number was why
+// the screen could not say which you were looking at.
+func TestOverviewKeepsFailureModesApart(t *testing.T) {
+	cases := []struct {
+		name string
+		opts serviceOpts
+		want store.ProjectOverview
+	}{
+		{
+			name: "unhealthy is running",
+			opts: serviceOpts{state: "running", health: "unhealthy"},
+			want: store.ProjectOverview{Running: 1, Unhealthy: 1},
+		},
+		{
+			name: "stopped cleanly is not a crash",
+			opts: serviceOpts{state: "exited", exitCode: intp(0)},
+			want: store.ProjectOverview{Stopped: 1},
+		},
+		{
+			name: "stopped with a code is a crash",
+			opts: serviceOpts{state: "exited", exitCode: intp(1)},
+			want: store.ProjectOverview{Stopped: 1, Crashed: 1},
+		},
+		{
+			name: "killed for memory",
+			opts: serviceOpts{state: "exited", exitCode: intp(137), oomKilled: true},
+			want: store.ProjectOverview{Stopped: 1, Crashed: 1, OOMKilled: 1},
+		},
+		{
+			name: "restarting is its own thing",
+			opts: serviceOpts{state: "restarting"},
+			want: store.ProjectOverview{Restarting: 1},
+		},
+		{
+			name: "paused is not stopped",
+			opts: serviceOpts{state: "paused"},
+			want: store.ProjectOverview{Paused: 1},
+		},
+		{
+			name: "starting healthcheck is not unhealthy",
+			opts: serviceOpts{state: "running", health: "starting"},
+			want: store.ProjectOverview{Running: 1, Starting: 1},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, r := openTestStore(t)
+			id := newProject(t, db)
+			writeSnap(t, db, id, observation(t, r, tc.opts))
+
+			got := overviewOf(t, db, "media")
+			if got.Running != tc.want.Running || got.Stopped != tc.want.Stopped ||
+				got.Restarting != tc.want.Restarting || got.Paused != tc.want.Paused ||
+				got.Starting != tc.want.Starting || got.Unhealthy != tc.want.Unhealthy ||
+				got.Crashed != tc.want.Crashed || got.OOMKilled != tc.want.OOMKilled {
+				t.Errorf("\n got running=%d stopped=%d restarting=%d paused=%d starting=%d unhealthy=%d crashed=%d oom=%d"+
+					"\nwant running=%d stopped=%d restarting=%d paused=%d starting=%d unhealthy=%d crashed=%d oom=%d",
+					got.Running, got.Stopped, got.Restarting, got.Paused, got.Starting, got.Unhealthy, got.Crashed, got.OOMKilled,
+					tc.want.Running, tc.want.Stopped, tc.want.Restarting, tc.want.Paused, tc.want.Starting, tc.want.Unhealthy, tc.want.Crashed, tc.want.OOMKilled)
+			}
+		})
+	}
+}
+
+// A container someone stopped on purpose is not a problem to go and look at.
+// This is the case that made "everything not running is a problem" wrong.
+func TestOverviewDeliberatelyStoppedWantsNoAttention(t *testing.T) {
+	db, r := openTestStore(t)
+	id := newProject(t, db)
+	writeSnap(t, db, id, observation(t, r, serviceOpts{state: "exited", exitCode: intp(0)}))
+
+	if got := overviewOf(t, db, "media"); got.Attention() {
+		t.Errorf("a cleanly stopped stack wants attention: %+v", got)
+	}
+}
+
+func intp(v int) *int { return &v }

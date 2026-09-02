@@ -5,6 +5,27 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.8.0 — 2026-09-02
+
+A stopped container and an unhealthy one are not the same thing.
+
+### Added
+
+- Exit codes. Silt now records why a container stopped, so "exited (0)" and "exited (137)" are different things on screen: one is someone stopping a stack, the other is something dying. A container killed by the kernel for memory is reported as OOM-killed rather than as exit 137, because an OOM kill and a docker kill share that code and only one of them is a memory limit to go and raise.
+- The service timeline has a legend, showing only the states that service has actually been in, in a fixed severity order so it does not reshuffle between services.
+
+### Changed
+
+- One state vocabulary everywhere. Running, starting, unhealthy, restarting, crashed, OOM-killed, stopped and paused each have their own colour and their own words, and a badge on the Projects screen now means the same thing as a dot on the service page and a row in the service table.
+- A container someone stopped on purpose is no longer flagged as a problem. It is grey, it does not put its stack in the attention list, and it does not colour anything red — colouring a deliberate stop red is how people learn to ignore red.
+- The Projects screen filters one failure mode at a time: unhealthy, crashed, restarting and stopped are separate chips rather than one "not running" number that named none of them.
+- The project's service table had a State column and a Health column of raw Docker strings, leaving "running / unhealthy" for the reader to interpret. It is one column with one verdict and the reason on hover.
+- Upgrading writes one new snapshot per project. The exit code is part of the runtime fingerprint — without it a container that exited 0 and later exited 137 would be recorded as the same stop — so the first observation after the upgrade differs from the last one before it. Snapshots already recorded keep no exit code and are shown as plain "exited" rather than being guessed at.
+
+### Fixed
+
+- Silt showed a stopped container and an unhealthy one identically. On the service timeline they were two shades of the same red, indistinguishable at the eight pixels a mark actually gets; on the Projects screen everything that was not running was one count. So the question those screens exist to answer — is this thing down, or is it up and answering wrongly — was the one they could not answer.
+
 ## 0.7.0 — 2026-09-02
 
 The Projects screen says what needs you.

@@ -64,6 +64,10 @@ type serviceStateResponse struct {
 	Health        string `json:"health,omitempty"`
 	RestartCount  int64  `json:"restart_count"`
 	StartedAt     *int64 `json:"started_at,omitempty"`
+	// ExitCode is present only when this container had stopped. Absent means
+	// "did not exit", not "exited cleanly".
+	ExitCode  *int64 `json:"exit_code,omitempty"`
+	OOMKilled bool   `json:"oom_killed,omitempty"`
 }
 
 type snapshotDetailResponse struct {
@@ -242,6 +246,8 @@ func (s *Server) getSnapshot(w http.ResponseWriter, r *http.Request) {
 			State:         st.State,
 			Health:        st.Health,
 			RestartCount:  st.RestartCount,
+			ExitCode:      nullableInt64(st.ExitCode),
+			OOMKilled:     st.OomKilled != 0,
 			StartedAt:     st.StartedAt,
 		})
 	}

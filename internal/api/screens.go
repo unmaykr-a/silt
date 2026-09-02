@@ -25,6 +25,12 @@ type serviceObservation struct {
 	State         string `json:"state,omitempty"`
 	Health        string `json:"health,omitempty"`
 	RestartCount  int64  `json:"restart_count"`
+	// ExitCode is present only for an observation where the container had
+	// stopped. Absent means "still running", not "exited cleanly" — Docker
+	// reports the previous run's code while a container is up, and rendering
+	// that as the current state says the wrong thing about a healthy service.
+	ExitCode  *int64 `json:"exit_code,omitempty"`
+	OOMKilled bool   `json:"oom_killed,omitempty"`
 }
 
 // envKeyChange is one observed transition of a single environment key.
@@ -93,6 +99,8 @@ func (s *Server) getServiceHistory(w http.ResponseWriter, r *http.Request) {
 			State:         row.State,
 			Health:        row.Health,
 			RestartCount:  row.RestartCount,
+			ExitCode:      nullableInt64(row.ExitCode),
+			OOMKilled:     row.OomKilled != 0,
 		})
 	}
 
@@ -159,4 +167,14 @@ func (s *Server) listProjectServices(w http.ResponseWriter, r *http.Request) {
 		rows = []string{}
 	}
 	writeJSON(w, http.StatusOK, rows)
+}
+
+// nullableInt64 keeps SQL NULL distinct from zero across the JSON boundary,
+// which for an exit code is the whole point: 0 means "exited cleanly" and NULL
+// means "did not exit".
+func nullableInt64(v sql.NullInt64) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
 }

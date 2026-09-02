@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/unmaykr-a/silt/internal/docker"
 	"github.com/unmaykr-a/silt/internal/redact"
@@ -80,7 +81,13 @@ type ServiceRuntime struct {
 	Health        string
 	RestartCount  int
 	StartedAt     *int64
-	InspectHash   string
+	// ExitCode is set only for a container that has stopped: it says whether
+	// someone stopped it or it died. OOMKilled separates the most common
+	// cause of a 137 from a plain SIGKILL, which share an exit code and are
+	// very different problems.
+	ExitCode    *int
+	OOMKilled   bool
+	InspectHash string
 	// EnvKeys is the per-key redaction record for the env_keys table.
 	EnvKeys []redact.Value
 }
@@ -179,6 +186,8 @@ func Build(p docker.Project, inputs []ServiceInput, r *redact.Redactor) (Observa
 			Health:        rt.Health,
 			RestartCount:  rt.RestartCount,
 			StartedAt:     rt.StartedAt,
+			ExitCode:      rt.ExitCode,
+			OOMKilled:     rt.OOMKilled,
 			EnvKeys:       envValues,
 		})
 	}
@@ -217,8 +226,16 @@ func RuntimeFingerprint(runtimes []ServiceRuntime) string {
 		if rt.StartedAt != nil {
 			started = *rt.StartedAt
 		}
-		fmt.Fprintf(h, "svc:%s state:%s health:%s restarts:%d started:%d\n",
-			rt.Service, rt.State, rt.Health, rt.RestartCount, started)
+		// The exit code is part of the runtime state: a container that exited
+		// 0 and later exited 137 has changed in a way worth recording, and
+		// without this the second stop would be indistinguishable from the
+		// first and get touched onto the existing snapshot.
+		exit := "none"
+		if rt.ExitCode != nil {
+			exit = strconv.Itoa(*rt.ExitCode)
+		}
+		fmt.Fprintf(h, "svc:%s state:%s health:%s restarts:%d started:%d exit:%s oom:%t\n",
+			rt.Service, rt.State, rt.Health, rt.RestartCount, started, exit, rt.OOMKilled)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -4,6 +4,7 @@
   import Timestamp from "$lib/components/Timestamp.svelte";
   import Empty from "$lib/components/Empty.svelte";
   import { shortDigest, duration } from "$lib/format";
+  import { serviceState } from "$lib/servicestate";
   import { Button } from "$lib/components/ui/button";
 
   let { projectId, reloadKey }: { projectId: number; reloadKey: number } = $props();
@@ -111,13 +112,13 @@
                 <th class="pb-2 font-medium">Image</th>
                 <th class="pb-2 font-medium">Digest</th>
                 <th class="pb-2 font-medium">State</th>
-                <th class="pb-2 font-medium">Health</th>
                 <th class="pb-2 text-right font-medium">Restarts</th>
                 <th class="pb-2 text-right font-medium">Uptime</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-border">
               {#each latest.services as svc (svc.service)}
+                {@const st = serviceState(svc)}
                 <tr>
                   <td class="py-2">
                     <a
@@ -132,9 +133,15 @@
                   <td class="py-2 font-mono text-xs text-muted-foreground" title={svc.image_digest ?? svc.image_id ?? ""}>
                     {shortDigest(svc.image_digest || svc.image_id)}
                   </td>
-                  <td class="py-2 text-xs">{svc.state ?? ""}</td>
-                  <td class="py-2 text-xs {svc.health === 'unhealthy' ? 'text-red-400' : ''}">
-                    {svc.health || "—"}
+                  <!-- State and health were two columns of raw Docker
+                       strings, so "running / unhealthy" and "exited / —" were
+                       for the reader to interpret. One column, one verdict,
+                       with the reason on hover. -->
+                  <td class="py-2 text-xs">
+                    <span class="inline-flex items-center gap-1.5" title={st.detail}>
+                      <span class="size-2 shrink-0 rounded-full {st.dot}"></span>
+                      <span class={st.text}>{st.label}</span>
+                    </span>
                   </td>
                   <td class="py-2 text-right text-xs {svc.restart_count > 0 ? 'text-amber-400' : 'text-muted-foreground'}">
                     {svc.restart_count}

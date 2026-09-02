@@ -7,29 +7,37 @@ import (
 
 type overviewResponse struct {
 	Projects []struct {
-		ID            int64  `json:"id"`
-		Name          string `json:"name"`
-		Archived      bool   `json:"archived"`
-		LastSeenAt    int64  `json:"last_seen_at"`
-		LastChangedAt int64  `json:"last_changed_at"`
-		SnapshotID    int64  `json:"snapshot_id"`
-		Services      int    `json:"services"`
-		Running       int    `json:"running"`
-		Stopped       int    `json:"stopped"`
-		Unhealthy     int    `json:"unhealthy"`
-		Restarts      int    `json:"restarts"`
-		Drift         bool   `json:"drift"`
-		Attention     bool   `json:"attention"`
+		ID              int64  `json:"id"`
+		Name            string `json:"name"`
+		Archived        bool   `json:"archived"`
+		LastSeenAt      int64  `json:"last_seen_at"`
+		LastChangedAt   int64  `json:"last_changed_at"`
+		SnapshotID      int64  `json:"snapshot_id"`
+		Services        int    `json:"services"`
+		Running         int    `json:"running"`
+		Stopped         int    `json:"stopped"`
+		Restarting      int    `json:"restarting"`
+		Paused          int    `json:"paused"`
+		Unhealthy       int    `json:"unhealthy"`
+		Crashed         int    `json:"crashed"`
+		OOMKilled       int    `json:"oom_killed"`
+		MaxRestartCount int    `json:"max_restart_count"`
+		Drift           bool   `json:"drift"`
+		Attention       bool   `json:"attention"`
 	} `json:"projects"`
 	Totals struct {
-		Projects  int `json:"projects"`
-		Services  int `json:"services"`
-		Running   int `json:"running"`
-		Stopped   int `json:"stopped"`
-		Unhealthy int `json:"unhealthy"`
-		Drift     int `json:"drift"`
-		Restarts  int `json:"restarts"`
-		Attention int `json:"attention"`
+		Projects   int `json:"projects"`
+		Services   int `json:"services"`
+		Running    int `json:"running"`
+		Stopped    int `json:"stopped"`
+		Restarting int `json:"restarting"`
+		Paused     int `json:"paused"`
+		Unhealthy  int `json:"unhealthy"`
+		Crashed    int `json:"crashed"`
+		OOMKilled  int `json:"oom_killed"`
+		Drift      int `json:"drift"`
+		Restarts   int `json:"restarts"`
+		Attention  int `json:"attention"`
 	} `json:"totals"`
 }
 
@@ -58,7 +66,9 @@ func TestOverviewReportsEveryProjectOnce(t *testing.T) {
 }
 
 // The fixture's last observation has radarr restarting, which is exactly the
-// case the screen exists to surface.
+// case the screen exists to surface — and it is reported as restarting rather
+// than folded into "stopped", which is the distinction that matters: a crash
+// loop and a container someone stopped are different problems.
 func TestOverviewSurfacesAStackThatIsNotRunning(t *testing.T) {
 	f := newFixture(t)
 	p := f.overview(t).Projects[0]
@@ -66,11 +76,20 @@ func TestOverviewSurfacesAStackThatIsNotRunning(t *testing.T) {
 	if p.Services != 1 {
 		t.Fatalf("services = %d, want 1", p.Services)
 	}
-	if p.Running != 0 || p.Stopped != 1 {
-		t.Errorf("running/stopped = %d/%d, want 0/1", p.Running, p.Stopped)
+	if p.Running != 0 {
+		t.Errorf("running = %d, want 0", p.Running)
+	}
+	if p.Restarting != 1 {
+		t.Errorf("restarting = %d, want 1", p.Restarting)
+	}
+	if p.Stopped != 0 {
+		t.Errorf("stopped = %d; a restarting container has not stopped", p.Stopped)
+	}
+	if p.Unhealthy != 0 {
+		t.Errorf("unhealthy = %d; a restarting container is not an unhealthy one", p.Unhealthy)
 	}
 	if !p.Attention {
-		t.Error("a stack whose only service is not running does not want attention")
+		t.Error("a stack whose only service is crash-looping does not want attention")
 	}
 }
 
@@ -80,13 +99,13 @@ func TestOverviewTotalsAgreeWithTheRows(t *testing.T) {
 	f := newFixture(t)
 	got := f.overview(t)
 
-	var attention, services, stopped int
+	var attention, services, restarting int
 	for _, p := range got.Projects {
 		if p.Archived {
 			continue
 		}
 		services += p.Services
-		stopped += p.Stopped
+		restarting += p.Restarting
 		if p.Attention {
 			attention++
 		}
@@ -97,8 +116,8 @@ func TestOverviewTotalsAgreeWithTheRows(t *testing.T) {
 	if got.Totals.Services != services {
 		t.Errorf("totals.services = %d, rows say %d", got.Totals.Services, services)
 	}
-	if got.Totals.Stopped != stopped {
-		t.Errorf("totals.stopped = %d, rows say %d", got.Totals.Stopped, stopped)
+	if got.Totals.Restarting != restarting {
+		t.Errorf("totals.restarting = %d, rows say %d", got.Totals.Restarting, restarting)
 	}
 }
 

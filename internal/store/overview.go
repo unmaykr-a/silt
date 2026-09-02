@@ -39,17 +39,37 @@ type ProjectOverview struct {
 	// it has never changed since Silt first saw it.
 	LastChangedAt int64
 
-	Services  int
-	Running   int
-	Stopped   int
-	Unhealthy int
+	Services int
+	Running  int
 
-	// Restarts is the highest restart count among the stack's containers, as
-	// Docker reports it: restarts since that container was created. It is not
-	// a rate and not a window — a container recreated by `up` starts again at
-	// zero, so any "restarts in the last day" derived from these counters
-	// would go negative exactly when a stack was redeployed.
-	Restarts int
+	// The ways a container can fail to be running, kept apart rather than
+	// summed into one "stopped" count. They are different problems and one of
+	// them is not a problem at all: a container someone stopped on purpose and
+	// a container in a crash loop have nothing in common except that neither
+	// is running, and lumping them together was the reason the screen could
+	// not tell you which you were looking at.
+	Stopped    int // exited or dead
+	Restarting int // crash-looping, or coming back up
+	Paused     int // deliberately suspended
+	Starting   int // created, or running with a healthcheck that has not passed
+	// Unhealthy counts running containers whose healthcheck is failing, which
+	// is a different failure from not running at all — the process is up and
+	// answering wrongly.
+	Unhealthy int
+	// Crashed counts stopped containers with a non-zero exit code: the ones
+	// nobody asked to stop.
+	Crashed int
+	// OOMKilled counts containers the kernel killed for memory. Not derivable
+	// from the exit code, since an OOM kill and a `docker kill` are both 137.
+	OOMKilled int
+
+	// MaxRestartCount is the highest restart count among the stack's
+	// containers, as Docker reports it: restarts since that container was
+	// created. It is not a rate and not a window — a container recreated by
+	// `up` starts again at zero, so any "restarts in the last day" derived
+	// from these counters would go negative exactly when a stack was
+	// redeployed.
+	MaxRestartCount int
 
 	// Drift means the compose files on disk differ from the ones that were in
 	// place the last time the running configuration actually changed: someone
@@ -77,7 +97,8 @@ type ProjectOverview struct {
 // is easy to lose. An edited compose file that was never applied is a change
 // that will land at the next unrelated restart, hours or weeks later.
 func (p ProjectOverview) Attention() bool {
-	return p.Unhealthy > 0 || p.Stopped > 0 || p.Drift || p.Restarts > 0
+	return p.Unhealthy > 0 || p.Crashed > 0 || p.OOMKilled > 0 ||
+		p.Restarting > 0 || p.Drift || p.MaxRestartCount > 0
 }
 
 // Overview reads every project on a host with its current state.
@@ -182,7 +203,7 @@ func (s *Store) overviewServiceCounts(ctx context.Context, ids []int64, bySnapsh
 			args[i] = id
 		}
 		query := `
-			SELECT snapshot_id, state, health, restart_count
+			SELECT snapshot_id, state, health, restart_count, exit_code, oom_killed
 			FROM service_states
 			WHERE snapshot_id IN (?` + strings.Repeat(",?", len(batch)-1) + `)`
 
@@ -201,9 +222,10 @@ func (s *Store) scanServiceCounts(ctx context.Context, query string, args []any,
 	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
-		var snapshotID, restarts int64
+		var snapshotID, restarts, oomKilled int64
+		var exitCode sql.NullInt64
 		var state, health string
-		if err := rows.Scan(&snapshotID, &state, &health, &restarts); err != nil {
+		if err := rows.Scan(&snapshotID, &state, &health, &restarts, &exitCode, &oomKilled); err != nil {
 			return fmt.Errorf("scan service count: %w", err)
 		}
 		p := bySnapshot[snapshotID]
@@ -211,18 +233,38 @@ func (s *Store) scanServiceCounts(ctx context.Context, query string, args []any,
 			continue
 		}
 		p.Services++
-		if state == "running" {
+
+		switch state {
+		case "running":
 			p.Running++
-		} else {
+			// An empty health is a container with no healthcheck. That is not
+			// the same as a healthy one and must not be counted as unhealthy
+			// either — most images ship without one.
+			switch health {
+			case "unhealthy":
+				p.Unhealthy++
+			case "starting":
+				p.Starting++
+			}
+		case "restarting":
+			p.Restarting++
+		case "paused":
+			p.Paused++
+		case "created":
+			p.Starting++
+		default:
+			// exited, dead, removing, and anything a future Docker adds.
 			p.Stopped++
+			if exitCode.Valid && exitCode.Int64 != 0 {
+				p.Crashed++
+			}
+			if oomKilled != 0 {
+				p.OOMKilled++
+			}
 		}
-		// An empty health is a container with no healthcheck, which is not the
-		// same as a healthy one and must not be counted as unhealthy either.
-		if health == "unhealthy" {
-			p.Unhealthy++
-		}
-		if int(restarts) > p.Restarts {
-			p.Restarts = int(restarts)
+
+		if int(restarts) > p.MaxRestartCount {
+			p.MaxRestartCount = int(restarts)
 		}
 	}
 	return rows.Err()

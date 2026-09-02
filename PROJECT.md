@@ -727,6 +727,11 @@ The **Projects** screen is the fleet view rather than a directory: what is runni
 is unhealthy, what has been restarting, what was edited but never applied, with every
 count above the grid acting as a filter and the broken stacks first by default.
 
+Container state uses one vocabulary everywhere — `web/src/lib/servicestate.ts`. Running,
+starting, unhealthy, restarting, crashed, OOM-killed, stopped and paused each have a
+colour and a word, and no screen invents its own. A container someone stopped on purpose
+is grey and is not a fault.
+
 Dark mode by default, light mode available. Every timestamp shows relative ("3h ago") with
 the absolute UTC/local value on hover.
 
@@ -1399,7 +1404,44 @@ Changed:
     that plants a token in each of four provider URLs and checks it never
     appears in the output caught the gotify leak on the first run.
 
-57. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+57. **A stopped container and an unhealthy one are not the same thing
+    (0.8.0)** — reported from a real host, and true in three places at once.
+    The service timeline painted unhealthy `bg-red-500` and exited
+    `bg-red-500/70`: two shades of one red at the eight pixels a mark gets.
+    The Projects screen folded exited, restarting, paused and created into a
+    single "not running" count. The project's service table printed Docker's
+    `state` and `health` in two columns and left "running / unhealthy" for the
+    reader to interpret.
+
+    They are different failures. An unhealthy container is *running*: the
+    process is alive, the port is open, and the thing behind it is answering
+    wrongly. A stopped container is not there. A restarting one is in a loop.
+    Each now has its own colour and its own word, from one module
+    (`web/src/lib/servicestate.ts`) that every screen reads, so a badge on the
+    fleet view means what a dot on the service page means.
+
+58. **A deliberate stop is not a fault (0.8.0)** — the corollary, and the part
+    that changes behaviour rather than colour. `exited 0` is grey, is excluded
+    from `Attention()`, and does not put its stack in the attention list.
+    Treating every non-running container as a problem is how a dashboard
+    teaches people to ignore it.
+
+59. **Exit codes, and why OOM gets its own field (0.8.0)** — none of the above
+    is possible without knowing *why* a container stopped, so
+    `service_states` now carries `exit_code` and `oom_killed`.
+
+    `exit_code` is NULL for a running container rather than 0. Docker reports
+    the previous run's code while a container is up, and a stale 0 presented as
+    current state reads as "exited cleanly" about something running fine —
+    worse than showing nothing. `oom_killed` is a separate column because it is
+    not derivable: an OOM kill and a `docker kill` are both 137, and only one
+    of them is a memory limit to go and raise.
+
+    The exit code is in the runtime fingerprint. Without it, a container that
+    exited 0 and later exited 137 would be indistinguishable from the first
+    stop and get touched onto the existing snapshot rather than recorded.
+
+60. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

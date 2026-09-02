@@ -22,14 +22,29 @@ type overviewProject struct {
 	LastChangedAt int64 `json:"last_changed_at,omitempty"`
 	SnapshotID    int64 `json:"snapshot_id,omitempty"`
 
-	Services  int `json:"services"`
-	Running   int `json:"running"`
-	Stopped   int `json:"stopped"`
+	Services int `json:"services"`
+	Running  int `json:"running"`
+
+	// The ways a container can fail to be running, kept apart. A container
+	// someone stopped on purpose and a container in a crash loop have nothing
+	// in common except that neither is running.
+	Stopped    int `json:"stopped"`
+	Restarting int `json:"restarting"`
+	Paused     int `json:"paused"`
+	Starting   int `json:"starting"`
+	// Unhealthy counts running containers failing their healthcheck: the
+	// process is up and answering wrongly, which is not the same failure as
+	// not running at all.
 	Unhealthy int `json:"unhealthy"`
-	// Restarts is the highest restart count among this stack's containers,
-	// counted since each container was created — the number `docker ps` shows,
-	// not a rate.
-	Restarts int `json:"restarts"`
+	// Crashed counts stopped containers with a non-zero exit code — the ones
+	// nobody asked to stop. OOMKilled is not derivable from the exit code: an
+	// OOM kill and a `docker kill` are both 137.
+	Crashed   int `json:"crashed"`
+	OOMKilled int `json:"oom_killed"`
+	// MaxRestartCount is the highest restart count among this stack's
+	// containers, counted since each container was created — the number
+	// `docker ps` shows, not a rate.
+	MaxRestartCount int `json:"max_restart_count"`
 
 	Drift bool `json:"drift"`
 	// Attention is computed here rather than in the browser so the API and the
@@ -37,12 +52,21 @@ type overviewProject struct {
 	Attention bool `json:"attention"`
 }
 
+// Container-level totals count containers; project-level totals count
+// projects. Which is which is stated per field, because a mixed set where the
+// reader has to guess is how a dashboard starts lying.
 type overviewTotals struct {
-	Projects  int `json:"projects"`
-	Services  int `json:"services"`
-	Running   int `json:"running"`
-	Stopped   int `json:"stopped"`
-	Unhealthy int `json:"unhealthy"`
+	Projects int `json:"projects"`
+	Services int `json:"services"`
+	// Containers.
+	Running    int `json:"running"`
+	Stopped    int `json:"stopped"`
+	Restarting int `json:"restarting"`
+	Paused     int `json:"paused"`
+	Unhealthy  int `json:"unhealthy"`
+	Crashed    int `json:"crashed"`
+	OOMKilled  int `json:"oom_killed"`
+	// Projects.
 	Drift     int `json:"drift"`
 	Restarts  int `json:"restarts"`
 	Attention int `json:"attention"`
@@ -78,20 +102,25 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	out := overviewResponse{Projects: make([]overviewProject, 0, len(rows))}
 	for _, p := range rows {
 		item := overviewProject{
-			ID:            p.ID,
-			Name:          p.Name,
-			WorkingDir:    p.WorkingDir,
-			Archived:      p.Archived,
-			LastSeenAt:    p.LastSeenAt,
-			LastChangedAt: p.LastChangedAt,
-			SnapshotID:    p.SnapshotID,
-			Services:      p.Services,
-			Running:       p.Running,
-			Stopped:       p.Stopped,
-			Unhealthy:     p.Unhealthy,
-			Restarts:      p.Restarts,
-			Drift:         p.Drift,
-			Attention:     p.Attention(),
+			ID:              p.ID,
+			Name:            p.Name,
+			WorkingDir:      p.WorkingDir,
+			Archived:        p.Archived,
+			LastSeenAt:      p.LastSeenAt,
+			LastChangedAt:   p.LastChangedAt,
+			SnapshotID:      p.SnapshotID,
+			Services:        p.Services,
+			Running:         p.Running,
+			Stopped:         p.Stopped,
+			Restarting:      p.Restarting,
+			Paused:          p.Paused,
+			Starting:        p.Starting,
+			Unhealthy:       p.Unhealthy,
+			Crashed:         p.Crashed,
+			OOMKilled:       p.OOMKilled,
+			MaxRestartCount: p.MaxRestartCount,
+			Drift:           p.Drift,
+			Attention:       p.Attention(),
 		}
 		out.Projects = append(out.Projects, item)
 
@@ -106,11 +135,15 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		out.Totals.Services += p.Services
 		out.Totals.Running += p.Running
 		out.Totals.Stopped += p.Stopped
+		out.Totals.Restarting += p.Restarting
+		out.Totals.Paused += p.Paused
 		out.Totals.Unhealthy += p.Unhealthy
+		out.Totals.Crashed += p.Crashed
+		out.Totals.OOMKilled += p.OOMKilled
 		if p.Drift {
 			out.Totals.Drift++
 		}
-		if p.Restarts > 0 {
+		if p.MaxRestartCount > 0 {
 			out.Totals.Restarts++
 		}
 		if p.Attention() {

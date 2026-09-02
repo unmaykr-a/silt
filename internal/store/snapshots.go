@@ -201,6 +201,8 @@ func (s *Store) WriteSnapshot(
 				Health:         rt.Health,
 				RestartCount:   int64(rt.RestartCount),
 				StartedAt:      rt.StartedAt,
+				ExitCode:       nullableInt(rt.ExitCode),
+				OomKilled:      boolToInt(rt.OOMKilled),
 				InspectHash:    nullableString(rt.InspectHash),
 			}); err != nil {
 				return fmt.Errorf("insert service state %s: %w", rt.Service, err)
@@ -282,6 +284,16 @@ func boolToInt(b bool) int64 {
 
 func nullableString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
+}
+
+// nullableInt keeps "not applicable" distinct from zero. A running container
+// has no current exit code, and storing 0 for it would read as "exited
+// cleanly" about something that never exited.
+func nullableInt(v *int) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: int64(*v), Valid: true}
 }
 
 func nullableMillis(ms int64) *int64 {
