@@ -181,7 +181,6 @@ func TestOverviewIncludesAProjectWithNoSnapshots(t *testing.T) {
 	}
 }
 
-
 // The distinction the counts exist for: an unhealthy container is running and
 // answering wrongly, a stopped one is not running at all, and a restarting one
 // is in a crash loop. Rolling them into a single "not running" number was why
