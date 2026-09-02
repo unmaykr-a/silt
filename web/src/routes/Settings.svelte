@@ -10,6 +10,7 @@
   import { bytes, duration, sampleDate } from "$lib/format";
   import { prefs, type Clock, type DateStyle, type Layout, type TimeStamps } from "$lib/prefs.svelte";
   import { Button } from "$lib/components/ui/button";
+  import AuditLog from "$lib/components/AuditLog.svelte";
   import type { Snippet } from "svelte";
 
   // The environment is the baseline; anything edited here is stored as an
@@ -47,6 +48,7 @@
     retention_days: number;
     unchanged_retention_days: number;
     event_retention_days: number;
+    audit_retention_days: number;
     retention_interval_ms: number;
     vacuum_interval_ms: number;
     keep_keys: string;
@@ -94,6 +96,7 @@
       retention_days: 365,
       unchanged_retention_days: 7,
       event_retention_days: 90,
+      audit_retention_days: 730,
       retention_interval_ms: 3_600_000,
       vacuum_interval_ms: 0,
       keep_keys: "",
@@ -111,6 +114,7 @@
       retention_days: e.retention_days,
       unchanged_retention_days: e.unchanged_retention_days,
       event_retention_days: e.event_retention_days,
+      audit_retention_days: e.audit_retention_days,
       retention_interval_ms: e.retention_interval_ms,
       vacuum_interval_ms: e.vacuum_interval_ms,
       keep_keys: e.keep_keys.join(", "),
@@ -302,6 +306,8 @@
       patch.unchanged_retention_days = Number(draft.unchanged_retention_days);
     if (draft.event_retention_days !== e.event_retention_days)
       patch.event_retention_days = Number(draft.event_retention_days);
+    if (draft.audit_retention_days !== e.audit_retention_days)
+      patch.audit_retention_days = Number(draft.audit_retention_days);
     if (draft.retention_interval_ms !== e.retention_interval_ms)
       patch.retention_interval_ms = Number(draft.retention_interval_ms);
     if (draft.vacuum_interval_ms !== e.vacuum_interval_ms)
@@ -666,6 +672,26 @@
               </div>
             {/snippet}
             {@render field("event_retention_days", "Events", "SILT_EVENT_RETENTION_DAYS", undefined, eventControl)}
+
+            {#snippet auditControl()}
+              <div class="flex items-center gap-2">
+                <input
+                  id="audit_retention_days"
+                  type="number"
+                  min="0"
+                  bind:value={draft.audit_retention_days}
+                  class={input}
+                />
+                <span class="shrink-0 text-xs text-muted-foreground">days</span>
+              </div>
+            {/snippet}
+            {@render field(
+              "audit_retention_days",
+              "Activity trail",
+              "SILT_AUDIT_RETENTION_DAYS",
+              "Who changed Silt itself — the list under Security. A row per administrative action rather than per observation, so it stays tiny, and its whole value is how far back it reaches. 0 keeps it forever.",
+              auditControl,
+            )}
 
             {#snippet passControl()}
               <select id="retention_interval_ms" bind:value={draft.retention_interval_ms} class={input}>
@@ -1067,6 +1093,10 @@
                 There is nothing to revoke while no authentication is configured.
               {/if}
             </p>
+          </div>
+
+          <div class="mt-8">
+            <AuditLog />
           </div>
         </section>
       {/if}

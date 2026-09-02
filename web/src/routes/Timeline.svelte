@@ -4,6 +4,7 @@
   import DensityStrip from "$lib/components/DensityStrip.svelte";
   import Empty from "$lib/components/Empty.svelte";
   import { clockTime, datetime, dateOnly, relative } from "$lib/format";
+  import { clock } from "$lib/clock.svelte";
 
   let { reloadKey, projects: knownProjects }: { reloadKey: number; projects: Project[] } = $props();
 
@@ -31,11 +32,10 @@
   // rather than sending you to another screen to find out.
   let expanded = $state<Record<string, boolean>>({});
 
-  let now = $state(Date.now());
-  $effect(() => {
-    const id = setInterval(() => (now = Date.now()), 30_000);
-    return () => clearInterval(id);
-  });
+  // The shared clock rather than a private timer: the timeline also renders a
+  // few hundred <Timestamp>s, and they should all move at once.
+  $effect(() => clock.subscribe());
+  const now = $derived(clock.now);
 
   $effect(() => {
     // Re-runs whenever a filter changes or an SSE event bumps reloadKey.

@@ -2,14 +2,26 @@
   import { api, type VersionInfo } from "$lib/api/client";
   import Dialog from "./Dialog.svelte";
   import SiltMark from "./SiltMark.svelte";
+  import ChangeKind from "./ChangeKind.svelte";
 
+  /**
+   * The release history.
+   *
+   * Was a button plus its dialog. The button moved into the status menu, where
+   * the version already appears, so this is the dialog alone and whoever opens
+   * it owns the state.
+   */
   const KOFI = "https://ko-fi.com/unmaykr";
 
+  let { open = $bindable(false) }: { open?: boolean } = $props();
+
   let info = $state<VersionInfo | null>(null);
-  let open = $state(false);
   let error = $state<string | null>(null);
 
+  // Fetched when first opened rather than on mount: the changelog is a few
+  // kilobytes nobody needs until they ask for it.
   $effect(() => {
+    if (!open || info) return;
     const controller = new AbortController();
     api
       .version(controller.signal)
@@ -19,33 +31,14 @@
       });
     return () => controller.abort();
   });
-
-  // The build stamp is a tag on a release and a commit otherwise, so it is the
-  // honest thing to show — but `sha-b0681bd` tells nobody which release they
-  // are on, so the release number leads and the build sits beside it.
-  const label = $derived(info ? `v${info.release}` : "");
-
-  const KIND_STYLE: Record<string, string> = {
-    added: "bg-emerald-500/15 text-emerald-500",
-    changed: "bg-sky-500/15 text-sky-500",
-    fixed: "bg-amber-500/15 text-amber-500",
-    security: "bg-red-500/15 text-red-500",
-    removed: "bg-zinc-500/15 text-zinc-400",
-  };
 </script>
 
-{#if info}
-  <button
-    type="button"
-    class="rounded-md px-2 py-1 font-mono text-[11px] text-muted-foreground transition-colors
-           hover:bg-secondary/60 hover:text-foreground"
-    onclick={() => (open = true)}
-    title="What's new in Silt"
-  >
-    {label}
-  </button>
-
-  <Dialog bind:open title="What's new in Silt">
+<Dialog bind:open title="What's new in Silt">
+  {#if error}
+    <p class="text-sm text-red-500 dark:text-red-400">{error}</p>
+  {:else if !info}
+    <p class="text-sm text-muted-foreground">Loading…</p>
+  {:else}
     <div class="mb-5 flex flex-wrap items-center gap-3">
       <SiltMark size={20} marker="#34d399" />
       <p class="font-mono text-[11px] text-muted-foreground">
@@ -86,14 +79,7 @@
           <ul class="mt-3 space-y-2">
             {#each release.entries as entry, i (i)}
               <li class="flex gap-2.5 text-sm">
-                <!-- A fixed width so the text column lines up: "added" and
-                     "security" are very different lengths. -->
-                <span
-                  class="mt-0.5 w-16 shrink-0 rounded px-1.5 py-0.5 text-center text-[10px] font-medium uppercase tracking-wide
-                         {KIND_STYLE[entry.kind] ?? KIND_STYLE.removed}"
-                >
-                  {entry.kind}
-                </span>
+                <span class="mt-1"><ChangeKind kind={entry.kind} /></span>
                 <span class="min-w-0 leading-relaxed">{entry.text}</span>
               </li>
             {/each}
@@ -101,7 +87,5 @@
         </section>
       {/each}
     </div>
-  </Dialog>
-{:else if error}
-  <span class="font-mono text-[11px] text-muted-foreground/50" title={error}>version unknown</span>
-{/if}
+  {/if}
+</Dialog>

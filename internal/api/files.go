@@ -321,6 +321,11 @@ func (s *Server) postRedactionRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "store redaction rule")
 		return
 	}
+	// A redaction rule changes what Silt shows of a file. The path and the
+	// action; never the key or line content it hides.
+	s.audit(r, store.AuditRedactionAdded, map[string]any{
+		"project_id": id, "path": req.Path, "action": req.Action, "kind": req.Kind,
+	})
 	writeJSON(w, http.StatusCreated, redactionRuleResponse{
 		ID: rule.ID, Path: rule.Path, Action: rule.Action,
 		Kind: rule.Kind, Key: rule.Key, LineNo: rule.LineNo, Note: rule.Note,
@@ -347,6 +352,7 @@ func (s *Server) deleteRedactionRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "rule not found")
 		return
 	}
+	s.audit(r, store.AuditRedactionRemove, map[string]any{"project_id": id, "rule_id": ruleID})
 	w.WriteHeader(http.StatusNoContent)
 }
 

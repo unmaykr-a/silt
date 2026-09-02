@@ -211,6 +211,20 @@ SILT_PASSWORD_HASH: "$2a$12$..."   # bcrypt; htpasswd -bnBC 12 "" yourpassword |
 `/healthz`, `/readyz` and `/metrics` stay reachable either way, so probes and Prometheus
 scrapes keep working.
 
+## Who changed Silt
+
+Silt records what changed on your host. **Settings → Security → Activity** asks the same
+question about Silt: who changed a setting, who ran a prune that deleted history, who
+signed in, and who was refused.
+
+It keeps *what* changed and never *what it changed to* — the settings screen holds an
+ingest token and notification targets, and this is a list built to be read. On an install
+with no authentication there is no actor to name, and Silt records none rather than
+inventing one.
+
+`SILT_AUDIT_RETENTION_DAYS` defaults to two years. It is a row per administrative action
+rather than per observation, so it stays small.
+
 ## Behind a reverse proxy
 
 Silt pushes live updates over server-sent events. Behind nginx or Nginx Proxy Manager,

@@ -25,6 +25,7 @@ type settingsValues struct {
 	RetentionDays          int      `json:"retention_days"`
 	UnchangedRetentionDays int      `json:"unchanged_retention_days"`
 	EventRetentionDays     int      `json:"event_retention_days"`
+	AuditRetentionDays     int      `json:"audit_retention_days"`
 	RetentionIntervalMS    int64    `json:"retention_interval_ms"`
 	VacuumIntervalMS       int64    `json:"vacuum_interval_ms"`
 	KeepKeys               []string `json:"keep_keys"`
@@ -85,6 +86,7 @@ func toValues(c config.Config) settingsValues {
 		RetentionDays:          c.RetentionDays,
 		UnchangedRetentionDays: c.UnchangedRetentionDays,
 		EventRetentionDays:     c.EventRetentionDays,
+		AuditRetentionDays:     c.AuditRetentionDays,
 		RetentionIntervalMS:    c.RetentionInterval.Milliseconds(),
 		VacuumIntervalMS:       c.VacuumInterval.Milliseconds(),
 		KeepKeys:               c.KeepKeys,
@@ -217,7 +219,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.log.Info("settings updated", "fields", changedFields(next), "reset", req.Reset)
+	fields := changedFields(next)
+	s.log.Info("settings updated", "fields", fields, "reset", req.Reset)
+	// Field names, never values. This table holds an ingest token and
+	// notification URLs; recording what they became would put credentials in
+	// a table built to be read.
+	s.audit(r, store.AuditSettingsChanged, map[string]any{"fields": fields, "reset": req.Reset})
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
 }
 
@@ -231,6 +238,7 @@ func (s *Server) deleteSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("settings reset to the environment")
+	s.audit(r, store.AuditSettingsReset, nil)
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
 }
 
@@ -264,6 +272,7 @@ func (s *Server) postPrune(w http.ResponseWriter, r *http.Request) {
 		Changed:   config.Days(cfg.RetentionDays),
 		Unchanged: config.Days(cfg.UnchangedRetentionDays),
 		Events:    config.Days(cfg.EventRetentionDays),
+		Audit:     config.Days(cfg.AuditRetentionDays),
 	}
 	stats, err := s.store.Prune(r.Context(), policy, time.Now())
 	if err != nil {
@@ -271,6 +280,14 @@ func (s *Server) postPrune(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "prune failed")
 		return
 	}
+	// A prune deletes history permanently, which makes it the one maintenance
+	// action worth being able to attribute afterwards.
+	s.audit(r, store.AuditPrune, map[string]any{
+		"unchanged_snapshots": stats.UnchangedSnapshots,
+		"changed_snapshots":   stats.ChangedSnapshots,
+		"events":              stats.Events,
+		"blobs":               stats.Blobs,
+	})
 	writeJSON(w, http.StatusOK, pruneResponse{
 		UnchangedSnapshots: stats.UnchangedSnapshots,
 		ChangedSnapshots:   stats.ChangedSnapshots,
@@ -319,6 +336,8 @@ func (s *Server) testNotifications(w http.ResponseWriter, r *http.Request) {
 	// the request deadline has to allow for all of them.
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(len(urls))*notify.TestTimeout+5*time.Second)
 	defer cancel()
+
+	s.audit(r, store.AuditNotifyTested, map[string]any{"targets": len(urls)})
 
 	out := notifyTestResponse{Results: []notifyTestResult{}}
 	for _, result := range notify.Test(ctx, urls) {

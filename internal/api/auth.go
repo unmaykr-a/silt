@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/auth"
+	"github.com/unmaykr-a/silt/internal/store"
 )
 
 // The HTTP surface of authentication. The deciding lives in internal/auth;
@@ -296,6 +297,9 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.gate.verifyPassword(client, req.Password) {
 		s.log.Warn("failed login attempt", "remote", client)
+		// Recorded before the refusal is written: a rejected sign-in is the
+		// audit row anyone actually goes looking for.
+		s.auditFailed(r, store.AuditSignInFailed, map[string]any{"method": "password"})
 		writeError(w, http.StatusUnauthorized, "incorrect password")
 		return
 	}
@@ -312,6 +316,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.log.Info("signed in", "method", "password", "remote", client)
+	s.audit(r, store.AuditSignIn, map[string]any{"method": "password"})
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
 
@@ -325,6 +330,7 @@ func (s *Server) postLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	clearCookie(w, r, sessionCookie)
+	s.audit(r, store.AuditSignOut, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
 
@@ -456,6 +462,7 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.log.Info("signed in", "method", "oidc", "subject", id.Name)
+	s.audit(r, store.AuditSignIn, map[string]any{"method": "oidc", "subject": id.Name})
 	http.Redirect(w, r, auth.SafeNext(flow.Next), http.StatusFound)
 }
 
@@ -520,6 +527,7 @@ func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	clearCookie(w, r, sessionCookie)
 	s.log.Info("all sessions revoked", "subject", id.Subject, "count", removed)
+	s.audit(r, store.AuditSessionsRevoked, map[string]any{"count": removed})
 	writeJSON(w, http.StatusOK, map[string]int64{"revoked": removed})
 }
 
@@ -599,6 +607,7 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.log.Info("built-in account claimed", "remote", clientKey(r))
+	s.audit(r, store.AuditAccountClaimed, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
 
@@ -638,6 +647,7 @@ func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.audit(r, store.AuditPasswordChanged, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"changed": true})
 }
 
@@ -674,6 +684,7 @@ func (s *Server) putAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.log.Info("built-in account state changed", "enabled", req.Enabled)
+	s.audit(r, store.AuditAccountChanged, map[string]any{"password_enabled": req.Enabled})
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": req.Enabled})
 }
 
@@ -718,6 +729,7 @@ func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("built-in account unlinked from its provider identity")
+	s.audit(r, store.AuditAccountChanged, map[string]any{"provider_link": "removed"})
 	writeJSON(w, http.StatusOK, map[string]bool{"linked": false})
 }
 

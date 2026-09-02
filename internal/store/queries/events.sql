@@ -18,3 +18,19 @@ LIMIT sqlc.arg(max_rows);
 
 -- name: CountEvents :one
 SELECT COUNT(*) FROM events;
+
+-- name: InsertAudit :exec
+INSERT INTO audit_log (ts, actor, method, action, ok, detail, remote)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListAudit :many
+SELECT * FROM audit_log
+WHERE ts < sqlc.arg(before)
+ORDER BY ts DESC, id DESC
+LIMIT sqlc.arg(max_rows);
+
+-- name: CountAudit :one
+SELECT COUNT(*) FROM audit_log;
+
+-- name: PruneAudit :execrows
+DELETE FROM audit_log WHERE ts < sqlc.arg(cutoff);

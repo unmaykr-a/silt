@@ -39,6 +39,22 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "0.9.0",
+		Date:    "2026-09-02",
+		Summary: "A header with two controls instead of five, and a record of who changed Silt.",
+		Entries: []Entry{
+			{Changed, "The header's right side was five controls of five shapes at the same weight — search, a status dot, a version button, a theme toggle and a sign-out button — sharing one corner. Search stays, because it is the one you reach for constantly. Everything else is behind a single button, where each of them has room to say more than it could as an icon."},
+			{Fixed, "The live indicator lied. It turned green on the first frame and stayed green through a server restart, a dropped network and a closed laptop lid, because the connection's own open and error events were never observed. It now reports reconnecting and offline, and says how long it has been connected."},
+			{Added, "A third theme setting: follow the system. The old toggle read your system preference once and then pinned light or dark forever, so a desktop that switches at sunset had to be followed by hand and there was no way back."},
+			{Changed, "The changelog's category markers were fixed-width blocks of colour down the left edge — the loudest thing on a screen where they are the least interesting. They are small icons now, one per category, with the colour kept."},
+			{Added, "An activity trail under Settings → Security: who changed a setting, who ran a prune, who signed in and who was refused. Silt records what changed on your host; this is the same question asked about Silt. It keeps what changed and never what it changed to, because settings hold an ingest token and notification targets and this is a list built to be read."},
+			{Added, "SILT_AUDIT_RETENTION_DAYS, defaulting to two years. The trail is a row per administrative action rather than per observation, so it stays small, and its whole value is how far back it reaches."},
+			{Fixed, "Every relative timestamp ran its own 30-second timer. The timeline renders a few hundred of them, so it ran a few hundred timers doing the same thing on their own phases, updating the page as a ripple. One shared clock now, stopped entirely when nothing is reading it."},
+			{Fixed, "The header did not fit a phone. The wordmark, three labelled section links, a search box and the status control were wider than a 390px screen, and the overflow was invisible until opening a menu scrolled the whole page sideways to bring it into view. Section links are icons below that width and the wordmark gives way to the mark."},
+			{Changed, "make check now runs the gofmt gate that CI runs as its own step. A local gate that does not match the remote one is worse than no local gate, because it is trusted."},
+		},
+	},
+	{
 		Version: "0.8.0",
 		Date:    "2026-09-02",
 		Summary: "A stopped container and an unhealthy one are not the same thing.",
