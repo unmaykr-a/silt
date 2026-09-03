@@ -6,62 +6,29 @@
  * index.html for unknown paths, which is what makes deep links work.
  */
 
-export type Route =
-  | { name: "timeline" }
-  | { name: "project"; projectId: number }
-  | { name: "service"; projectId: number; service: string }
-  | { name: "diff"; from?: number; to?: number; projectId?: number }
-  | { name: "files"; projectId: number; path?: string }
-  | { name: "projects" }
-  | { name: "search"; query: string }
-  | { name: "settings" }
-  | { name: "notfound"; path: string };
+import { parseRoute, stripBase, joinBase, type Route } from "./routing";
 
-function parse(pathname: string, search: string): Route {
-  const params = new URLSearchParams(search);
-  const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+export type { Route };
 
-  if (parts.length === 0) return { name: "timeline" };
+/**
+ * Where the app is mounted.
+ *
+ * "/" in every real install, since Silt serves itself from the root. The demo
+ * on GitHub Pages lives under a project path.
+ */
+export const BASE = (import.meta.env.BASE_URL || "/").replace(/\/+$/, "");
 
-  if (parts[0] === "settings") return { name: "settings" };
-  if (parts[0] === "search") return { name: "search", query: params.get("q") ?? "" };
-  if (parts[0] === "projects" && parts.length === 1) return { name: "projects" };
-
-  if (parts[0] === "diff") {
-    const from = Number(params.get("from"));
-    const to = Number(params.get("to"));
-    const projectId = Number(params.get("project"));
-    return {
-      name: "diff",
-      from: Number.isFinite(from) && from > 0 ? from : undefined,
-      to: Number.isFinite(to) && to > 0 ? to : undefined,
-      projectId: Number.isFinite(projectId) && projectId > 0 ? projectId : undefined,
-    };
-  }
-
-  if (parts[0] === "projects" && parts[1]) {
-    const projectId = Number(parts[1]);
-    if (!Number.isFinite(projectId) || projectId <= 0) {
-      return { name: "notfound", path: pathname };
-    }
-    if (parts[2] === "services" && parts[3]) {
-      return { name: "service", projectId, service: decodeURIComponent(parts[3]) };
-    }
-    if (parts[2] === "files") {
-      return { name: "files", projectId, path: params.get("path") ?? undefined };
-    }
-    return { name: "project", projectId };
-  }
-
-  return { name: "notfound", path: pathname };
+/** Prefix the mount point, for anything that becomes a real URL. */
+export function href(path: string): string {
+  return joinBase(path, BASE);
 }
 
 function createRouter() {
-  let route = $state<Route>(parse(location.pathname, location.search));
+  let route = $state<Route>(parseRoute(stripBase(location.pathname, BASE), location.search));
 
   if (typeof window !== "undefined") {
     window.addEventListener("popstate", () => {
-      route = parse(location.pathname, location.search);
+      route = parseRoute(stripBase(location.pathname, BASE), location.search);
     });
   }
 
@@ -70,10 +37,10 @@ function createRouter() {
       return route;
     },
     navigate(url: string, replace = false) {
-      const target = new URL(url, location.origin);
+      const target = new URL(href(url), location.origin);
       if (replace) history.replaceState({}, "", target);
       else history.pushState({}, "", target);
-      route = parse(target.pathname, target.search);
+      route = parseRoute(stripBase(target.pathname, BASE), target.search);
       window.scrollTo(0, 0);
     },
   };
@@ -81,15 +48,44 @@ function createRouter() {
 
 export const router = createRouter();
 
-/** Intercept in-app link clicks so anchors work without a full page load. */
+/**
+ * Intercept in-app link clicks so anchors work without a full page load.
+ *
+ * Also rewrites the href onto the mount point. Every `href` in the app is
+ * written app-relative ("/projects/3"), which is the same thing under a base
+ * of "/". Under the demo's project path it is not: intercepting the click
+ * would be enough for a plain click and nothing else — the status bar would
+ * show the wrong URL, and ctrl-click, middle-click and "open in new tab"
+ * would all leave the app.
+ */
 export function link(node: HTMLAnchorElement) {
+  function appPath(): string | null {
+    const raw = node.getAttribute("href");
+    if (!raw || /^[a-z]+:/i.test(raw) || raw.startsWith("//") || raw.startsWith("#")) return null;
+    return stripBase(raw, BASE);
+  }
+
+  function rewrite() {
+    const path = appPath();
+    if (path === null) return;
+    const full = href(path);
+    if (node.getAttribute("href") !== full) node.setAttribute("href", full);
+  }
+
   function onClick(event: MouseEvent) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-    const href = node.getAttribute("href");
-    if (!href || href.startsWith("http") || href.startsWith("#")) return;
+    const path = appPath();
+    if (path === null) return;
     event.preventDefault();
-    router.navigate(href);
+    router.navigate(path);
   }
+
+  rewrite();
   node.addEventListener("click", onClick);
-  return { destroy: () => node.removeEventListener("click", onClick) };
+  return {
+    // Svelte re-runs this when the href changes, e.g. a project link in a list
+    // that is re-sorted rather than re-created.
+    update: rewrite,
+    destroy: () => node.removeEventListener("click", onClick),
+  };
 }

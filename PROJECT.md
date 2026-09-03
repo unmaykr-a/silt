@@ -1658,7 +1658,104 @@ Changed:
     shipped a bug — are covered. Promoting that fake engine to a shared
     testing package is the next real step, not a claim to have taken it.
 
-76. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+77. **The fake engine became a package, and the pipeline got tests (0.13.0)**
+    — entry 75 named promoting the fake Docker engine as the next real step
+    and this is it. `internal/docker/dockertest` is one implementation with
+    container and image inspection added; the Docker tests use it instead of
+    their own copy, and `internal/collect` uses it to drive the whole
+    pipeline — engine to store to broadcast — through a harness rather than
+    around it. Coverage there went 22% → 35.4%, and the parts that moved are
+    the parts that had shipped a bug: a runtime-only change reaching the
+    browser is now a test rather than a fix nobody can regress against.
+
+    The internal-test detail that made it cheap: `dockertest` imports nothing
+    from `internal/docker`, so `package docker` can use it with no cycle. The
+    first attempt moved `events_test.go` to `package docker_test` and
+    cascaded into a dozen undefined identifiers for no gain.
+
+78. **The demo is the app, not a copy of it (0.13.0)** — a published demo
+    could have been a second implementation with its own data layer. It would
+    have drifted within a release, and the first thing anyone would learn
+    from it is how the demo behaves. Instead `web/src/lib/demo.ts` is a shim
+    over `fetch`: the same components, the same API client, the same router,
+    answering from responses captured off a real Silt reading the `make demo`
+    database. Only the transport differs.
+
+    Three things the shim has to supply that a capture cannot:
+
+    - **Time.** A capture is one instant; a demo is read for months. Every
+      timestamp is shifted onto the reader's clock at load, by an allowlist
+      of field names rather than "any number that looks like an epoch" —
+      `from` and `to` carry snapshot ids on `/api/diff`, and a silently
+      shifted id would be a bug nobody would think to look for.
+    - **Timeline windows.** Both range pickers ask for `from`/`to` derived
+      from `Date.now()`, which no fixed key can match. The nearest captured
+      range answers and its buckets slide onto the requested window, which
+      keeps the histogram's shape.
+    - **Error responses.** The demo mounts no compose roots, so a file
+      preview genuinely is a 503. Captured and replayed, the screen shows its
+      own explanation; dropped, it would show "no demo data", which is a lie
+      about why the panel is empty.
+
+    Writes are refused with a message rather than faked, and the connection
+    indicator gets a fourth state: opening an EventSource against a file host
+    is a permanent reconnect loop reported as "offline" — technically true
+    and useless.
+
+79. **Base paths, because Pages serves under one (0.13.0)** — every href in
+    the app is written app-relative, which is identical under a base of "/"
+    and wrong under `/silt/`. Intercepting the click would have been enough
+    for a plain click and nothing else: the status bar, ctrl-click,
+    middle-click and "open in new tab" would all have left the app. The
+    `link` action rewrites the attribute instead, so there is one place that
+    knows about the mount point. `parseRoute` is fed a base-stripped path,
+    with a prefix match that is not merely a prefix match — `/siltation` is
+    not under `/silt`.
+
+    The published site's own trick is `404.html` as a copy of `index.html`:
+    Pages serves it for unknown paths, which is what makes a deep link
+    survive a reload with no server to fall back.
+
+80. **The demo verifies itself (0.13.0)** — its failure mode is quiet. A URL
+    the capture never reached answers 404 and the screen shows its own empty
+    state, which published is a blank panel with nobody to notice.
+    `make demo-site-verify` serves the built site the way Pages serves it and
+    drives every screen in a browser, failing on the shim's own "no demo
+    data". It walks the real routes rather than replaying the capture's URL
+    list, because the two agreeing proves nothing: the question is whether
+    the screens' requests are covered.
+
+81. **A locale setting blanked the page (0.13.0)** — found by the demo's own
+    verification, which happened to run in a container whose Chromium
+    reported `en-US@posix`. That is what a browser says under `LANG=C`,
+    `LANG=POSIX` or `LANG=en_US@posix`, and it is not a valid BCP 47 tag.
+    uPlot builds `new Intl.NumberFormat(navigator.language)` at module scope,
+    so importing the chart threw, so the bundle threw, so there was nothing on
+    the page at all — no error state, no partial render, on a setting with
+    nothing to do with charts.
+
+    Two fixes, because there are two exposures. `web/src/lib/localeguard.ts`
+    wraps `Intl.NumberFormat` and `Intl.DateTimeFormat` in a Proxy that retries
+    a `RangeError` with a repaired locale, and is imported first in `main.ts`
+    for that reason — sibling imports evaluate in source order, and the
+    formatter is built inside a dependency at import time. The first attempt
+    patched `navigator.language` instead and the test for it failed: a page
+    can define that property non-configurably, and a repair that cannot be
+    applied is no repair. `Intl` is a plain writable global, a Proxy keeps
+    `instanceof` and the statics intact, and nothing happens at all unless a
+    construction actually throws.
+
+    `web/src/lib/locale.ts` covers our own formatting, which does not go
+    through those constructors: the system locale is probed once and a fixed
+    one stands in if it cannot be used, so a `toLocaleString` is a
+    wrong-looking timestamp at worst rather than a blank screen.
+
+    The lesson worth keeping is about the verification, not the locale: a
+    check that drives the real thing in a real browser found a total failure
+    that every unit test, every type and every screenshot of a working screen
+    had passed over.
+
+82. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

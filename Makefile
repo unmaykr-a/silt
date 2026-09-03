@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 SQLC_VERSION ?= v1.31.1
 
-.PHONY: check fmtcheck build web run test fmt tidy clean docker sqlc changelog demo e2e
+.PHONY: check fmtcheck build web run test fmt tidy clean docker sqlc changelog demo demo-site demo-site-verify e2e
 
 ## check: the gate every milestone must pass
 ##
@@ -54,6 +54,50 @@ demo:
 	@rm -rf .demo && mkdir -p .demo
 	$(GO) run ./cmd/silt-demo .demo/silt.db
 
+## demo-site: the static demo published to GitHub Pages
+##
+## No server runs behind the published site, so the UI is built with the demo
+## flag set and its /api calls are answered from a file captured here, off a
+## real Silt reading the demo database. Nothing about the app is special-cased:
+## the same components, the same client, only the transport differs.
+##
+## SILT_BASE_PATH is the project path Pages serves under; override it for a
+## user or custom-domain site, where the base is "/".
+DEMO_SITE_DIR  ?= .demo-site
+DEMO_BASE_PATH ?= /silt/
+DEMO_ADDR      ?= 127.0.0.1:8411
+
+demo-site:
+	@rm -rf $(DEMO_SITE_DIR) .demo && mkdir -p $(DEMO_SITE_DIR) .demo
+	$(GO) run ./cmd/silt-demo .demo/silt.db
+	$(GO) build -o .demo/silt ./cmd/silt
+	SILT_BASE_PATH=$(DEMO_BASE_PATH) SILT_WEB_OUT=$(CURDIR)/$(DEMO_SITE_DIR) VITE_SILT_DEMO=1 \
+		$(NPM) --prefix web run build
+	@echo "capturing fixtures"
+	@SILT_DB_PATH=$(CURDIR)/.demo/silt.db SILT_LISTEN_ADDR=$(DEMO_ADDR) \
+	  SILT_DOCKER_HOST=tcp://127.0.0.1:1 SILT_LOCAL_ACCOUNT=false SILT_LOG_LEVEL=warn \
+	  ./.demo/silt & echo $$! > .demo/pid; \
+	for i in $$(seq 1 40); do \
+	  curl -sf http://$(DEMO_ADDR)/healthz >/dev/null && break || sleep 0.25; \
+	done; \
+	node scripts/capture-demo.mjs http://$(DEMO_ADDR) $(DEMO_SITE_DIR)/demo-fixtures.json; \
+	status=$$?; kill $$(cat .demo/pid); rm -f .demo/pid; exit $$status
+	@# Pages serves 404.html for unknown paths, which is how a deep link into
+	@# a client-side route survives a reload without a server to fall back.
+	cp $(DEMO_SITE_DIR)/index.html $(DEMO_SITE_DIR)/404.html
+	@# Jekyll would otherwise drop Vite's _-prefixed output.
+	touch $(DEMO_SITE_DIR)/.nojekyll
+	@echo "demo site in $(DEMO_SITE_DIR)"
+
+## demo-site-verify: prove the built demo has an answer for every screen
+##
+## The demo's failure mode is a blank panel where a request the capture never
+## reached should have been, which nothing else notices. Needs the e2e
+## Playwright install, so it is a separate target.
+demo-site-verify:
+	cd e2e && npm ci && npx playwright install --with-deps chromium
+	node scripts/verify-demo.mjs $(DEMO_SITE_DIR) $(DEMO_BASE_PATH)
+
 ## e2e: end-to-end checks against a real binary and a seeded database
 ##
 ## Separate from `check` because it builds the frontend, seeds a database and
@@ -90,7 +134,7 @@ tidy:
 clean:
 	rm -f silt
 	find internal/web/dist -mindepth 1 ! -name .gitkeep -delete
-	rm -rf web/dist .demo .e2e e2e/test-results
+	rm -rf web/dist .demo .demo-site .e2e e2e/test-results
 
 docker:
 	docker buildx build --platform linux/amd64,linux/arm64 \

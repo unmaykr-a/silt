@@ -8,6 +8,7 @@
   import SiltMark from "$lib/components/SiltMark.svelte";
   import SearchBox from "$lib/components/SearchBox.svelte";
   import StatusMenu from "$lib/components/StatusMenu.svelte";
+  import DemoBanner from "$lib/components/DemoBanner.svelte";
   import Changelog from "$lib/components/Changelog.svelte";
   import Timeline from "./routes/Timeline.svelte";
   import Projects from "./routes/Projects.svelte";
@@ -242,6 +243,7 @@
        content scroll separately. Without it the tallest column decides the
        page height and the rail scrolls the whole document with it. -->
   <div class="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+    <DemoBanner />
     <header class="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-4">
       {#if showRail}
         <button

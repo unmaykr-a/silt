@@ -155,3 +155,30 @@ test("a change arrives without reloading the page", async ({ page }) => {
   await expect(page.locator("body")).toContainText(probe, { timeout: 10_000 });
   expect(navigations, "the page reloaded instead of updating live").toBe(0);
 });
+
+test("a POSIX browser locale does not blank the page", async ({ page }) => {
+  // A browser started under LANG=C, LANG=POSIX or LANG=en_US@posix reports
+  // navigator.language as "en-US@posix", which is not a valid BCP 47 tag.
+  // uPlot builds an Intl.NumberFormat from it at module scope, so importing
+  // the chart threw, so the bundle threw, so the page was blank — on a locale
+  // setting with nothing to do with charts.
+  // Non-configurable on purpose: a page cannot count on being able to patch
+  // the navigator back, which is why the fix guards the Intl constructors
+  // instead of the value they read.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "language", {
+      configurable: false,
+      get: () => "en-US@posix",
+    });
+  });
+
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  // Not networkidle: the page holds the event stream open, so it never idles.
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("header")).toBeVisible();
+  // The chart is the thing that threw, so its presence is the assertion.
+  await expect(page.locator(".uplot").first()).toBeVisible();
+  expect(errors, "the page threw on a POSIX locale").toEqual([]);
+});

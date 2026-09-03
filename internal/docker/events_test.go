@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types/events"
+
+	"github.com/unmaykr-a/silt/internal/docker/dockertest"
 )
 
 func testLogger() *slog.Logger {
@@ -79,9 +81,9 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-func startWatcher(t *testing.T, f *fakeEngine, rec *recorder) {
+func startWatcher(t *testing.T, f *dockertest.Engine, rec *recorder) {
 	t.Helper()
-	c, err := New(f.host())
+	c, err := New(f.Host())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -108,11 +110,11 @@ func startWatcher(t *testing.T, f *fakeEngine, rec *recorder) {
 }
 
 func TestWatcherDeliversEvents(t *testing.T) {
-	f := newFakeEngine()
+	f := dockertest.New()
 	// Registered before the watcher so it runs after it: Close blocks until the
 	// streaming /events handler returns, which only happens once the watcher's
 	// context is cancelled.
-	t.Cleanup(f.close)
+	t.Cleanup(f.Close)
 
 	rec := &recorder{}
 	startWatcher(t, f, rec)
@@ -128,7 +130,7 @@ func TestWatcherDeliversEvents(t *testing.T) {
 		t.Errorf("first connect resumedFrom = %v, want zero", connects[0])
 	}
 
-	f.emit(containerEvent("start", "media", "radarr", time.Unix(1000, 0)))
+	f.Emit(containerEvent("start", "media", "radarr", time.Unix(1000, 0)))
 	waitFor(t, "event delivery", func() bool {
 		evs, _, _ := rec.snapshot()
 		return len(evs) == 1
@@ -146,11 +148,11 @@ func TestWatcherDeliversEvents(t *testing.T) {
 
 // Healthcheck probes must never reach the rest of Silt.
 func TestWatcherFiltersExecNoise(t *testing.T) {
-	f := newFakeEngine()
+	f := dockertest.New()
 	// Registered before the watcher so it runs after it: Close blocks until the
 	// streaming /events handler returns, which only happens once the watcher's
 	// context is cancelled.
-	t.Cleanup(f.close)
+	t.Cleanup(f.Close)
 
 	rec := &recorder{}
 	startWatcher(t, f, rec)
@@ -161,9 +163,9 @@ func TestWatcherFiltersExecNoise(t *testing.T) {
 
 	// Docker appends the command to exec actions, which is why the filter has
 	// to match by prefix.
-	f.emit(containerEvent("exec_create: /healthcheck.sh", "media", "radarr", time.Unix(1001, 0)))
-	f.emit(containerEvent("exec_start: /healthcheck.sh", "media", "radarr", time.Unix(1002, 0)))
-	f.emit(containerEvent("die", "media", "radarr", time.Unix(1003, 0)))
+	f.Emit(containerEvent("exec_create: /healthcheck.sh", "media", "radarr", time.Unix(1001, 0)))
+	f.Emit(containerEvent("exec_start: /healthcheck.sh", "media", "radarr", time.Unix(1002, 0)))
+	f.Emit(containerEvent("die", "media", "radarr", time.Unix(1003, 0)))
 
 	waitFor(t, "die event", func() bool {
 		evs, _, _ := rec.snapshot()
@@ -184,11 +186,11 @@ func TestWatcherFiltersExecNoise(t *testing.T) {
 // The contract that M1 exists to get right: a severed stream reconnects,
 // resumes from the last event, and fires OnConnect so the caller reconciles.
 func TestWatcherReconnectsAndResumes(t *testing.T) {
-	f := newFakeEngine()
+	f := dockertest.New()
 	// Registered before the watcher so it runs after it: Close blocks until the
 	// streaming /events handler returns, which only happens once the watcher's
 	// context is cancelled.
-	t.Cleanup(f.close)
+	t.Cleanup(f.Close)
 
 	rec := &recorder{}
 	startWatcher(t, f, rec)
@@ -199,13 +201,13 @@ func TestWatcherReconnectsAndResumes(t *testing.T) {
 	})
 
 	last := time.Unix(1700000000, 500)
-	f.emit(containerEvent("start", "media", "radarr", last))
+	f.Emit(containerEvent("start", "media", "radarr", last))
 	waitFor(t, "first event", func() bool {
 		evs, _, _ := rec.snapshot()
 		return len(evs) == 1
 	})
 
-	f.severStream()
+	f.SeverStream()
 
 	waitFor(t, "disconnect", func() bool {
 		_, _, d := rec.snapshot()
@@ -225,8 +227,8 @@ func TestWatcherReconnectsAndResumes(t *testing.T) {
 	}
 
 	// The resubscription must carry a since= so the daemon can replay the gap.
-	waitFor(t, "resubscription", func() bool { return f.subscriptions() >= 2 })
-	since := f.sinceValues()
+	waitFor(t, "resubscription", func() bool { return f.Subscriptions() >= 2 })
+	since := f.SinceValues()
 	if since[0] != "" {
 		t.Errorf("first subscription since = %q, want empty", since[0])
 	}
@@ -235,7 +237,7 @@ func TestWatcherReconnectsAndResumes(t *testing.T) {
 	}
 
 	// Events still flow on the new connection.
-	f.emit(containerEvent("die", "media", "radarr", last.Add(time.Second)))
+	f.Emit(containerEvent("die", "media", "radarr", last.Add(time.Second)))
 	waitFor(t, "post-reconnect event", func() bool {
 		evs, _, _ := rec.snapshot()
 		return len(evs) == 2
@@ -245,12 +247,12 @@ func TestWatcherReconnectsAndResumes(t *testing.T) {
 // An engine that is down at startup must not be fatal; the watcher keeps
 // retrying and connects when it returns.
 func TestWatcherRetriesUnreachableEngine(t *testing.T) {
-	f := newFakeEngine()
+	f := dockertest.New()
 	// Registered before the watcher so it runs after it: Close blocks until the
 	// streaming /events handler returns, which only happens once the watcher's
 	// context is cancelled.
-	t.Cleanup(f.close)
-	f.setReachable(false)
+	t.Cleanup(f.Close)
+	f.SetReachable(false)
 
 	rec := &recorder{}
 	startWatcher(t, f, rec)
@@ -260,7 +262,7 @@ func TestWatcherRetriesUnreachableEngine(t *testing.T) {
 		t.Fatalf("connected %d times while engine was down, want 0", len(connects))
 	}
 
-	f.setReachable(true)
+	f.SetReachable(true)
 	waitFor(t, "connect after recovery", func() bool {
 		_, c, _ := rec.snapshot()
 		return len(c) >= 1

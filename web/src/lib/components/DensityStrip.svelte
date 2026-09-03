@@ -5,6 +5,7 @@
   import { theme } from "$lib/theme.svelte";
   import { prefs } from "$lib/prefs.svelte";
   import { datetime } from "$lib/format";
+  import { localeFor } from "$lib/locale";
 
   // Change markers and health events share one axis. That shared axis is the
   // whole point of the app: it is what lets someone see the image that got
@@ -178,9 +179,9 @@
     const d = new Date(ms);
     const midnight = d.getHours() === 0 && d.getMinutes() === 0;
     if (midnight) {
-      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      return d.toLocaleDateString(localeFor(undefined), { month: "short", day: "numeric" });
     }
-    return d.toLocaleTimeString(undefined, {
+    return d.toLocaleTimeString(localeFor(undefined), {
       hour: "2-digit",
       minute: "2-digit",
       hour12: prefs.clock === "h12" ? true : prefs.clock === "h24" ? false : undefined,
