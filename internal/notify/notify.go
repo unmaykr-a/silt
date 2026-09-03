@@ -46,7 +46,17 @@ func ParseFilter(kinds []string, minSeverity string) (Filter, error) {
 			f.Kinds = nil // nil means every kind
 			break
 		}
-		f.Kinds[diff.Kind(k)] = true
+		// Refuse a kind that does not exist. It used to be accepted and then
+		// match nothing, so `SILT_NOTIFY_ON=image` — a plausible typo for
+		// image_id — silently meant "never notify", with the discovery
+		// deferred to the outage the notification was configured for.
+		kind := diff.Kind(k)
+		if !diff.ValidKind(kind) {
+			return Filter{}, fmt.Errorf(
+				"SILT_NOTIFY_ON %q is not a change kind; use `all` or any of: %s",
+				k, kindList())
+		}
+		f.Kinds[kind] = true
 	}
 
 	switch s := diff.Severity(strings.ToLower(strings.TrimSpace(minSeverity))); s {
@@ -302,4 +312,14 @@ func MaskAll(urls []string) []string {
 		out = append(out, Mask(u))
 	}
 	return out
+}
+
+// kindList renders the valid kinds for an error message.
+func kindList() string {
+	names := make([]string, 0, len(diff.AllKinds))
+	for _, k := range diff.AllKinds {
+		names = append(names, string(k))
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }

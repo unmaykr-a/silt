@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
+
+	"github.com/unmaykr-a/silt/internal/redact"
 )
 
 // Config is the fully validated runtime configuration.
@@ -185,6 +187,27 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("%s must not be negative, got %d", name, days)
 		}
 	}
+	// BaseURL ends up as a link in a notification, which is read on a phone at
+	// three in the morning. A value that is not a URL produces a link that
+	// goes nowhere, and the only place that shows up is the message you needed
+	// to work.
+	if c.BaseURL != "" {
+		u, err := url.Parse(c.BaseURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("SILT_BASE_URL %q is not a URL; it should look like https://silt.example.lan", c.BaseURL)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("SILT_BASE_URL %q must be http or https, not %q", c.BaseURL, u.Scheme)
+		}
+	}
+
+	// A keep key decides what is stored in cleartext, so a pattern that keeps
+	// more than it names is refused at startup rather than silently widening
+	// the list. `*` alone would turn redaction off entirely.
+	if err := redact.ValidateKeepKeys(c.KeepKeys); err != nil {
+		return fmt.Errorf("SILT_KEEP_KEYS: %w", err)
+	}
+
 	for i, root := range c.ComposeRoots {
 		root = strings.TrimSpace(root)
 		if root == "" {

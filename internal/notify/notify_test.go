@@ -212,3 +212,49 @@ func TestLiveCanGoFromNothingToConfigured(t *testing.T) {
 		t.Error("Replace did not install the new sender")
 	}
 }
+
+// A kind that does not exist used to be accepted and then match nothing, so a
+// typo meant "never notify" and you found out during the outage.
+func TestParseFilterRefusesAnUnknownKind(t *testing.T) {
+	for _, kinds := range [][]string{
+		{"image"},  // a plausible typo for image_id
+		{"images"}, // and another
+		{"image_id", "ports", "voluems"},
+		{"IMAGE_ID_TYPO"},
+	} {
+		if _, err := ParseFilter(kinds, "medium"); err == nil {
+			t.Errorf("ParseFilter(%v) accepted a kind Silt never produces", kinds)
+		}
+	}
+}
+
+func TestParseFilterAcceptsEveryRealKind(t *testing.T) {
+	names := make([]string, 0, len(diff.AllKinds))
+	for _, k := range diff.AllKinds {
+		names = append(names, string(k))
+	}
+	if _, err := ParseFilter(names, "low"); err != nil {
+		t.Errorf("ParseFilter refused the full list of real kinds: %v", err)
+	}
+	// The wildcards still mean everything.
+	for _, all := range [][]string{{"all"}, {"*"}, {"ALL"}} {
+		f, err := ParseFilter(all, "low")
+		if err != nil {
+			t.Errorf("ParseFilter(%v): %v", all, err)
+		}
+		if f.Kinds != nil {
+			t.Errorf("ParseFilter(%v) did not mean every kind", all)
+		}
+	}
+}
+
+// The error has to say what is allowed, or the fix is a documentation hunt.
+func TestParseFilterErrorNamesTheValidKinds(t *testing.T) {
+	_, err := ParseFilter([]string{"image"}, "medium")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "image_id") {
+		t.Errorf("the error does not list the valid kinds: %v", err)
+	}
+}

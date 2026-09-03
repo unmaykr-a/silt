@@ -1576,7 +1576,45 @@ Changed:
     measured — sliding in from 0,0 on first paint reads as a glitch rather
     than as motion. `motion-reduce` turns it off.
 
-70. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+70. **A keep key is a security boundary (0.11.0)** — found by asking what the
+    settings endpoint accepts rather than what it rejects. `SILT_KEEP_KEYS`
+    patterns were matched with `path.Match`, so `*` was a legal value that
+    matched every environment variable on the host and stored all of them in
+    cleartext. `**`, `?*` and `[A-Z]*` too. Nothing warned; the sentinel test
+    passes because it never sets a keep key; and the failure is invisible from
+    the UI, which shows the values as though keeping them were intended.
+
+    The grammar is now exactly what the documentation always claimed: a name,
+    optionally with a single `*` at one end. Validated at startup, validated on
+    the settings screen, and — because this is the function that decides what
+    is written in cleartext — an invalid pattern that reaches the matcher some
+    other way is dropped rather than obeyed, so the failure mode is "your key
+    was not kept" rather than "everything was".
+
+71. **Accepting a value you cannot act on is not leniency (0.11.0)** — the
+    same round found two more. `SILT_NOTIFY_ON=image` was accepted and matched
+    nothing, so a typo meant "never notify" and the discovery was deferred to
+    the outage. `SILT_BASE_URL=not a url` was accepted and became the link in
+    a notification. Both now fail at the door, and the kind error lists the
+    kinds. A setting that is wrong should say so while someone is looking at
+    it, which is the same argument the notification test button was built on.
+
+72. **The bug the sweep found was mine, and it was one I had already written
+    down (0.11.0)** — the new sliding marker under the section links cleared
+    itself with `{ ...marker, ready: false }`. That reads the marker, runs
+    inside the effect that writes it, and so loops until Svelte aborts the
+    page. It only fired where nothing is selected — `/search` and an unknown
+    URL — which no screenshot of a working screen would ever have caught.
+
+    Entry 62 is the same bug in the SSE status callback, written three
+    releases earlier. Knowing the rule was not enough; what catches it is
+    visiting the routes where the *empty* branch is the one that runs. The
+    measurement is now a plain function in `web/src/lib/marker.ts` that never
+    reads its previous value, with a test that fails if it starts to, and the
+    sweep — every route at five widths in three configurations — is how this
+    class gets checked from here.
+
+73. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

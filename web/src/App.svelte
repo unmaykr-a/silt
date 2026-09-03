@@ -2,6 +2,7 @@
   import { router, link } from "$lib/router.svelte";
   import { subscribe, api, type Project, type AuthState, type StreamStatus } from "$lib/api/client";
   import { prefs } from "$lib/prefs.svelte";
+  import { markerFor, HIDDEN } from "$lib/marker";
   import Login from "$lib/components/Login.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import SiltMark from "$lib/components/SiltMark.svelte";
@@ -128,6 +129,33 @@
 
   const route = $derived(router.current);
 
+  // The sliding marker under the section links. Measured from the active link
+  // rather than painted on it, because only one element can animate between
+  // two positions.
+  let navEl = $state<HTMLElement | null>(null);
+  let navMarker = $state(HIDDEN);
+
+  // markerFor never reads the current value, which is the whole point: this
+  // runs synchronously inside the effect that writes the result, so merging
+  // into the previous marker made the effect depend on its own output and loop
+  // until Svelte aborted the page. See web/src/lib/marker.ts.
+  function measureNav() {
+    if (!navEl) return;
+    navMarker = markerFor(navEl.querySelector<HTMLElement>('[aria-current="page"]'));
+  }
+
+  $effect(() => {
+    // Re-measure on navigation, and on resize: the links are icons below sm
+    // and labels above it, so their widths change with the viewport.
+    void route;
+    measureNav();
+    if (!navEl || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => measureNav());
+    observer.observe(navEl);
+    for (const child of navEl.children) observer.observe(child);
+    return () => observer.disconnect();
+  });
+
   async function signOut() {
     await api.logout();
     await refreshAuth();
@@ -244,7 +272,23 @@
              bring the menu into view. Hiding the nav outright was the other
              option and a worse one: on Settings and Projects there is no rail
              in this layout, so a phone would have had no navigation at all. -->
-        <nav class="flex items-center gap-0.5" aria-label="Sections">
+        <!-- The marker slides between sections rather than appearing under a
+             different one. These are links, not buttons, so the segmented
+             control does not apply — but the mechanism is the same: one
+             absolutely-positioned element measured from the active link. -->
+        <nav
+          bind:this={navEl}
+          class="relative isolate flex items-center gap-0.5"
+          aria-label="Sections"
+        >
+          {#if navMarker.ready}
+            <span
+              aria-hidden="true"
+              class="absolute inset-y-0 -z-10 rounded-md bg-secondary transition-[left,width] duration-200 ease-out
+                     motion-reduce:transition-none"
+              style="left: {navMarker.left}px; width: {navMarker.width}px;"
+            ></span>
+          {/if}
           {#each SECTIONS as section (section.href)}
             <a
               use:link
@@ -252,10 +296,11 @@
               onclick={() => (navOpen = false)}
               title={section.label}
               aria-label={section.label}
-              class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors sm:px-2.5
+              aria-current={isActive(section.matches) ? "page" : undefined}
+              class="relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors sm:px-2.5
                      {isActive(section.matches)
-                ? 'bg-secondary text-secondary-foreground'
-                : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+                ? 'text-secondary-foreground'
+                : 'text-muted-foreground hover:text-foreground'}"
             >
               <span class="sm:hidden">{@render navIcon(section.icon)}</span>
               <span class="hidden sm:inline">{section.label}</span>

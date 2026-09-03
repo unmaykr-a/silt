@@ -39,6 +39,29 @@ const (
 	KindOther         Kind = "other"
 )
 
+// AllKinds is every change kind Silt can produce.
+//
+// Exported so the notification filter can refuse a kind that does not exist,
+// rather than accepting it and matching nothing: `SILT_NOTIFY_ON=image` is a
+// plausible typo for `image_id`, and it used to mean "never notify" with no
+// error anywhere — discovered during the outage the notification was for.
+var AllKinds = []Kind{
+	KindImageRef, KindImageID, KindImageDigest, KindEnv, KindPorts,
+	KindVolumes, KindNetworks, KindHealthcheck, KindResources, KindCommand,
+	KindEntrypoint, KindRestartPolicy, KindLabels, KindDependsOn,
+	KindServiceAdded, KindServiceRemove, KindState, KindOther,
+}
+
+// ValidKind reports whether k is a kind Silt actually produces.
+func ValidKind(k Kind) bool {
+	for _, known := range AllKinds {
+		if k == known {
+			return true
+		}
+	}
+	return false
+}
+
 // Severity drives UI colour and the notification threshold.
 type Severity string
 
