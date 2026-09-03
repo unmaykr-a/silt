@@ -5,6 +5,27 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.13.0 — 2026-09-03
+
+A demo you can click through, and the pipeline finally has tests.
+
+### Added
+
+- A live demo at https://unmaykr-a.github.io/silt/ — the whole UI, running against captured data, with no server behind it. Every screen, every graph and every control is the code that ships; only the transport differs, so what you click through is what you get. Writes are refused rather than faked, and the timestamps are shifted onto your clock so it never reads as an abandoned deployment.
+- `make demo-site` builds it and `make demo-site-verify` drives the result in a browser, failing if any screen has a request the capture missed — the demo's one failure mode is a blank panel nothing else would notice.
+- Tests for the collection pipeline, end to end: an observation that becomes a snapshot and a broadcast, an unchanged one that stays silent, a runtime-only change reaching the browser (the bug 0.10.0 fixed, now pinned), an image change counting as a configuration change, a secret that does not survive the pipeline, a container that vanishes mid-snapshot, and discovery grouping by project. The package that had shipped a real bug was the one at 22% coverage; it is now the best-covered path in the collector.
+- The fake Docker engine the tests run against is now a package of its own, with container inspection and image inspection added. There was one copy in the Docker tests and none where the pipeline is; there is now one implementation both use.
+- Tests for route parsing, which decides what every deep link resolves to and had none.
+
+### Changed
+
+- The theme control sits on one line with its label, sized to itself. Stretched to the panel it was a bordered box inside a bordered box — the only hard rectangle in a menu that is otherwise flowing text, and it read as wedged against the edge rather than placed.
+- Links are written app-relative and rewritten onto wherever Silt is mounted, so ctrl-click, middle-click and the browser's own status bar all agree with what a plain click does.
+
+### Fixed
+
+- A browser started with LANG=C, LANG=POSIX or LANG=en_US@posix rendered nothing at all. Those report a locale of `en-US@posix`, which is not a valid language tag; the charting library builds a number formatter from it as it loads, so the import threw, so the whole bundle threw. A blank page, from a locale setting with nothing to do with charts. An invalid tag is now repaired at the point it would throw, and date formatting falls back rather than failing.
+
 ## 0.12.0 — 2026-09-03
 
 The testing round becomes a test suite.

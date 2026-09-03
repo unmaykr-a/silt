@@ -23,6 +23,11 @@ function keepEmbedDir(): Plugin {
 }
 
 export default defineConfig({
+  // Silt serves itself from the root, so "/" is right for every real install.
+  // The GitHub Pages demo lives under a project path, and `make demo-site`
+  // passes that in. Everything that builds a URL reads it back through
+  // import.meta.env.BASE_URL — see web/src/lib/router.svelte.ts.
+  base: process.env.SILT_BASE_PATH || "/",
   plugins: [tailwindcss(), svelte(), keepEmbedDir()],
   resolve: {
     // $lib is the SvelteKit convention that shadcn-svelte components import
@@ -31,7 +36,7 @@ export default defineConfig({
     alias: { $lib: resolve(import.meta.dirname, "src/lib") },
   },
   build: {
-    outDir: OUT_DIR,
+    outDir: process.env.SILT_WEB_OUT ? resolve(process.env.SILT_WEB_OUT) : OUT_DIR,
     // outDir sits outside the Vite root, so this must be explicit.
     emptyOutDir: true,
   },

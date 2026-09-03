@@ -56,7 +56,9 @@
       ? "bg-emerald-500"
       : status === "connecting"
         ? "bg-amber-500 animate-pulse"
-        : "bg-red-500",
+        : status === "demo"
+          ? "bg-sky-500"
+          : "bg-red-500",
   );
 
   // Say what it means, not what the state is called. "offline" alone leaves
@@ -66,14 +68,18 @@
       ? "Receiving live updates"
       : status === "connecting"
         ? "Reconnecting…"
-        : "Not receiving updates",
+        : status === "demo"
+          ? "Static demo"
+          : "Not receiving updates",
   );
   const detail = $derived(
     status === "live"
       ? "Changes appear as they happen."
       : status === "connecting"
         ? "Retrying automatically."
-        : "This page may be out of date. Reload to catch up.",
+        : status === "demo"
+          ? "Captured from a real Silt. Nothing here changes, and nothing can be saved."
+          : "This page may be out of date. Reload to catch up.",
   );
 
   // Can Silt end this session itself? Under forward auth the proxy decides, so
@@ -110,7 +116,7 @@
                connection that has quietly stopped, which is precisely how the
                indicator managed to lie. Silt sends a heartbeat every 20s, so
                this figure should never read older than that. -->
-          <dl class="mt-1.5 space-y-0.5 text-xs text-muted-foreground/70">
+          <dl class="mt-1.5 space-y-0.5 text-xs text-muted-foreground/70" class:hidden={status === "demo"}>
             {#if status === "live"}
               <div class="flex gap-1.5">
                 <dt>connected</dt>
@@ -136,13 +142,20 @@
       </div>
     </div>
 
-    <!-- Theme. Three buttons rather than a toggle, because "follow the
-         system" is not a state a two-way toggle can express, and pinning
-         light-or-dark forever is what the toggle silently did. -->
-    <div class="border-b border-border px-3 py-2.5">
-      <p class="mb-1.5 text-xs text-muted-foreground">Theme</p>
+    <!-- Theme. Three choices rather than a toggle, because "follow the system"
+         is not a state a two-way toggle can express, and pinning light-or-dark
+         forever is what the toggle silently did.
+
+         Label and control on one row, with the control sized to its content.
+         Stretched to the full width it was a bordered box inside a bordered
+         box, thirteen pixels from the panel edge on both sides — the only hard
+         rectangle in a menu that is otherwise flowing text, and it read as
+         wedged in rather than placed. -->
+    <div class="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5">
+      <span class="text-xs text-muted-foreground">Theme</span>
       <Segmented
         label="Theme"
+        size="xs"
         options={THEMES}
         value={theme.value}
         onchange={(next) => theme.set(next)}
@@ -191,6 +204,13 @@
         </p>
       {:else if auth?.required}
         <p class="text-sm text-muted-foreground">Signed in</p>
+      {:else if status === "demo"}
+        <!-- The real warning below would be alarming and untrue here: there is
+             no host, no socket and nothing to protect. -->
+        <p class="text-sm text-muted-foreground">Public demo</p>
+        <p class="mt-0.5 text-xs text-muted-foreground/70">
+          Your own install decides its own authentication.
+        </p>
       {:else}
         <p class="text-sm text-muted-foreground">No authentication configured</p>
         <p class="mt-0.5 text-xs text-muted-foreground/70">

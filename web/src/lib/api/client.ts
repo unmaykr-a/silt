@@ -4,6 +4,7 @@
 // build runs before typechecking — so a spec change that breaks the frontend
 // fails the build instead of surfacing as an undefined at runtime.
 import type { components } from "./schema";
+import { IS_DEMO } from "$lib/demo";
 
 export type Host = components["schemas"]["Host"];
 export type Project = components["schemas"]["Project"];
@@ -222,7 +223,7 @@ export type StreamEvent = "ready" | "event" | "snapshot.changed";
  * retry after a drop, because from the reader's side they are the same thing:
  * not live yet.
  */
-export type StreamStatus = "connecting" | "live" | "offline";
+export type StreamStatus = "connecting" | "live" | "offline" | "demo";
 
 export type StreamOptions = {
   /**
@@ -250,6 +251,16 @@ export function subscribe(
   handlers: Partial<Record<StreamEvent, (data: unknown) => void>>,
   options: StreamOptions = {},
 ): () => void {
+  // The static demo has no server to stream from. Opening an EventSource
+  // against a file host produces a permanent reconnect loop and an indicator
+  // that says "offline" — technically true, and useless. Say what it is
+  // instead, and open nothing.
+  if (IS_DEMO) {
+    options.status?.("demo");
+    options.activity?.(Date.now());
+    return () => {};
+  }
+
   const source = new EventSource("/api/stream");
   const listeners: Array<[string, EventListener]> = [];
   let closed = false;

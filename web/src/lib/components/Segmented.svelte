@@ -64,11 +64,15 @@
   const pad = $derived(size === "xs" ? "px-2 py-1 text-[11px]" : "px-3 py-1.5 text-xs");
 </script>
 
+<!-- inline-flex, so the control is as wide as its labels rather than as wide as
+     whatever contains it. As a block it stretched, and in the status menu that
+     made it a bordered box inside a bordered box, pinned to both edges — the
+     only hard rectangle in a panel that is otherwise flowing text. -->
 <div
   bind:this={container}
   role="group"
   aria-label={label}
-  class="relative isolate flex rounded-md border border-border"
+  class="relative isolate inline-flex rounded-md border border-border"
 >
   <!-- Hidden until measured: sliding in from 0,0 on first paint reads as a
        glitch rather than as motion. -->

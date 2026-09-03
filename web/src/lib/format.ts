@@ -6,6 +6,7 @@
  * the world and 24-hour dd/mm is unreadable to the rest of it.
  */
 import { prefs, dateLocale, dateParts, type Clock, type DateStyle } from "./prefs.svelte";
+import { localeFor } from "./locale";
 
 function hourOptions(clock: Clock): Intl.DateTimeFormatOptions {
   switch (clock) {
@@ -31,12 +32,12 @@ export function datetime(
     ...(opts.zone ? { timeZoneName: "short" } : {}),
     ...hourOptions(prefs.clock),
   };
-  return new Date(ts).toLocaleString(dateLocale(style), { ...dateParts(style), ...time });
+  return new Date(ts).toLocaleString(localeFor(dateLocale(style)), { ...dateParts(style), ...time });
 }
 
 /** Just the clock, for a dense column where the date is already established. */
 export function clockTime(ts: number, seconds = prefs.seconds): string {
-  return new Date(ts).toLocaleTimeString(dateLocale(prefs.dateStyle), {
+  return new Date(ts).toLocaleTimeString(localeFor(dateLocale(prefs.dateStyle)), {
     hour: "2-digit",
     minute: "2-digit",
     ...(seconds ? { second: "2-digit" } : {}),
@@ -47,7 +48,7 @@ export function clockTime(ts: number, seconds = prefs.seconds): string {
 /** Just the date. */
 export function dateOnly(ts: number): string {
   const style = prefs.dateStyle;
-  return new Date(ts).toLocaleDateString(dateLocale(style), dateParts(style));
+  return new Date(ts).toLocaleDateString(localeFor(dateLocale(style)), dateParts(style));
 }
 
 export function relative(ts: number, now: number = Date.now()): string {
@@ -75,7 +76,7 @@ export function sampleDate(style: DateStyle, clock: Clock, ts = Date.now()): str
     minute: "2-digit",
     ...(clock === "h24" ? { hour12: false } : clock === "h12" ? { hour12: true } : {}),
   };
-  return new Date(ts).toLocaleString(dateLocale(style), { ...dateParts(style), ...time });
+  return new Date(ts).toLocaleString(localeFor(dateLocale(style)), { ...dateParts(style), ...time });
 }
 
 export function duration(ms: number): string {

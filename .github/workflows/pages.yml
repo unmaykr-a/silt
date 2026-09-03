@@ -1,0 +1,64 @@
+name: demo
+
+# The published demo at https://unmaykr-a.github.io/silt/.
+#
+# Built rather than committed: the fixtures are 1.8 MB of captured API
+# responses, and a generated blob in git is a blob that goes stale the first
+# time someone changes a screen. `make demo-site` regenerates them from the
+# same seed `make demo` uses, and `make demo-site-verify` drives the built
+# site in a browser and fails if any screen has a request the capture missed.
+
+on:
+  push:
+    branches: [main]
+  # So the demo can be rebuilt without a commit — a Pages settings change, or
+  # a run that failed on something transient.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a queued run supersedes an older one rather than
+# racing it. In-progress runs are left alone: a half-deployed site is worse
+# than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/package-lock.json
+      - run: npm --prefix web ci
+      - name: build the demo site
+        run: make demo-site
+      - name: verify every screen has data
+        run: make demo-site-verify
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .demo-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

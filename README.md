@@ -9,6 +9,9 @@ lets you answer one question well: **what changed, and when?**
 
 When something breaks at 03:10, you can see the image that got pulled at 03:00.
 
+**[Try it →](https://unmaykr-a.github.io/silt/)** — the whole UI, running in your browser
+against a made-up host. No sign-up, nothing to install.
+
 Silt **never writes to the Docker API.** It observes, through a read-only socket proxy.
 That is an architectural rule, not a v1 shortcut.
 
@@ -359,13 +362,23 @@ make demo     # a populated database, no Docker host needed
 SILT_DB_PATH=.demo/silt.db go run ./cmd/silt
 
 make check    # gofmt, build, vet, Go tests, frontend tests and build
-make e2e      # 117 browser checks against a real binary and that database
+make e2e      # 118 browser checks against a real binary and that database
 make race     # the race detector, which collection earns
+
+make demo-site         # the static demo, built into .demo-site
+make demo-site-verify  # drive it in a browser and fail on a screen with no data
 ```
 
 `make check` is the fast gate and runs exactly what CI runs, in CI's order. `make e2e` is
 separate because it builds the frontend, seeds a database and drives a browser — a minute
 against a second — and runs as its own CI job.
+
+The published demo is built the same way: the UI compiled with `VITE_SILT_DEMO=1`, and its
+`/api` calls answered by a fetch shim reading responses captured from a real Silt running
+against the demo database. No screen is special-cased — the components, the API client and
+the router are the ones that ship, and only the transport differs. Writes are refused
+rather than faked, and every timestamp is shifted onto the reader's clock at load so the
+demo does not visibly age between deployments.
 
 ## Status
 
