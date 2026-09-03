@@ -1755,7 +1755,52 @@ Changed:
     that every unit test, every type and every screenshot of a working screen
     had passed over.
 
-82. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+82. **The demo was demonstrating the wrong thing (0.14.0)** — the seed gave
+    every project seven observations where one image tag gained the suffix
+    `-alt`, so every diff in the published demo read
+    `radarr:5.4.0 -> radarr:5.4.0-alt`. On the screen the project leads with,
+    that is a screenshot of the feature not working.
+
+    The seed now carries a `Change` list per stack, replayed forward and
+    accumulating, so the diff between two adjacent snapshots is exactly the
+    change that happened between them. One stack has a real sequence: a patch
+    release alone, a port and a mount arriving together, then an upgrade
+    landing with a rotated API key and a new setting — one snapshot with four
+    changes across three severities, which is what a single `compose up`
+    actually looks like and what the grouping is for.
+
+    Two smaller lies went with it. Image IDs were derived from the service
+    name, so they never changed and the image history had one row however many
+    upgrades it contained. And the compose files were written into the
+    observation directly rather than through `Redactor.ComposeText`, so the
+    demo displayed a literal API key in cleartext — on the one screen whose
+    entire point is that it never stores one.
+
+83. **A verification that only ever opened the empty case (0.14.0)** — the
+    capture derived per-file diff paths from `/api/diff`, which does not
+    return files: the file diff belongs to the Files screen and comes from
+    `/api/diff/file`. So the loop iterated an always-empty array and captured
+    nothing, and the published demo's compare view had no data behind it.
+
+    It passed `make demo-site-verify` because the check only visited
+    `/diff?project=N`, which renders "pick two snapshots to compare" and asks
+    for nothing. The check now opens a diff with two snapshots selected, and
+    the capture derives its paths from the snapshots' own file lists.
+
+    The general shape is worth keeping: a check that only exercises a screen's
+    empty state verifies the empty state. Entry 80 said the demo verifies
+    itself; it verified the half of it that needed no data.
+
+84. **Light mode was the display's maximum (0.14.0)** — stock shadcn light is
+    `oklch(1 0 0)` behind `oklch(0.141 …)`, on a screen people leave open all
+    day, with a card the same pure white as the page behind it. Off the
+    extremes at both ends: the page is an off-white, the card is the white and
+    now reads as raised, and the foreground comes off black at around 12:1.
+    Secondary text moved the other way — the stock `muted-foreground` on white
+    was about 3.5:1, under AA, so a comfort change and an accessibility fix
+    pointed in opposite directions and both were needed.
+
+85. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

@@ -67,12 +67,18 @@
 <!-- inline-flex, so the control is as wide as its labels rather than as wide as
      whatever contains it. As a block it stretched, and in the status menu that
      made it a bordered box inside a bordered box, pinned to both edges — the
-     only hard rectangle in a panel that is otherwise flowing text. -->
+     only hard rectangle in a panel that is otherwise flowing text.
+
+     p-0.5 is what keeps the sliding marker off the border. The marker is
+     measured from the selected button, so with no padding it sat flush
+     against the frame on the first and last option and read as a rendering
+     fault rather than a highlight. The padding and the marker's own inset are
+     the same 2px, so the gap is even on all four sides. -->
 <div
   bind:this={container}
   role="group"
   aria-label={label}
-  class="relative isolate inline-flex rounded-md border border-border"
+  class="relative isolate inline-flex rounded-md border border-border p-0.5"
 >
   <!-- Hidden until measured: sliding in from 0,0 on first paint reads as a
        glitch rather than as motion. -->

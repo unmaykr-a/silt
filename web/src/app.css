@@ -4,25 +4,37 @@
    dark variant keys off an explicit class rather than the OS preference. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Theme tokens from shadcn-svelte's zinc base colour. */
+/* Theme tokens from shadcn-svelte's zinc base colour, with the light side
+   pulled off the extremes.
+
+   Stock shadcn light is pure white behind near-black text, and a card the same
+   pure white as the page behind it. That is the maximum contrast the display
+   can produce, on a screen people leave open all day — and it flattens the
+   layout, because a white card on a white page is only a border.
+
+   So: the page is an off-white, the card is the white, and the foreground
+   comes off black. Cards now read as sitting above the page rather than being
+   drawn on it, and the text/background pair is around 12:1 — comfortably past
+   AAA with room to spare, just not a photographer's lightbox. Secondary text
+   moved the other way, up in contrast: at the stock value it was under AA. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --background: oklch(0.985 0.002 286.32);
+  --foreground: oklch(0.21 0.006 285.885);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.21 0.006 285.885);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.141 0.005 285.823);
+  --popover-foreground: oklch(0.21 0.006 285.885);
   --primary: oklch(0.21 0.006 285.885);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.375);
+  --secondary: oklch(0.951 0.002 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
-  --accent: oklch(0.967 0.001 286.375);
+  --muted: oklch(0.951 0.002 286.375);
+  --muted-foreground: oklch(0.505 0.016 285.938);
+  --accent: oklch(0.951 0.002 286.375);
   --accent-foreground: oklch(0.21 0.006 285.885);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.92 0.004 286.32);
-  --input: oklch(0.92 0.004 286.32);
+  --destructive: oklch(0.55 0.225 27.325);
+  --border: oklch(0.905 0.004 286.32);
+  --input: oklch(0.905 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
   --chart-1: oklch(0.871 0.006 286.286);
   --chart-2: oklch(0.552 0.016 285.938);
@@ -30,13 +42,13 @@
   --chart-4: oklch(0.37 0.013 285.805);
   --chart-5: oklch(0.274 0.006 286.033);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar: oklch(0.968 0.002 286.32);
+  --sidebar-foreground: oklch(0.21 0.006 285.885);
   --sidebar-primary: oklch(0.21 0.006 285.885);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent: oklch(0.94 0.002 286.375);
   --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-border: oklch(0.905 0.004 286.32);
   --sidebar-ring: oklch(0.705 0.015 286.067);
   --radius: 0.5rem;
 }

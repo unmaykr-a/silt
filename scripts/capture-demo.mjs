@@ -157,36 +157,42 @@ async function main() {
       await capture(`/api/projects/${p.id}/files/preview?path=${encodeURIComponent(path)}`);
     }
 
+    // Every path any snapshot captured, which is what the Files screen's
+    // selectors can reach between them.
+    const filePaths = new Set();
     for (const snap of snapshots) {
       await capture(`/api/snapshots/${snap.id}`);
       await capture(`/api/snapshots/${snap.id}/compose`);
       await captureText(`/api/snapshots/${snap.id}/compose?format=yaml`);
       const files = (await capture(`/api/snapshots/${snap.id}/files`)) || [];
       for (const f of files) {
-        if (f.path) await capture(`/api/snapshots/${snap.id}/file?path=${encodeURIComponent(f.path)}`);
+        if (!f.path) continue;
+        filePaths.add(f.path);
+        await capture(`/api/snapshots/${snap.id}/file?path=${encodeURIComponent(f.path)}`);
       }
     }
 
-    // Diffs between adjacent snapshots, which is what clicking an entry in
-    // the history does, plus the per-file diffs the screen opens from them.
-    // The list is newest-first.
+    // The snapshot pairs someone actually selects: each step through the
+    // history, and the newest against every older one. The list is
+    // newest-first.
     const pairs = [];
     for (let i = 0; i + 1 < snapshots.length; i++) {
       pairs.push([snapshots[i + 1].id, snapshots[i].id]);
     }
-    // And the two ends, which is what "compare oldest to newest" gives.
-    if (snapshots.length > 2) {
-      pairs.push([snapshots[snapshots.length - 1].id, snapshots[0].id]);
+    for (let i = 2; i < snapshots.length; i++) {
+      pairs.push([snapshots[i].id, snapshots[0].id]);
     }
+
     for (const [from, until] of pairs) {
-      const diff = await capture(`/api/diff?from=${from}&to=${until}`);
-      for (const f of diff?.files ?? []) {
-        if (!f.path) continue;
-        await capture(`/api/diff/file?from=${from}&path=${encodeURIComponent(f.path)}&to=${until}`);
+      await capture(`/api/diff?from=${from}&to=${until}`);
+      // The per-file diff is the Files screen, not the Diff screen, and
+      // /api/diff does not list files — deriving the paths from it captured
+      // nothing at all, which is how the compare view shipped with no data.
+      for (const path of filePaths) {
+        const q = `from=${from}&path=${encodeURIComponent(path)}&to=${until}`;
+        await capture(`/api/diff/file?${q}`);
         // "Show the whole file" is one click away from every file diff.
-        await capture(
-          `/api/diff/file?context=full&from=${from}&path=${encodeURIComponent(f.path)}&to=${until}`,
-        );
+        await capture(`/api/diff/file?context=full&${q}`);
       }
     }
   }

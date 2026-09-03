@@ -12,6 +12,9 @@ package demo
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/compose"
@@ -29,6 +32,14 @@ type Service struct {
 	Restarts int
 	ExitCode *int
 	OOMKille bool
+
+	// The configuration a diff can move. Empty means the defaults in build():
+	// most services in a homelab are three environment variables and a port,
+	// and spelling that out fourteen times would bury the ones that differ.
+	Env    []string
+	Ports  []string
+	Mounts []docker.Mount
+	Labels map[string]string
 	// StartedAgo is how long ago the container last started. For a container
 	// with restarts that is when it last restarted, which is what decides
 	// whether those restarts still count as recent.
@@ -42,9 +53,242 @@ type Stack struct {
 	// File, when set, is captured as the project's compose file so the diff
 	// and drift screens have something to show.
 	File string
+	// Changes is what happened to this stack over the history, oldest first.
+	// Empty means the default in Seed: one image bump, so every stack has a
+	// shape on the density strip.
+	Changes []Change
+}
+
+// Change is one edit to a stack, landing at one point in its history.
+//
+// The history is replayed forward and changes accumulate, so a diff between
+// two adjacent snapshots shows exactly the change that happened between them.
+// That is the whole point of the seed: a demo where every diff is a version
+// string moving by one digit demonstrates nothing about a screen built to
+// group changes by service, kind and severity.
+type Change struct {
+	// Note says what this change is, for whoever reads the seed next.
+	Note string
+	// Apply edits the service list in place. It is given a copy.
+	Apply func([]Service)
+	// File, when set, replaces the captured compose file from here on, so the
+	// file diff moves with the configuration rather than staying frozen.
+	File string
 }
 
 func ptr(v int) *int { return &v }
+
+// The compose file for the media stack, and the three revisions it goes
+// through. The file moves with the configuration, so the file diff and the
+// structured diff describe the same event rather than disagreeing about it —
+// and one of the changed lines is a secret, which is the only way to show that
+// a rotated credential is a visibly changed line and nothing more.
+const (
+	mediaFileV1 = `services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:5.4.0
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Tallinn
+      - RADARR__API_KEY=8f14e45fceea167a
+    ports:
+      - 7878:7878
+    volumes:
+      - /srv/media/radarr:/config
+      - /mnt/tank/films:/films
+`
+
+	mediaFileV2 = `services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:5.4.0
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Tallinn
+      - RADARR__API_KEY=8f14e45fceea167a
+    ports:
+      - 7878:7878
+      - 9898:9898
+    volumes:
+      - /srv/media/radarr:/config
+      - /mnt/tank/films:/films
+      - /mnt/tank/downloads:/downloads
+`
+
+	mediaFileV3 = `services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:5.6.0
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Tallinn
+      - LOG_LEVEL=debug
+      - RADARR__API_KEY=c4ca4238a0b92382
+    ports:
+      - 7878:7878
+      - 9898:9898
+    volumes:
+      - /srv/media/radarr:/config
+      - /mnt/tank/films:/films
+      - /mnt/tank/downloads:/downloads
+`
+)
+
+// revisions is how many observations each stack gets. Seven over two days is
+// enough for a density strip to have shape without the history becoming a
+// scroll.
+const revisions = 7
+
+// defaultChange is what a stack with no history of its own does: bump the
+// first service's image once, so every project has something on the strip and
+// something in its diff list.
+func defaultChange() Change {
+	return Change{
+		Note: "routine image bump",
+		Apply: func(services []Service) {
+			if len(services) == 0 {
+				return
+			}
+			services[0].Image = bumpTag(services[0].Image)
+		},
+	}
+}
+
+// bumpTag advances the last run of digits in an image tag.
+//
+// Crude on purpose: it has to produce something that looks like a real
+// upgrade, and "5.4.0" -> "5.4.1" does. The previous seed appended "-alt",
+// which produced diffs reading `radarr:5.4.0 -> radarr:5.4.0-alt` — visibly
+// synthetic, in the screenshot the project leads with.
+//
+// The digits are the *last run anywhere in the tag*, not the trailing
+// characters: "29-apache" ends in letters, and looking only at the end left
+// that stack with an unchanging image, seven identical observations, and — via
+// touch-instead-of-insert — a single snapshot in its history.
+func bumpTag(image string) string {
+	colon := strings.LastIndex(image, ":")
+	if colon < 0 {
+		return image
+	}
+	tag := image[colon+1:]
+
+	end := len(tag)
+	for end > 0 && !isDigit(tag[end-1]) {
+		end--
+	}
+	if end == 0 {
+		return image // no digits anywhere to advance
+	}
+	start := end
+	for start > 0 && isDigit(tag[start-1]) {
+		start--
+	}
+
+	n, err := strconv.Atoi(tag[start:end])
+	if err != nil {
+		return image
+	}
+	// Padded to the original width, so "2024.07" advances to "2024.08" rather
+	// than to "2024.8".
+	bumped := fmt.Sprintf("%0*d", end-start, n+1)
+	return image[:colon+1] + tag[:start] + bumped + tag[end:]
+}
+
+func isDigit(b byte) bool { return b >= '0' && b <= '9' }
+
+// fakeDigest is a stable 64-hex string for a string, so the demo's image IDs
+// and digests look like the real thing and change when the image does.
+//
+// FNV rather than SHA-256 on purpose: nothing here is a security claim, and a
+// real hash in seed data invites someone to check it against a registry.
+func fakeDigest(seed string) string {
+	var out strings.Builder
+	h := fnv.New64a()
+	for i := 0; out.Len() < 64; i++ {
+		h.Reset()
+		fmt.Fprintf(h, "%s/%d", seed, i)
+		fmt.Fprintf(&out, "%016x", h.Sum64())
+	}
+	return out.String()[:64]
+}
+
+// giteaChanges is separate because the drift snapshot has to replay to the
+// same running state the newest snapshot left behind.
+func giteaChanges() []Change {
+	return []Change{{
+		Note: "gitea upgraded",
+		Apply: func(services []Service) {
+			services[0].Image = "gitea/gitea:1.23"
+		},
+	}}
+}
+
+// mediaChanges is the history the media stack replays, oldest first.
+//
+// Ordered so the newest diff — the one "compare last two changes" opens, and
+// the one anyone clicking through the demo sees first — is the interesting
+// one: an upgrade arriving together with a rotated credential and a new
+// setting, which is what a single `compose up` actually looks like.
+func mediaChanges() []Change {
+	radarr := func(services []Service, edit func(*Service)) {
+		for i := range services {
+			if services[i].Name == "radarr" {
+				edit(&services[i])
+			}
+		}
+	}
+
+	return []Change{
+		{
+			// One thing moving on its own: the ordinary case, and the one the
+			// severity colouring has to get right against the busy one below.
+			Note: "sonarr picks up a patch release",
+			Apply: func(services []Service) {
+				for i := range services {
+					if services[i].Name == "sonarr" {
+						services[i].Image = "lscr.io/linuxserver/sonarr:4.0.4"
+					}
+				}
+			},
+		},
+		{
+			Note: "a second port, and the downloads share mounted",
+			File: mediaFileV2,
+			Apply: func(services []Service) {
+				radarr(services, func(s *Service) {
+					s.Ports = append(append([]string(nil), s.Ports...), "9898:9898/tcp")
+					s.Mounts = append(append([]docker.Mount(nil), s.Mounts...),
+						docker.Mount{Type: "bind", Source: "/mnt/tank/downloads", Target: "/downloads", Mode: "rw"})
+				})
+			},
+		},
+		{
+			// The busy one: an upgrade, a rotated key, a new setting. All of
+			// it arrives in a single `compose up`, which is why one snapshot
+			// has to be able to show more than one change.
+			Note: "radarr upgraded, its API key rotated, debug logging turned on",
+			File: mediaFileV3,
+			Apply: func(services []Service) {
+				radarr(services, func(s *Service) {
+					s.Image = "lscr.io/linuxserver/radarr:5.6.0"
+					s.Env = []string{
+						"PUID=1000", "PGID=1000", "TZ=Europe/Tallinn",
+						// On the default keep list, so this one stays readable
+						// while the key beside it does not. A diff where every
+						// value is a digest teaches nothing about which values
+						// Silt keeps and which it never stores.
+						"LOG_LEVEL=debug",
+						"RADARR__API_KEY=demo-secret-rotated",
+					}
+				})
+			},
+		},
+	}
+}
 
 // Stacks is the demo host: every container state Silt can render, a project
 // large enough to test truncation, and a spread of ages.
@@ -59,8 +303,17 @@ func Stacks() []Stack {
 	fileV1 := "services:\n  app:\n    image: app:1.0\n    restart: unless-stopped\n    ports:\n      - 8080:80\n"
 
 	return []Stack{
-		{Name: "media", File: fileV1, Services: []Service{
-			ok("radarr", "lscr.io/linuxserver/radarr:5.4.0"),
+		// The stack with a history worth reading. Every other stack shows one
+		// change at a time; this one shows what an evening of tinkering
+		// actually looks like, which is what the diff screen is built for.
+		{Name: "media", File: mediaFileV1, Changes: mediaChanges(), Services: []Service{
+			{Name: "radarr", Image: "lscr.io/linuxserver/radarr:5.4.0", State: "running", Health: "healthy",
+				Env:   []string{"PUID=1000", "PGID=1000", "TZ=Europe/Tallinn", "RADARR__API_KEY=demo-secret-radarr"},
+				Ports: []string{"7878:7878/tcp"},
+				Mounts: []docker.Mount{
+					{Type: "bind", Source: "/srv/media/radarr", Target: "/config", Mode: "rw"},
+					{Type: "bind", Source: "/mnt/tank/films", Target: "/films", Mode: "rw"},
+				}},
 			ok("sonarr", "lscr.io/linuxserver/sonarr:4.0.1"),
 			ok("prowlarr", "lscr.io/linuxserver/prowlarr:1.14"),
 			ok("bazarr", "lscr.io/linuxserver/bazarr:1.4"),
@@ -103,7 +356,7 @@ func Stacks() []Stack {
 			{Name: "worker", Image: "alpine:3.20", State: "paused"},
 			{Name: "api", Image: "alpine:3.20", State: "running", Health: "starting"},
 		}},
-		{Name: "gitea", File: fileV1, Services: []Service{ok("server", "gitea/gitea:1.22")}},
+		{Name: "gitea", File: fileV1, Changes: giteaChanges(), Services: []Service{ok("server", "gitea/gitea:1.22")}},
 		{Name: "vaultwarden", Services: []Service{ok("vaultwarden", "vaultwarden/server:1.32")}},
 		// Restarted recently: still amber.
 		{Name: "jellyfin", Services: []Service{
@@ -148,15 +401,27 @@ func Seed(ctx context.Context, db *store.Store) error {
 			return fmt.Errorf("upsert %s: %w", stack.Name, err)
 		}
 
-		// Seven observations over two days, with the image changing twice, so
-		// the density strip and the image history are not a single point.
-		for i := 6; i >= 0; i-- {
+		// Seven observations over two days, so the density strip and the image
+		// history are not a single point.
+		//
+		// The stack's changes land on the newest revisions, one per step, and
+		// accumulate: replayed forward, the diff between any two adjacent
+		// snapshots is exactly the change that happened between them.
+		changes := stack.Changes
+		if len(changes) == 0 {
+			changes = []Change{defaultChange()}
+		}
+		for i := revisions - 1; i >= 0; i-- {
 			when := now - int64(i)*8*hour
 			services := append([]Service(nil), stack.Services...)
-			if i%3 == 0 && len(services) > 0 {
-				services[0].Image += "-alt"
+			file := stack.File
+			for c := 0; c <= len(changes)-1-i; c++ {
+				changes[c].Apply(services)
+				if changes[c].File != "" {
+					file = changes[c].File
+				}
 			}
-			obs, err := build(r, stack.Name, dir, services, stack.File, when)
+			obs, err := build(r, stack.Name, dir, services, file, when)
 			if err != nil {
 				return err
 			}
@@ -169,9 +434,14 @@ func Seed(ctx context.Context, db *store.Store) error {
 		// a different file on disk. That is drift, and it is the one state
 		// that cannot be produced by changing a container.
 		if stack.Name == "gitea" {
-			edited := "services:\n  server:\n    image: gitea/gitea:1.22\n    restart: always\n    ports:\n      - 3000:3000\n      - 2222:22\n"
+			edited := "services:\n  server:\n    image: gitea/gitea:1.23\n    restart: always\n    ports:\n      - 3000:3000\n      - 2222:22\n"
+			// Replayed to the same state as the newest snapshot, so the running
+			// configuration is identical and only the file on disk differs.
+			// That is what makes it drift rather than a change.
 			services := append([]Service(nil), stack.Services...)
-			services[0].Image += "-alt" // match the last snapshot, so only the file differs
+			for _, c := range giteaChanges() {
+				c.Apply(services)
+			}
 			obs, err := build(r, stack.Name, dir, services, edited, now)
 			if err != nil {
 				return err
@@ -230,15 +500,30 @@ func build(r *redact.Redactor, name, dir string, services []Service, file string
 		if s.StartedAgo > 0 {
 			started = when - int64(s.StartedAgo/time.Millisecond)
 		}
+		// A secret and two keep-list values by default, so redaction is visible
+		// on the service screen rather than theoretical. A service that
+		// declares its own environment is one whose changes the history moves.
+		env := s.Env
+		if env == nil {
+			env = []string{"PUID=1000", "TZ=Europe/Tallinn", "API_KEY=demo-secret-" + s.Name}
+		}
+		// Derived from the image reference, so bumping a tag moves the ID and
+		// the digest too. Deriving it from the service name instead — which is
+		// what this did — meant the image history had exactly one row however
+		// many upgrades the history contained, on the screen built to show
+		// when an image actually changed.
 		inputs = append(inputs, compose.ServiceInput{
-			Service: s.Name,
+			Service:     s.Name,
+			ImageDigest: "sha256:" + fakeDigest("digest/"+s.Image),
 			Inspected: docker.Inspected{
 				Config: docker.ContainerConfig{
-					Image:   s.Image,
-					ImageID: "sha256:" + name + s.Name,
-					// A secret and two keep-list values, so the redaction is
-					// visible on the service screen rather than theoretical.
-					Env: []string{"PUID=1000", "TZ=Europe/Tallinn", "API_KEY=demo-secret-" + s.Name},
+					Image:         s.Image,
+					ImageID:       "sha256:" + fakeDigest(s.Image),
+					Env:           env,
+					PortBindings:  s.Ports,
+					Mounts:        s.Mounts,
+					Labels:        s.Labels,
+					RestartPolicy: "unless-stopped",
 				},
 				Runtime: docker.RuntimeState{
 					ContainerID:   name + "-" + s.Name,
@@ -261,9 +546,15 @@ func build(r *redact.Redactor, name, dir string, services []Service, file string
 		return compose.Observation{}, fmt.Errorf("build %s: %w", name, err)
 	}
 	if file != "" {
+		// Through the same redaction the real capture path uses, rather than
+		// stored as written. The seed contains a literal API key, and a demo
+		// that showed it in cleartext would contradict the one claim the
+		// project leads with — on the page anyone evaluating Silt reads first.
+		path := dir + "/compose.yaml"
+		content, lines := r.ComposeText([]byte(file), compose.NewRuleSet(nil, path))
 		obs.Files = []compose.CapturedFile{{
-			Path: dir + "/compose.yaml", Status: compose.FileOK,
-			Content: []byte(file), LineCount: 6, Size: int64(len(file)),
+			Path: path, Status: compose.FileOK,
+			Content: content, Lines: lines, LineCount: len(lines), Size: int64(len(file)),
 		}}
 		obs.Project.Source = compose.SourceFiles
 	}

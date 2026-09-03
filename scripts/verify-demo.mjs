@@ -113,7 +113,17 @@ async function main() {
   for (const p of projects) {
     await visit(`project ${p.name}`, `/projects/${p.id}`);
     await visit(`files ${p.name}`, `/projects/${p.id}/files`);
-    await visit(`diff ${p.name}`, `/diff?project=${p.id}`);
+    await visit(`diff picker ${p.name}`, `/diff?project=${p.id}`);
+
+    // A diff with two snapshots actually selected. Without this the check
+    // only ever saw "pick two snapshots to compare", which is why the
+    // per-file diffs could be absent from the capture and still pass.
+    const snaps = fixtures[`/api/projects/${p.id}/snapshots?limit=200`] || [];
+    if (snaps.length >= 2) {
+      const [to, from] = snaps;
+      await visit(`diff ${p.name}`, `/diff?from=${from.id}&to=${to.id}&project=${p.id}`);
+    }
+
     const services = fixtures[`/api/projects/${p.id}/services`] || [];
     for (const s of services.slice(0, 2)) {
       await visit(`service ${p.name}/${s}`, `/projects/${p.id}/services/${encodeURIComponent(s)}`);

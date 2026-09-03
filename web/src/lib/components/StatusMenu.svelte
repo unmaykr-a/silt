@@ -155,7 +155,6 @@
       <span class="text-xs text-muted-foreground">Theme</span>
       <Segmented
         label="Theme"
-        size="xs"
         options={THEMES}
         value={theme.value}
         onchange={(next) => theme.set(next)}

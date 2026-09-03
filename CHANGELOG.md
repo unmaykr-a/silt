@@ -5,6 +5,23 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.14.0 — 2026-09-03
+
+A readable front page, a demo that demonstrates something, and a light theme you can look at.
+
+### Changed
+
+- Light mode is no longer pure white behind near-black text. The page is an off-white, cards are the white and now read as sitting above it rather than being drawn on it, and the text pair is around 12:1 — past AAA, without the lightbox. Secondary text moved the other way, up in contrast: at the old value it was below AA.
+- The theme control is back at its normal size, and its sliding highlight no longer touches the frame. It was measured from the selected button with no padding to sit in, so on the first and last option it read as a rendering fault rather than a highlight.
+- The README leads with what Silt does and what it looks like, then puts the reference material behind sections you can open. It was a long read that buried the screenshots and had never been updated for the last ten releases' worth of UI.
+- The demo history contains changes worth looking at. Every diff in it used to be one image tag gaining the suffix "-alt" — visibly synthetic, on the screen the project leads with. It now replays a real sequence: a patch release on its own, a port and a mount arriving together, then an upgrade landing with a rotated API key and a new setting, which is what a single `compose up` actually looks like.
+
+### Fixed
+
+- The demo showed an API key in cleartext. Its compose files were seeded directly rather than through the capture path, so the one screen whose entire point is that a secret is never stored was showing one — on the public demo, to anyone evaluating Silt. The seed now goes through the same redaction a real capture does.
+- The published demo's compare view had no data behind it. The capture derived file paths from the diff endpoint, which does not return any, so every per-file diff was silently absent; the verification only ever opened an empty diff picker, so it passed. Both are fixed, and the check now opens a populated diff.
+- Image identity in the demo was derived from the service name, so it never changed. The image history showed one row however many upgrades the history held — on the screen built to show when an image actually changed.
+
 ## 0.13.0 — 2026-09-03
 
 A demo you can click through, and the pipeline finally has tests.
