@@ -5,6 +5,25 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.11.0 — 2026-09-03
+
+A testing round, and the things it found.
+
+### Added
+
+- The section links slide their marker like every other selection in Silt, and follow a drill-down: a service page still shows Projects as current.
+
+### Fixed
+
+- A typo in SILT_NOTIFY_ON was accepted and then matched nothing, so `image` instead of `image_id` meant "never notify" with no error — discovered during the outage the notification was for. Unknown change kinds are now refused, and the error lists the real ones.
+- A snapshot where only a compose file changed showed in the project's list as one where nothing had happened. Silt recorded that from the first release and never reported it; it now reads "file edited" in the drift colour.
+- SILT_BASE_URL was not validated. It becomes the link in a notification, so a value that is not a URL produced a link that went nowhere, in the one message you needed to work.
+- Visiting search or an unknown URL killed the page. Nothing is selected there, and the marker measurement merged into its own previous value — so the effect depended on its own output and Svelte aborted after too many updates. Found by sweeping every route at five widths in three configurations, which is now how this gets checked.
+
+### Security
+
+- SILT_KEEP_KEYS=* silently turned redaction off. Keep keys are matched as globs, so a bare * matched every environment variable on the host and stored all of them — passwords included — in cleartext, with no warning anywhere. `**`, `?*` and `[A-Z]*` did the same. Patterns are now validated to what the documentation always promised: a name, optionally with a single * at one end. A pattern that keeps more than it names is refused at startup and on the settings screen, and one that reaches the matcher another way is dropped rather than obeyed.
+
 ## 0.10.0 — 2026-09-02
 
 Live updates actually arrive, restarts stop mattering forever, and things move.

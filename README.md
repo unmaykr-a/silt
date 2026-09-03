@@ -55,7 +55,9 @@ misconfigured volume, a shared debug bundle.
 - **Environment values are redacted by default.** Cleartext is kept only for keys on an
   explicit safe list (`PUID`, `PGID`, `TZ`, `LOG_LEVEL`, `*_PORT`, …), extendable with
   `SILT_KEEP_KEYS`. There is no "redact these" pattern to get wrong, because the default
-  is to redact.
+  is to redact. A keep key is a name, optionally with a single `*` at one end; a pattern
+  that would keep more than it names — `*` on its own, say — is refused rather than
+  quietly turning redaction off.
 - **Redacted values are recorded as a truncated HMAC** under a random key generated on
   first boot, stored in the database and never exported. A bare hash would be a guessing
   oracle — a four-digit PIN is ten thousand hashes. Keyed, the digests still prove *that*

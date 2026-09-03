@@ -12,6 +12,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"path"
 	"strings"
 	"sync"
@@ -83,12 +84,69 @@ func (r *Redactor) SetKeepKeys(extra []string) {
 	r.mu.Unlock()
 }
 
+// ValidateKeepKey checks one keep-list pattern.
+//
+// This is a security boundary, not a convenience. A keep key decides what is
+// stored in *cleartext*, and matching is done with path.Match — so `*` on its
+// own is a valid pattern that matches every environment variable on the host
+// and silently turns off the redaction the whole project is built around.
+// `**`, `[A-Z]*` and `?*` do the same. Nothing warned, nothing failed, and the
+// database quietly filled with passwords.
+//
+// So the accepted grammar is exactly what the documentation always claimed:
+// a name, optionally with a single `*` at one end. Everything else is refused,
+// including a bare `*`, because "keep everything" is not a thing anyone should
+// be able to ask for by accident.
+func ValidateKeepKey(pattern string) error {
+	p := strings.ToUpper(strings.TrimSpace(pattern))
+	if p == "" {
+		return fmt.Errorf("a keep key must not be empty")
+	}
+
+	body := p
+	body = strings.TrimPrefix(body, "*")
+	body = strings.TrimSuffix(body, "*")
+	if body == "" {
+		return fmt.Errorf("keep key %q would match every environment variable and store all of them in cleartext", pattern)
+	}
+	if strings.ContainsAny(body, "*?[]\\") {
+		return fmt.Errorf("keep key %q: only a single leading or trailing * is allowed", pattern)
+	}
+	for _, r := range body {
+		if !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '_' && r != '-' && r != '.' {
+			return fmt.Errorf("keep key %q contains %q; use letters, digits, _, - and .", pattern, r)
+		}
+	}
+	return nil
+}
+
+// ValidateKeepKeys checks a whole list, reporting the first problem.
+func ValidateKeepKeys(patterns []string) error {
+	for _, p := range patterns {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if err := ValidateKeepKey(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func buildKeepList(extra []string) []string {
 	keep := make([]string, 0, len(defaultKeepKeys)+len(extra))
 	for _, k := range defaultKeepKeys {
 		keep = append(keep, strings.ToUpper(k))
 	}
 	for _, k := range extra {
+		// Belt and braces: configuration validates these before they get here,
+		// but this is the function that decides what is stored in cleartext,
+		// and it should not depend on every caller having checked first. A
+		// pattern that does not validate is dropped, so the failure mode is
+		// "your key was not kept" rather than "everything was".
+		if ValidateKeepKey(k) != nil {
+			continue
+		}
 		if k = strings.ToUpper(strings.TrimSpace(k)); k != "" {
 			keep = append(keep, k)
 		}

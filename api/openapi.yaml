@@ -1217,7 +1217,8 @@ components:
       type: object
       required:
         [id, project_id, taken_at, last_observed_at, observation_count,
-         trigger, compose_source, config_changed, runtime_changed]
+         trigger, compose_source, config_changed, runtime_changed,
+         files_changed]
       properties:
         id: { type: integer, format: int64 }
         project_id: { type: integer, format: int64 }
@@ -1237,6 +1238,13 @@ components:
             False means runtime changed but configuration did not — a restart
             or health transition.
         runtime_changed: { type: boolean }
+        files_changed:
+          type: boolean
+          description: >-
+            A compose file on disk differed from the last capture. On its own —
+            with config_changed false — this is drift: an edit nobody applied.
+            Recorded from the start and never reported, so such a snapshot
+            appeared in the list as one where nothing happened.
 
     ServiceState:
       type: object

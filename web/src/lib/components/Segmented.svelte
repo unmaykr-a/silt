@@ -1,4 +1,5 @@
 <script lang="ts" generics="T extends string">
+  import { markerFor, HIDDEN } from "$lib/marker";
   /**
    * A segmented control whose selection slides between options.
    *
@@ -33,13 +34,14 @@
   }
 
   let container = $state<HTMLDivElement | null>(null);
-  let marker = $state({ left: 0, width: 0, ready: false });
+  let marker = $state(HIDDEN);
 
+  // Nothing selected hides the marker rather than leaving it on a value no
+  // longer in effect — the timeline while a window is dragged out on the strip.
+  // markerFor never reads the current value; see web/src/lib/marker.ts.
   function measure() {
     if (!container) return;
-    const active = container.querySelector<HTMLElement>('[aria-pressed="true"]');
-    if (!active) return;
-    marker = { left: active.offsetLeft, width: active.offsetWidth, ready: true };
+    marker = markerFor(container.querySelector<HTMLElement>('[aria-pressed="true"]'));
   }
 
   // Re-measured on selection and on resize. Fonts loading late change the

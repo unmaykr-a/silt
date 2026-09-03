@@ -51,6 +51,11 @@ type snapshotResponse struct {
 	ComposeSource    string `json:"compose_source"`
 	ConfigChanged    bool   `json:"config_changed"`
 	RuntimeChanged   bool   `json:"runtime_changed"`
+	// FilesChanged is a compose file on disk differing from the last capture.
+	// On its own — with ConfigChanged false — it is drift: an edit nobody
+	// applied. It was recorded from the start and never reported, so such a
+	// snapshot appeared in the list as one where nothing happened.
+	FilesChanged bool `json:"files_changed"`
 }
 
 type serviceStateResponse struct {
@@ -632,6 +637,7 @@ func toSnapshotResponse(s sqlcgen.Snapshot) snapshotResponse {
 		ComposeSource:    s.ComposeSource,
 		ConfigChanged:    s.ConfigChanged == 1,
 		RuntimeChanged:   s.RuntimeChanged == 1,
+		FilesChanged:     s.FilesChanged == 1,
 	}
 }
 

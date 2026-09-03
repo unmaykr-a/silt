@@ -121,3 +121,46 @@ func TestLoadValidation(t *testing.T) {
 		})
 	}
 }
+
+// A base URL becomes a link in a notification, read on a phone at three in the
+// morning. A value that is not a URL produces a link that goes nowhere, and
+// the only place it shows up is the message you needed to work.
+func TestBaseURLIsValidated(t *testing.T) {
+	for _, bad := range []string{"not a url", "silt.example.lan", "ftp://silt.example.lan", "://nope", "http://"} {
+		c := mustLoad(t)
+		c.BaseURL = bad
+		if err := c.Validate(); err == nil {
+			t.Errorf("Validate() accepted SILT_BASE_URL=%q", bad)
+		}
+	}
+	for _, good := range []string{"", "http://silt.example.lan", "https://silt.taali.ee", "https://silt.example.lan:8375/"} {
+		c := mustLoad(t)
+		c.BaseURL = good
+		if err := c.Validate(); err != nil {
+			t.Errorf("Validate() refused SILT_BASE_URL=%q: %v", good, err)
+		}
+	}
+}
+
+// A keep key decides what is stored in cleartext. `*` would keep everything.
+func TestKeepKeysAreValidated(t *testing.T) {
+	c := mustLoad(t)
+	c.KeepKeys = []string{"*"}
+	if err := c.Validate(); err == nil {
+		t.Error("Validate() accepted a keep key that turns redaction off entirely")
+	}
+	c.KeepKeys = []string{"APP_*", "TZ"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate() refused documented keep keys: %v", err)
+	}
+}
+
+// mustLoad returns the default configuration, which is valid by construction.
+func mustLoad(t *testing.T) Config {
+	t.Helper()
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return c
+}

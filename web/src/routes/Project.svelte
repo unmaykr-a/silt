@@ -221,17 +221,28 @@
         <ul class="mt-3 divide-y divide-border border-y border-border">
           {#each snapshots as snap, i (snap.id)}
             <li class="flex items-baseline gap-3 py-2 text-sm">
+              <!-- A file change with no config change is drift: an edit
+                   nobody applied. It was recorded from the first release and
+                   never reported here, so the row read "observed" — a snapshot
+                   where, as far as this list was concerned, nothing had
+                   happened. -->
               <span
                 class="size-1.5 shrink-0 rounded-full {snap.config_changed
                   ? 'bg-emerald-400'
-                  : snap.runtime_changed
-                    ? 'bg-amber-500'
-                    : 'bg-zinc-700'}"
+                  : snap.files_changed
+                    ? 'bg-sky-400'
+                    : snap.runtime_changed
+                      ? 'bg-amber-500'
+                      : 'bg-zinc-700'}"
                 aria-hidden="true"
               ></span>
               <span class="w-32 shrink-0 text-xs">
                 {#if snap.config_changed}
                   config changed
+                {:else if snap.files_changed}
+                  <span class="text-sky-600 dark:text-sky-400" title="A compose file on disk changed and the running stack did not">
+                    file edited
+                  </span>
                 {:else if snap.runtime_changed}
                   runtime changed
                 {:else}
