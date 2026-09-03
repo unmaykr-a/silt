@@ -31,3 +31,4 @@
 # Local configuration, copied from .env.example.
 .env
 .demo-site/
+.shots/
