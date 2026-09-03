@@ -66,6 +66,39 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+  e2e:
+    name: end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            e2e/package-lock.json
+      # Its own job rather than part of `make check`: it builds the frontend,
+      # seeds a database and drives a browser, which is a minute against a
+      # second. Running in parallel keeps the fast gate fast.
+      #
+      # It exists because of the class of bug a unit test cannot see: a page
+      # that dies only on the routes where nothing is selected, which every
+      # screenshot of a working screen looks past.
+      - run: make e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
+
   docker:
     name: docker buildx (amd64 + arm64)
     runs-on: ubuntu-latest

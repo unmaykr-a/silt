@@ -1,0 +1,157 @@
+import { test, expect, type Page } from "@playwright/test";
+
+/** Console errors and uncaught exceptions for the whole page. */
+function watchForErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(`uncaught: ${e.message}`));
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(`console: ${m.text()}`);
+  });
+  return errors;
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.setItem("silt.theme", "dark"));
+});
+
+test("every time range redraws the timeline", async ({ page }) => {
+  const errors = watchForErrors(page);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  for (const range of ["1h", "6h", "24h", "7d", "30d"]) {
+    await page.click(`div[role="group"][aria-label="Time range"] button:has-text("${range}")`);
+    await page.waitForTimeout(400);
+    await expect(page.locator("canvas").first()).toBeVisible();
+  }
+  expect(errors).toEqual([]);
+});
+
+test("the selection marker slides rather than jumping", async ({ page }) => {
+  await page.goto("/projects", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  const marker = page.locator('div[role="group"][aria-label="Sort projects"] span[aria-hidden="true"]');
+  const before = await marker.evaluate((m) => (m as HTMLElement).style.left);
+  await page.click('div[role="group"][aria-label="Sort projects"] button:has-text("Name")');
+  // Sampled mid-transition: an element that jumps is already at its
+  // destination by now, one that animates is somewhere in between.
+  await page.waitForTimeout(90);
+  const during = await marker.evaluate((m) => getComputedStyle(m).left);
+  await page.waitForTimeout(400);
+  const after = await marker.evaluate((m) => (m as HTMLElement).style.left);
+
+  expect(after).not.toBe(before);
+  expect(during).not.toBe(after);
+});
+
+test("the section marker follows a drill-down", async ({ page }) => {
+  // A service page is still Projects. Losing that means the nav stops telling
+  // you where you are as soon as you go anywhere.
+  await page.goto("/projects/1/services/radarr", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(800);
+  await expect(page.locator('nav[aria-label="Sections"] [aria-current="page"]')).toHaveAttribute(
+    "aria-label",
+    "Projects",
+  );
+});
+
+test("each attention filter narrows the grid without breaking it", async ({ page }) => {
+  const errors = watchForErrors(page);
+  await page.goto("/projects", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  const chips = page.locator("div.flex-wrap > button");
+  const count = await chips.count();
+  expect(count, "the demo host should trip several attention filters").toBeGreaterThan(2);
+
+  for (let i = 0; i < count; i++) {
+    await chips.nth(i).click();
+    await page.waitForTimeout(250);
+    // Filtering to nothing is a legitimate outcome; a crash is not.
+    expect(errors).toEqual([]);
+    await chips.nth(i).click();
+    await page.waitForTimeout(150);
+  }
+});
+
+test("a filter matching nothing says so", async ({ page }) => {
+  await page.goto("/projects", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(800);
+  await page.fill('input[aria-label="Filter projects"]', "no-such-project-anywhere");
+  await page.waitForTimeout(400);
+  await expect(page.locator("body")).toContainText("Nothing matches");
+});
+
+test("both diff views render", async ({ page }) => {
+  const errors = watchForErrors(page);
+  await page.goto("/diff?from=1&to=5&project=1", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+  for (const view of ["Structured", "YAML"]) {
+    await page.click(`button:has-text("${view}")`);
+    await page.waitForTimeout(500);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("every settings section renders", async ({ page }) => {
+  const errors = watchForErrors(page);
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  for (const section of [
+    "Appearance",
+    "Collection",
+    "Retention",
+    "Notifications",
+    "Ingest webhook",
+    "Security",
+    "Environment only",
+    "Storage",
+  ]) {
+    await page.click(`button:has-text("${section}")`);
+    await page.waitForTimeout(500);
+    await expect(page.locator("main")).toContainText(section);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("the status menu opens, reports the connection, and closes", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1200);
+
+  await page.click('button[aria-label="Status, version and preferences"]');
+  const menu = page.locator('[role="menu"]');
+  await expect(menu).toBeVisible();
+  // Silt heartbeats every 20s, so an idle page must still be able to say it is
+  // connected. This line is what makes a wedged stream distinguishable from a
+  // quiet one.
+  await expect(menu).toContainText("last heard from Silt");
+  await expect(menu).toContainText("Receiving live updates");
+
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+});
+
+test("a change arrives without reloading the page", async ({ page }) => {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1200);
+
+  let navigations = 0;
+  page.on("framenavigated", () => navigations++);
+
+  const probe = `e2e probe ${Date.now()}`;
+  const status = await page.evaluate(async (message) => {
+    const res = await fetch("/api/ingest?token=demo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "e2e.probe", message, severity: "info" }),
+    });
+    return res.status;
+  }, probe);
+  expect(status).toBe(202);
+
+  await expect(page.locator("body")).toContainText(probe, { timeout: 10_000 });
+  expect(navigations, "the page reloaded instead of updating live").toBe(0);
+});
