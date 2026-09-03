@@ -1,0 +1,11 @@
+{
+  "name": "silt-e2e",
+  "private": true,
+  "description": "End-to-end checks. Separate from web/ so `npm --prefix web ci` stays fast.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

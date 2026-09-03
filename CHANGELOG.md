@@ -5,6 +5,17 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.12.0 — 2026-09-03
+
+The testing round becomes a test suite.
+
+### Added
+
+- An end-to-end suite: 117 checks driving a real binary against a seeded database. Every route, at four widths, in three configurations, asserting no console error, no horizontal overflow and something on the page — plus the controls, the settings sections, the sliding markers, and a change arriving over the live stream with no reload. The last round found a page that died only where nothing is selected; that was a one-off script, and this is the same sweep on every push.
+- `make demo` builds a populated database without a Docker host — fourteen projects covering every container state, an unapplied compose edit, and enough history for the graphs to have shape. Development and the test suite now share it instead of a seeder written and deleted each time.
+- Tests for how Docker's inspect response is read: exit codes only from stopped containers, a zero exit code kept distinct from none, an absent healthcheck kept distinct from a healthy one, and a missing or unparseable start time left unset rather than landing in 1970. That function carried the newest logic in the project and had no tests at all.
+- Tests for the severity a Docker event lands with, which decides whether it reaches the error count and whether a notification filter lets it through. An action a future Docker adds stays informational rather than turning the timeline red on an engine upgrade.
+
 ## 0.11.0 — 2026-09-03
 
 A testing round, and the things it found.

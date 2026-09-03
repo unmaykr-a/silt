@@ -9,6 +9,13 @@
 !/internal/web/dist/.gitkeep
 /web/node_modules/
 /web/dist/
+/e2e/node_modules/
+/e2e/test-results/
+/e2e/playwright-report/
+
+# Scratch directories for `make demo` and `make e2e`.
+/.demo/
+/.e2e/
 
 # Local data
 *.db

@@ -743,7 +743,9 @@ the absolute UTC/local value on hover.
 
 ```
 silt/
-├── cmd/silt/main.go
+├── cmd/
+│   ├── silt/main.go
+│   └── silt-demo/main.go       # seeds a demo database; never shipped
 ├── internal/
 │   ├── config/                 # env parsing, defaults, validation
 │   ├── docker/                 # engine client, event stream, inspect normalisation
@@ -757,6 +759,7 @@ silt/
 │   ├── diff/                   # structural diff + classification + severity
 │   ├── api/                    # handlers, SSE hub, ingest
 │   ├── notify/                 # shoutrrr wrapper + filtering
+│   ├── demo/                   # the demo host, shared by `make demo` and e2e
 │   └── web/
 │       ├── web.go              # embed.FS
 │       └── dist/.gitkeep       # committed — see Section 12
@@ -764,6 +767,9 @@ silt/
 ├── web/                        # Vite + Svelte 5 + TS
 │   ├── src/
 │   └── package.json
+├── e2e/                        # Playwright; its own package.json so
+│   ├── tests/                  # `npm --prefix web ci` stays fast
+│   └── playwright.config.ts
 ├── Dockerfile
 ├── docker-compose.yml          # example: silt + docker-socket-proxy
 ├── .github/workflows/
@@ -1614,7 +1620,45 @@ Changed:
     sweep — every route at five widths in three configurations — is how this
     class gets checked from here.
 
-73. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+73. **A one-off round is not a check (0.12.0)** — the previous release said
+    the route sweep "is now how this gets checked". It was a script in a
+    temporary directory, which is a thing that gets checked once. It is now
+    `e2e/`: a real suite driving a real binary against a seeded database,
+    running as its own CI job.
+
+    Its own job rather than part of `make check` because it builds the
+    frontend, seeds a database and drives a browser — a minute against a
+    second — and the fast gate has to stay fast enough that people run it.
+
+    What it asserts is deliberately shallow and wide: every route, at four
+    widths, in three configurations, with no console error, no horizontal
+    overflow, and something on the page. Depth belongs in unit tests; this
+    catches the class they cannot see, which is a screen that only breaks in
+    a configuration nobody screenshots.
+
+74. **The seeder stopped being disposable (0.12.0)** — four batches in a row
+    wrote a throwaway seeder, used it, and deleted it, each one slightly
+    different and none of them covering drift. `internal/demo` is the shared
+    one: fourteen projects covering every container state, an unapplied
+    compose edit, and enough history for the graphs to have shape. `make demo`
+    for development, the same data for the suite. It is not in the image —
+    the Dockerfile builds `./cmd/silt` alone.
+
+75. **Coverage where the bugs actually were (0.12.0)** — `internal/docker`
+    sat at 47% and `normaliseInspect` had no tests, while being the function
+    that reads every runtime fact the UI shows and carrying the newest logic
+    in the project. Now 64%, with the distinctions that matter pinned: an
+    exit code only from a stopped container, zero distinct from none, an
+    absent healthcheck distinct from a healthy one.
+
+    `internal/collect` remains the weak one at 22%, and honestly so: the bulk
+    of it is the Docker-dependent pipeline, and the fake engine that would
+    make it testable is a test-only type in another package. Its pure
+    decisions — event severity, batch summaries, and the broadcast rule that
+    shipped a bug — are covered. Promoting that fake engine to a shared
+    testing package is the next real step, not a claim to have taken it.
+
+76. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

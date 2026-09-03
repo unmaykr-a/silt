@@ -352,6 +352,21 @@ hour of five-minute snapshots across 40 services costs **zero bytes**.
 plans for one — check `uname -m` reports `aarch64` before filing an issue about a failed
 pull.
 
+## Developing
+
+```bash
+make demo     # a populated database, no Docker host needed
+SILT_DB_PATH=.demo/silt.db go run ./cmd/silt
+
+make check    # gofmt, build, vet, Go tests, frontend tests and build
+make e2e      # 117 browser checks against a real binary and that database
+make race     # the race detector, which collection earns
+```
+
+`make check` is the fast gate and runs exactly what CI runs, in CI's order. `make e2e` is
+separate because it builds the frontend, seeds a database and drives a browser — a minute
+against a second — and runs as its own CI job.
+
 ## Status
 
 Pre-alpha, under active development. The recording, diffing and UI all work; expect rough
