@@ -1,9 +1,9 @@
 -- name: CreateSession :exec
-INSERT INTO sessions (token_hash, subject, name, method, created_at, last_seen_at, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+INSERT INTO sessions (token_hash, subject, name, method, role, created_at, last_seen_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSession :one
-SELECT token_hash, subject, name, method, created_at, last_seen_at, expires_at
+SELECT token_hash, subject, name, method, role, created_at, last_seen_at, expires_at
 FROM sessions
 WHERE token_hash = ?;
 

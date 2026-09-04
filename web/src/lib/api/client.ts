@@ -22,6 +22,7 @@ export type SettingsValues = components["schemas"]["SettingsValues"];
 export type SettingsPatch = components["schemas"]["SettingsPatch"];
 export type SettingsIdentity = components["schemas"]["SettingsIdentity"];
 export type SetupCheck = components["schemas"]["SetupCheck"];
+export type Probes = components["schemas"]["Probes"];
 export type VersionInfo = components["schemas"]["VersionInfo"];
 export type Release = components["schemas"]["Release"];
 export type PruneResult = components["schemas"]["PruneResult"];
@@ -122,6 +123,7 @@ export const api = {
   serviceHistory: (projectId: number, service: string, signal?: AbortSignal) =>
     get<ServiceHistory>(`/api/projects/${projectId}/services/${encodeURIComponent(service)}`, signal),
   settings: (signal?: AbortSignal) => get<Settings>("/api/settings", signal),
+  probes: (signal?: AbortSignal) => get<Probes>("/api/settings/probes", signal),
   updateSettings: (patch: SettingsPatch) =>
     request<Settings>("/api/settings", {
       method: "PUT",

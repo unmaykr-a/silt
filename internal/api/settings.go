@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -84,9 +85,16 @@ type settingsIdentity struct {
 	OIDCGroupsClaim   string   `json:"oidc_groups_claim"`
 	OIDCAllowedGroups []string `json:"oidc_allowed_groups"`
 	OIDCAllowedUsers  []string `json:"oidc_allowed_users"`
-	SessionTTLMS      int64    `json:"session_ttl_ms"`
-	SessionIdleTTLMS  int64    `json:"session_idle_ttl_ms"`
-	MetricsPublic     bool     `json:"metrics_public"`
+	OIDCAdminGroups   []string `json:"oidc_admin_groups"`
+	AdminGroups       []string `json:"admin_groups"`
+	AuthGroupsHeader  string   `json:"auth_groups_header"`
+	// RolesEnabled is whether anyone is a viewer rather than an administrator.
+	// Without an admin group configured everyone admitted may change
+	// everything, which is what Silt did before roles existed.
+	RolesEnabled     bool  `json:"roles_enabled"`
+	SessionTTLMS     int64 `json:"session_ttl_ms"`
+	SessionIdleTTLMS int64 `json:"session_idle_ttl_ms"`
+	MetricsPublic    bool  `json:"metrics_public"`
 }
 
 type settingsUsage struct {
@@ -220,6 +228,10 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 		OIDCGroupsClaim:   effective.OIDCGroupsClaim,
 		OIDCAllowedGroups: orEmpty(effective.OIDCAllowedGroups),
 		OIDCAllowedUsers:  orEmpty(effective.OIDCAllowedUsers),
+		OIDCAdminGroups:   orEmpty(effective.OIDCAdminGroups),
+		AdminGroups:       orEmpty(effective.AdminGroups),
+		AuthGroupsHeader:  effective.AuthGroupsHeader,
+		RolesEnabled:      len(effective.OIDCAdminGroups) > 0 || len(effective.AdminGroups) > 0,
 		SessionTTLMS:      effective.SessionTTL.Milliseconds(),
 		SessionIdleTTLMS:  effective.SessionIdleTTL.Milliseconds(),
 		MetricsPublic:     effective.MetricsPublic,
@@ -242,6 +254,60 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
+}
+
+// settingsExport is the override document, portable.
+//
+// Silt stores settings as a sparse patch on top of the environment, so this is
+// already the shape of "what has been changed here" — the export is that
+// document with a header saying where it came from, not a new format.
+//
+// Secrets are stripped, and the export says which were dropped rather than
+// leaving the reader to notice. A file that silently omits your notification
+// targets is a restore that silently stops notifying.
+type settingsExport struct {
+	Silt       string             `json:"silt"`
+	Release    string             `json:"release"`
+	HostName   string             `json:"host_name"`
+	ExportedAt int64              `json:"exported_at"`
+	Settings   settings.Overrides `json:"settings"`
+	// Omitted names the secret fields that were set and left out.
+	Omitted []string `json:"omitted,omitempty"`
+	Note    string   `json:"note"`
+}
+
+func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
+	if s.live == nil {
+		writeError(w, http.StatusServiceUnavailable, "settings are read-only in this configuration")
+		return
+	}
+	cfg := s.conf()
+	out := settingsExport{
+		Silt:       "settings",
+		Release:    changelog.Current(),
+		HostName:   cfg.HostName,
+		ExportedAt: nowMS(),
+		Settings:   s.live.Overrides(),
+		Note: "Overrides only: anything not listed here comes from the environment. " +
+			"Import with PUT /api/settings, or paste into the settings screen.",
+	}
+
+	// A shoutrrr URL carries the credential for the service it points at, and
+	// the ingest token is a credential outright. Neither is readable anywhere
+	// else in the API and neither becomes readable by being called an export.
+	if out.Settings.NotifyURLs != nil {
+		out.Omitted = append(out.Omitted, "notify_urls")
+		out.Settings.NotifyURLs = nil
+	}
+	if out.Settings.IngestToken != nil {
+		out.Omitted = append(out.Omitted, "ingest_token")
+		out.Settings.IngestToken = nil
+	}
+
+	// Downloaded rather than rendered: this is a file someone keeps.
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf("attachment; filename=\"silt-settings-%s.json\"", cfg.HostName))
+	writeJSON(w, http.StatusOK, out)
 }
 
 // settingsUpdateRequest is a sparse patch. An absent field is left alone; a

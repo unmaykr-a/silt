@@ -126,6 +126,7 @@ type Session struct {
 	CreatedAt  int64
 	LastSeenAt int64
 	ExpiresAt  int64
+	Role       string
 }
 
 type Setting struct {

@@ -37,6 +37,7 @@ func (f *fakeSnapshotter) SnapshotProject(_ context.Context, id int64) error {
 
 type fixture struct {
 	srv       *httptest.Server
+	api       *api.Server
 	store     *store.Store
 	hub       *api.Hub
 	snapshots *fakeSnapshotter
@@ -47,6 +48,13 @@ type fixture struct {
 }
 
 func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	return newFixtureWithRoots(t, nil)
+}
+
+// newFixtureWithRoots is newFixture with compose roots configured, for the
+// probes that report on them.
+func newFixtureWithRoots(t *testing.T, roots []string) *fixture {
 	t.Helper()
 	ctx := context.Background()
 
@@ -120,6 +128,7 @@ func newFixture(t *testing.T) *fixture {
 		MaxComposeFileBytes:    1 << 20,
 		SessionTTL:             720 * time.Hour,
 		SessionIdleTTL:         168 * time.Hour,
+		ComposeRoots:           roots,
 	}
 	server := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, hub, cfg, snaps)
 	// The settings layer is part of the surface under test: without it every
@@ -155,7 +164,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(ts.Close)
 
 	return &fixture{
-		srv: ts, store: db, hub: hub, snapshots: snaps,
+		srv: ts, api: server, store: db, hub: hub, snapshots: snaps,
 		projectID: projectID, snapshotA: a.ID, snapshotB: b.ID, ingestTok: "test-token",
 	}
 }

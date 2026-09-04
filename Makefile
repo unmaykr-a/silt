@@ -116,11 +116,12 @@ E2E_ENV = SILT_DB_PATH=../.e2e/silt.db SILT_LISTEN_ADDR=127.0.0.1:8410 \
           SILT_DOCKER_HOST=tcp://127.0.0.1:1 SILT_LOCAL_ACCOUNT=false \
           SILT_INGEST_TOKEN=demo SILT_LOG_LEVEL=warn
 
-## release: tag the version at the top of the changelog and push it
+## release: tag the current release by hand
 ##
-## Pushing the tag is the whole trigger: CI builds the multi-arch image and
-## publishes a GitHub release whose notes come from internal/changelog, so
-## there is nothing to write twice and nothing to keep in step by hand.
+## Not normally needed: merging a version bump to main publishes the release
+## on its own, from the same changelog. This exists for cutting one from a
+## commit that is not the tip, and for anywhere the automatic path is not
+## wanted.
 ##
 ## Refuses a dirty tree and a tag that already exists, because both mean the
 ## release would not be what the changelog says it is.

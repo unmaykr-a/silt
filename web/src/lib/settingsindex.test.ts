@@ -93,3 +93,24 @@ describe("the index and the screen agree", () => {
     expect(dupes.map((d) => d.name)).toEqual([]);
   });
 });
+
+describe("the words people actually type", () => {
+  // Each of these was a real miss: the setting existed, the screen showed it,
+  // and searching the obvious word returned nothing.
+  const cases: [string, string][] = [
+    ["admin", "roles"],
+    ["read only", "roles"],
+    ["viewer", "roles"],
+    ["SILT_OIDC_ADMIN_GROUPS", "oidc_admin_groups"],
+    ["export", "export"],
+    ["backup", "export"],
+    ["does it work", "probes"],
+    ["mounted", "probes"],
+  ];
+
+  for (const [query, want] of cases) {
+    it(`finds ${want} from "${query}"`, () => {
+      expect(searchSettings(query).map((h) => h.name)).toContain(want);
+    });
+  }
+});

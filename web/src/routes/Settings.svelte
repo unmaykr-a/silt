@@ -168,6 +168,24 @@
   });
 
   const overridden = $derived(new Set(settings?.overridden ?? []));
+
+  // What this identity may do. A viewer reads every screen and changes
+  // nothing, so the controls that would be refused are not offered at all: a
+  // save button that always fails is worse than no save button.
+  //
+  // Its own request rather than the Security section's, which only loads when
+  // that section is open — the role is needed from the first render.
+  let role = $state<string>("admin");
+  const readOnly = $derived(role === "viewer");
+
+  $effect(() => {
+    const controller = new AbortController();
+    api
+      .authState(controller.signal)
+      .then((a) => (role = a.role ?? "admin"))
+      .catch(() => {});
+    return () => controller.abort();
+  });
   const counts = $derived(overrideCounts(overridden));
   // Errors and warnings from the setup review, badged on the rail so an
   // install nobody has authenticated says so from whichever section you open.
@@ -215,6 +233,39 @@
       newPassword.length >= minimum &&
       newPassword === confirmPassword,
   );
+
+  let importError = $state<string | null>(null);
+
+  /** Download the override document. A plain navigation: the server sets the
+      filename, and there is nothing to build client-side. */
+  function exportSettings() {
+    window.location.href = "/api/settings/export";
+  }
+
+  /** Restore one. The file's `settings` object is exactly what PUT takes, so
+      the import is the ordinary write and gets the ordinary validation. */
+  async function importSettings(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    importError = null;
+    try {
+      const doc = JSON.parse(await file.text());
+      const patch = doc?.settings ?? doc;
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+        throw new Error("that file has no settings in it");
+      }
+      adopt(await api.updateSettings(patch));
+      notice = doc?.omitted?.length
+        ? `Restored. Set again by hand: ${doc.omitted.join(", ")}.`
+        : "Restored.";
+      error = null;
+    } catch (err) {
+      importError = (err as Error).message;
+    }
+  }
 
   async function refreshAuthState() {
     try {
@@ -450,7 +501,7 @@
           type="button"
           class="mt-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           onclick={() => useEnvironment(name)}
-          disabled={saving}
+          disabled={saving || readOnly}
         >
           use the environment value
         </button>
@@ -570,7 +621,7 @@
         type="button"
         class="mt-4 hidden text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground lg:block"
         onclick={resetAll}
-        disabled={saving}
+        disabled={saving || readOnly}
       >
         Use the environment for everything
       </button>
@@ -586,6 +637,14 @@
     {#if notice}
       <p class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-600 dark:text-emerald-300">
         {notice}
+      </p>
+    {/if}
+
+    {#if readOnly}
+      <p class="rounded-md border border-border bg-secondary/40 px-4 py-2.5 text-sm text-muted-foreground">
+        You have read-only access. Every screen is yours to read; changing Silt's own
+        configuration needs an administrator. Appearance still works — those settings live in this
+        browser, not in Silt.
       </p>
     {/if}
 
@@ -1282,6 +1341,13 @@
           <h4 class="mt-5 text-xs font-medium uppercase tracking-wide text-muted-foreground">In effect</h4>
           <dl class="divide-y divide-border">
             {@render detail(
+              "Roles",
+              id.roles_enabled
+                ? "on — administrators change Silt's configuration, everyone else reads"
+                : "off — everyone admitted may change everything",
+              "SILT_OIDC_ADMIN_GROUPS / SILT_ADMIN_GROUPS",
+            )}
+            {@render detail(
               "Method",
               id.mode === "none" ? "none — anyone who can reach this address can read it" : id.mode,
               "",
@@ -1298,6 +1364,17 @@
           <dl class="divide-y divide-border">
             {@render flag("Trust an asserted identity", id.trust_proxy_auth, "SILT_TRUST_PROXY_AUTH")}
             {@render detail("Identity header", id.auth_header || "not set", "SILT_AUTH_HEADER")}
+            {@render detail(
+              "Groups header",
+              id.auth_groups_header || "not set",
+              "SILT_AUTH_GROUPS_HEADER",
+              "Read only when administrator groups are configured: without a rule there is nothing to compare against, and reading an attacker-settable header for no reason is a habit worth not having.",
+            )}
+            {@render detail(
+              "Administrator groups",
+              id.admin_groups.join(", ") || "everyone admitted is an administrator",
+              "SILT_ADMIN_GROUPS",
+            )}
             {@render detail(
               "Trusted proxies",
               id.trusted_proxies.length ? id.trusted_proxies.join(", ") : "not set",
@@ -1322,6 +1399,12 @@
               "Both allowlists empty admits anyone the provider will authenticate.",
             )}
             {@render detail("Allowed users", id.oidc_allowed_users.join(", ") || "any", "SILT_OIDC_ALLOWED_USERS")}
+            {@render detail(
+              "Administrator groups",
+              id.oidc_admin_groups.join(", ") || "everyone admitted is an administrator",
+              "SILT_OIDC_ADMIN_GROUPS",
+              "Membership makes an identity an administrator. Empty is what Silt did before roles existed — turning an upgrade into a lockout for the person who configured it would be the worst possible default.",
+            )}
           </dl>
         </section>
       {/if}
@@ -1360,8 +1443,35 @@
             {/each}
           </dl>
 
-          <div class="mt-4">
-            <Button variant="outline" size="sm" onclick={prune} disabled={pruning}>
+          <!-- Settings are already a sparse patch on top of the environment, so
+               the export is that document with a header. There is no import
+               endpoint: PUT /api/settings already takes this shape, and a
+               second write path would be a second set of validation rules to
+               keep in step. -->
+          <div class="mt-6 border-t border-border pt-5">
+            <h4 class="text-sm font-medium">Move this configuration</h4>
+            <p class="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+              A file of everything set here rather than by the environment. Secrets are left
+              out and named in the file — a notification target restored as a blank is a
+              restore that quietly stops notifying, so it says which ones you will have to
+              set again.
+            </p>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+              <Button variant="outline" size="sm" onclick={exportSettings}>Download settings</Button>
+              {#if !readOnly}
+                <label class="cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+                  <input type="file" accept="application/json,.json" class="sr-only" onchange={importSettings} />
+                  Restore from a file
+                </label>
+              {/if}
+              {#if importError}
+                <span class="text-xs text-red-500 dark:text-red-300">{importError}</span>
+              {/if}
+            </div>
+          </div>
+
+          <div class="mt-6 border-t border-border pt-5">
+            <Button variant="outline" size="sm" onclick={prune} disabled={pruning || readOnly}>
               {pruning ? "Pruning…" : "Run retention pass now"}
             </Button>
           </div>
@@ -1382,7 +1492,7 @@
       <!-- Sticky rather than at the bottom: a save button you have to scroll to
            find is the same complaint as a settings link you have to scroll to
            find. It only shows on the sections that can be saved. -->
-      {#if !READ_ONLY_SECTIONS.has(section)}
+      {#if !READ_ONLY_SECTIONS.has(section) && !readOnly}
         <div class="sticky bottom-0 -mx-1 flex items-center gap-3 border-t border-border bg-background/95 px-1 py-3 backdrop-blur-sm">
           <Button size="sm" onclick={save} disabled={!dirty || saving}>
             {saving ? "Saving…" : "Save changes"}

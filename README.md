@@ -138,6 +138,13 @@ events land on the same axis as your config changes.
 
 - **Authentication three ways**, tried in order: OpenID Connect, forward auth from a
   reverse proxy, and a built-in account. A fresh install is closed until someone claims it.
+- **Read-only access** for everyone outside an administrator group. They read every screen
+  and change nothing but their own appearance preferences, which live in their browser.
+- **A setup review** that names the settings that are legal, working, and probably not what
+  you meant — plus live checks that ask whether the Docker endpoint answers and whether the
+  compose roots are really mounted.
+- **Settings you can move**: a file of everything set here rather than by the environment,
+  restored through the ordinary settings write. Secrets are left out and named.
 - **Sessions are rows, not signed cookies** — they survive a restart, signing out revokes
   them server-side, and one button ends all of them.
 - **An audit log** of who changed a setting, who pruned history, who signed in and who was
@@ -299,6 +306,8 @@ exists.
 | `SILT_OIDC_CLIENT_ID` / `SILT_OIDC_CLIENT_SECRET` | The client you registered. |
 | `SILT_OIDC_REDIRECT_URL` | Defaults to `$SILT_BASE_URL/api/auth/callback`. |
 | `SILT_OIDC_ALLOWED_GROUPS` / `SILT_OIDC_ALLOWED_USERS` | Optional. Both empty admits anyone the provider authenticates. |
+| `SILT_OIDC_ADMIN_GROUPS` | Read-only for everyone else. Empty means everyone admitted may change everything. |
+| `SILT_ADMIN_GROUPS` + `SILT_AUTH_GROUPS_HEADER` | The same split behind a forward-auth proxy. |
 | `SILT_OIDC_GROUPS_CLAIM` / `SILT_OIDC_USERNAME_CLAIM` | Default `groups` and `preferred_username`; providers disagree. |
 | `SILT_TRUST_PROXY_AUTH` + `SILT_AUTH_HEADER` | Believe an identity your reverse proxy asserts. |
 | `SILT_TRUSTED_PROXIES` | **Set this** if you use forward auth. See below. |
