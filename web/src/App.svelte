@@ -350,7 +350,18 @@
           {:else if route.name === "service"}
             <Service projectId={route.projectId} service={route.service} {reloadKey} />
           {:else if route.name === "files"}
-            <Files projectId={route.projectId} initialPath={route.path} />
+            <!--
+              Keyed, because Files seeds its selection from initialPath once
+              and then owns it — the file picker changes the selection without
+              touching the URL, which is right. The consequence is that
+              arriving from a search hit at a *different* file while this
+              screen is already open changed the prop and nothing else: same
+              component, same loaded file, wrong file. Remounting on the URL
+              is the version where both are true.
+            -->
+            {#key `${route.projectId}:${route.path ?? ""}`}
+              <Files projectId={route.projectId} initialPath={route.path} />
+            {/key}
           {:else if route.name === "diff"}
             <Diff from={route.from} to={route.to} projectId={route.projectId} />
           {:else if route.name === "settings"}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/changelog"
@@ -276,6 +277,34 @@ type settingsExport struct {
 	Note    string   `json:"note"`
 }
 
+// filenameSafe reduces a host name to something that can sit inside a
+// Content-Disposition filename.
+//
+// SILT_HOST_NAME is a free-text label, so it can hold a quote, a slash or a
+// newline — and a header value is none of those things. Nothing here is an
+// attack, since the value is the operator's own, but naming your host
+// `my "prod" box` should not break the download.
+func filenameSafe(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "host"
+	}
+	// Long enough to be recognisable, short enough for any filesystem.
+	if len(out) > 64 {
+		out = out[:64]
+	}
+	return out
+}
+
 func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 	if s.live == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings are read-only in this configuration")
@@ -306,7 +335,7 @@ func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Downloaded rather than rendered: this is a file someone keeps.
 	w.Header().Set("Content-Disposition",
-		fmt.Sprintf("attachment; filename=\"silt-settings-%s.json\"", cfg.HostName))
+		fmt.Sprintf("attachment; filename=%q", "silt-settings-"+filenameSafe(cfg.HostName)+".json"))
 	writeJSON(w, http.StatusOK, out)
 }
 

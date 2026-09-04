@@ -934,31 +934,88 @@ miserable, and second granularity collides on `UNIQUE (project_id, taken_at)`.
 
 ## 13. Config reference
 
+Every variable Silt reads, grouped the way the Settings screen groups them. A test
+(`internal/config/documented_test.go`) reads the `env` tags off the struct and fails if
+one of them is missing from this table or from `.env.example`, because a setting that is
+read but undocumented works perfectly and so nothing else ever notices.
+
+`SILT_PORT` is not in this table on purpose: it is a compose-level variable that
+`docker-compose.yml` uses to pick the published host port, and the process never reads it.
+
+**Process and storage**
+
 | Env var | Default | Purpose |
 |---|---|---|
-| `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint |
-| `SILT_LISTEN_ADDR` | `:8375` | |
-| `SILT_DB_PATH` | `/data/silt.db` | |
-| `SILT_COMPOSE_ROOTS` | *(empty)* | Comma-separated mounted paths to watch |
-| `SILT_SNAPSHOT_INTERVAL` | `5m` | Reconcile cadence |
-| `SILT_RETENTION_DAYS` | `365` | Snapshots with `config_changed = 1` |
-| `SILT_UNCHANGED_RETENTION_DAYS` | `7` | Snapshots with `config_changed = 0` |
-| `SILT_EVENT_RETENTION_DAYS` | `90` | Events — far higher volume than snapshots |
-| `SILT_VACUUM_INTERVAL` | `0` | `0` disables; e.g. `168h` for weekly |
-| `SILT_RETENTION_INTERVAL` | `1h` | How often the retention pass runs |
+| `SILT_LISTEN_ADDR` | `:8375` | Address inside the container. Change `SILT_PORT` instead unless you mean this |
+| `SILT_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `SILT_DB_PATH` | `/data/silt.db` | SQLite file |
+| `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint. A read-only socket proxy, never the socket itself — see Section 3 |
 | `SILT_HOST_NAME` | `local` | Label for this Docker host in the database |
-| `SILT_BASE_URL` | *(empty)* | Public URL, used to link notifications to the diff |
+| `SILT_BASE_URL` | *(empty)* | Public URL. Links notifications to the diff and derives the OIDC callback |
+
+**Collection**
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SILT_SNAPSHOT_INTERVAL` | `5m` | Reconcile cadence — catches whatever the event stream missed |
 | `SILT_COMPOSE_ROOTS` | *(empty)* | Comma-separated absolute paths, mounted read-only, under which compose files may be read. An allowlist, not a hint |
 | `SILT_MAX_COMPOSE_FILE_BYTES` | `1048576` | Cap on a single captured file |
 | `SILT_KEEP_KEYS` | *(empty)* | Extra env keys kept in cleartext, `*` glob. Adds to the built-in safe list; there is no redact-list |
+
+**Retention**
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SILT_RETENTION_DAYS` | `365` | Snapshots with `config_changed = 1`. `0` keeps forever |
+| `SILT_UNCHANGED_RETENTION_DAYS` | `7` | Snapshots with `config_changed = 0` |
+| `SILT_EVENT_RETENTION_DAYS` | `90` | Events — far higher volume than snapshots |
+| `SILT_AUDIT_RETENTION_DAYS` | `730` | The administrative trail. A row per action rather than per observation, so it stays tiny and its value is how far back it reaches |
+| `SILT_RETENTION_INTERVAL` | `1h` | How often the retention pass runs |
+| `SILT_VACUUM_INTERVAL` | `0` | `0` disables; e.g. `168h` for weekly |
+
+**Notifications**
+
+| Env var | Default | Purpose |
+|---|---|---|
 | `SILT_NOTIFY_URLS` | *(empty)* | Comma-separated shoutrrr URLs |
 | `SILT_NOTIFY_ON` | `image_id,image_digest,volumes,service_removed` | Change kinds that notify |
 | `SILT_NOTIFY_MIN_SEVERITY` | `medium` | ANDed with `SILT_NOTIFY_ON`: a change must match a listed kind **and** meet this severity |
+
+**Authentication**
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SILT_LOCAL_ACCOUNT` | `true` | The built-in account. Off for an install that authenticates only through a provider or a proxy |
+| `SILT_PASSWORD_HASH` | *(empty)* | bcrypt. Claims the built-in account before startup and takes the password out of the UI's hands |
+| `SILT_TRUST_PROXY_AUTH` | `false` | Trust an identity header from the reverse proxy |
+| `SILT_AUTH_HEADER` | `X-Remote-User` | Forward-auth identity header name |
+| `SILT_AUTH_GROUPS_HEADER` | `X-Remote-Groups` | Forward-auth group header. Only read when `SILT_ADMIN_GROUPS` is set |
+| `SILT_ADMIN_GROUPS` | *(empty)* | Groups in the header that mean administrator. Unset ⇒ every forward-auth identity is an administrator |
+| `SILT_TRUSTED_PROXIES` | *(empty)* | Addresses or CIDRs whose auth header is believed. Empty with forward auth on means any client can assert an identity |
+| `SILT_SESSION_TTL` | `720h` | Session lifetime regardless of activity |
+| `SILT_SESSION_IDLE_TTL` | `168h` | Ends an unused session early. `0` disables |
+
+**OpenID Connect**
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `SILT_OIDC_ISSUER` | *(empty)* | Enables OIDC. Must match the discovery document exactly, trailing slash included |
+| `SILT_OIDC_CLIENT_ID` | *(empty)* | Registered client |
+| `SILT_OIDC_CLIENT_SECRET` | *(empty)* | Registered client secret |
+| `SILT_OIDC_REDIRECT_URL` | *(empty)* | Only if it is not `$SILT_BASE_URL/api/auth/callback` |
+| `SILT_OIDC_SCOPES` | `openid,profile,email` | `openid` is always included whether listed or not |
+| `SILT_OIDC_USERNAME_CLAIM` | `preferred_username` | Differs between providers |
+| `SILT_OIDC_GROUPS_CLAIM` | `groups` | Some providers use `roles` |
+| `SILT_OIDC_ADMIN_GROUPS` | *(empty)* | Groups that mean administrator. Unset ⇒ everyone admitted is an administrator |
+| `SILT_OIDC_ALLOWED_GROUPS` | *(empty)* | Restricts who may sign in. Empty admits anyone the provider authenticates |
+| `SILT_OIDC_ALLOWED_USERS` | *(empty)* | Same, by username |
+
+**Everything else**
+
+| Env var | Default | Purpose |
+|---|---|---|
 | `SILT_INGEST_TOKEN` | *(empty)* | Required for `POST /api/ingest`; empty ⇒ endpoint returns 503 |
-| `SILT_TRUST_PROXY_AUTH` | `false` | Trust an auth header from the reverse proxy |
-| `SILT_AUTH_HEADER` | `X-Remote-User` | Forward-auth header name |
-| `SILT_PASSWORD_HASH` | *(empty)* | bcrypt; fallback login when no IdP |
-| `SILT_LOG_LEVEL` | `info` | |
+| `SILT_METRICS_PUBLIC` | `false` | `/metrics` without a session. It names every project on the host |
 
 ---
 
@@ -997,7 +1054,7 @@ building are these, in order:
 1. **An activity trail** — *shipped in 0.9.0.* Who changed a setting, ran a prune, signed
    in, was refused. It is the first question anyone asks the moment a second person can
    sign in, and it cannot be answered retroactively, which is why it came first.
-2. **Read-only vs administrator.** Silt is already read-only against Docker; the split
+2. **Read-only vs administrator** — *shipped in 0.16.0.* Silt is already read-only against Docker; the split
    that matters is between reading the journal and changing Silt's own configuration.
    The natural key is an OIDC group — `SILT_OIDC_ADMIN_GROUPS` alongside the existing
    allowlist — with everyone else able to read every screen and change nothing but their
@@ -1879,6 +1936,14 @@ Changed:
     could change everything, and silently demoting them would look like Silt
     breaking.
 
+    The cost of storing it is that a demotion is not retroactive: removing
+    someone from the administrator group takes effect at their next sign-in,
+    up to the session lifetime away. Forward auth has no such lag, because the
+    proxy asserts the groups on every request and the role is recomputed from
+    them each time. That asymmetry is worth knowing rather than worth removing
+    — the remedy for the sticky case already exists and is one button, "end
+    every session", under Security — so the Authentication screen says so.
+
 91. **Probes ask; checks read (0.16.0)** — the setup review added in 0.15.0
     reads the configuration and says what looks unintended. It cannot say
     whether the Docker endpoint answers or whether the compose root you
@@ -1917,7 +1982,77 @@ Changed:
     works, and `make release` still does it — it is just no longer the only
     path, and no longer the one that has to be remembered.
 
-94. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+94. **Setup is open exactly once, and only while it is the only door (0.17.0)** —
+    `POST /api/auth/setup` claims the built-in account, and it was guarded by
+    "are you signed in" rather than "are you an administrator". On an install
+    where a provider is the way in and the built-in account was never claimed,
+    that made every viewer one request away from an administrator password.
+
+    The rule is now the same one everything else uses: if there is already
+    another way in, claiming the account is an administrative act and needs an
+    administrator. If there is not — a fresh install, where the setup form is
+    the only thing on screen — it stays anonymous, because there is nobody to
+    ask and no account to escalate from. The two cases look identical in the
+    handler and are not the same question, which is exactly why the first
+    version got it wrong.
+
+95. **The vacuum clock has to survive a restart (0.17.0)** — `lastVacuum`
+    started at the zero value, which is an infinitely long time ago, so the
+    first retention pass after every start vacuumed. A container that restarts
+    nightly turned a weekly VACUUM into a nightly rewrite of the entire
+    database file.
+
+    Starting the clock at `time.Now()` instead has the opposite failure: a
+    container restarted more often than the interval never vacuums at all.
+    Neither in-memory answer is right, because the thing being measured is
+    longer than the process's life. The time goes in the settings table, which
+    is the only version where the configured cadence is the actual cadence.
+
+    The same shape is worth watching for anywhere else a long interval meets a
+    short-lived process.
+
+96. **Resolve the roots, not just the path (0.17.0)** — the compose-root check
+    resolves symlinks before deciding, which is what stops a link inside a
+    mounted root from reading the rest of the filesystem. It compared the
+    resolved path against the *unresolved* roots, so a root that was itself a
+    symlink — `/srv` pointing at external storage, the ordinary shape on a
+    small host — never matched anything under it.
+
+    It failed closed, which is why it took this long to find: nothing leaked,
+    the screen simply said no files, and that is indistinguishable from a stack
+    with no compose file. A security check that fails closed and silently is
+    still a bug, and a harder one to see than the loud kind.
+
+97. **An API path answers as an API (0.17.0)** — `mux.Handle("/", web.Handler())`
+    is the right catch-all for a single-page app and it also caught every
+    mistyped API path and every wrong method, answering both with a document of
+    HTML and a 200. A caller then has a success it cannot parse.
+
+    `/api/` now has its own fallback, which asks the mux which methods the path
+    does accept and answers 405 with them named, or 404 when there is no such
+    path. It asks the mux rather than keeping a second list of routes, because
+    a second list is a list that goes stale.
+
+98. **Documentation drift is a test, not a habit (0.17.0)** — sixteen settings
+    were readable only in the struct, the whole OpenID Connect block among
+    them, which is exactly what someone is looking for when a login will not
+    work. Nothing noticed, because a setting that is read and undocumented
+    works perfectly.
+
+    `internal/config/documented_test.go` reads the `env` tags by reflection and
+    fails when one is missing from the reference table or from `.env.example`,
+    and in the other direction when the example offers something nothing reads
+    — `docker-compose.yml` counts as a reader there, which is how `SILT_PORT`
+    stays legitimate.
+
+99. **The rest of the pass (0.17.0)** — the collector listed every host and project per Docker
+    event to find one project, now one indexed lookup; the settings export
+    filename is sanitised rather than interpolated straight from the host name;
+    the Files route is keyed on its path so a link to a different file
+    remounts; two a11y build warnings fixed rather than suppressed, so the next
+    real one is visible.
+
+100. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

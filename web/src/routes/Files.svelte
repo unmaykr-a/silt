@@ -20,6 +20,10 @@
   // Content hashes per snapshot, so the picker can say which files changed
   // without fetching every file's text.
   let hashes = $state<Record<number, Record<string, string>>>({});
+  // Read once on purpose: after mount the picker owns the selection, and the
+  // route is keyed on the path so arriving at a different file remounts this
+  // screen rather than trying to reconcile two owners of the same value.
+  // svelte-ignore state_referenced_locally
   let path = $state(initialPath ?? "");
   let snapshots = $state<Snapshot[]>([]);
   // Full file first. Opening a project's compose is usually "let me read the
@@ -236,20 +240,32 @@
     />
   {:else}
     <div class="flex flex-wrap items-center gap-2 text-xs">
-      <select bind:value={path} class="max-w-lg rounded-md border border-border bg-background px-2 py-1.5 font-mono">
+      <select
+        bind:value={path}
+        aria-label="File"
+        class="max-w-lg rounded-md border border-border bg-background px-2 py-1.5 font-mono"
+      >
         {#each paths as p (p)}
           <option value={p}>{changedPaths.has(p) ? "● " : ""}{p}</option>
         {/each}
       </select>
 
       {#if view === "changes" && snapshots.length >= 2}
-        <select bind:value={fromId} class="rounded-md border border-border bg-background px-2 py-1.5">
+        <select
+          bind:value={fromId}
+          aria-label="Compare from"
+          class="rounded-md border border-border bg-background px-2 py-1.5"
+        >
           {#each snapshots as s (s.id)}
             <option value={s.id}>#{s.id} · {datetime(s.taken_at)}</option>
           {/each}
         </select>
         <span class="text-muted-foreground">→</span>
-        <select bind:value={toId} class="rounded-md border border-border bg-background px-2 py-1.5">
+        <select
+          bind:value={toId}
+          aria-label="Compare to"
+          class="rounded-md border border-border bg-background px-2 py-1.5"
+        >
           {#each snapshots as s (s.id)}
             <option value={s.id}>#{s.id} · {datetime(s.taken_at)}</option>
           {/each}
@@ -345,27 +361,40 @@
           {previewError}
         </p>
       {:else}
+        <!--
+          Two branches rather than one row with conditional role and tabindex.
+          Conditioning both on the same flag is correct at runtime, but the
+          compiler reads the attributes statically, cannot see that they move
+          together, and warns on every build about a noninteractive element
+          with a tabindex. A warning that is always there is a warning nobody
+          reads, and the real one arrives in the same list.
+        -->
+        {#snippet cells(line: PreviewLine)}
+          <span class="w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50">
+            {line.number}
+          </span>
+          <span class="min-w-0 flex-1 pr-4"><CodeLine text={line.text} /></span>
+        {/snippet}
+
         <div class="overflow-x-auto rounded-lg border border-border bg-card">
           {#each preview as line (line.number)}
-            <div
-              class="group flex items-baseline font-mono text-xs leading-relaxed {lineClass(line)} {line.markable
-                ? 'cursor-pointer hover:bg-secondary/40'
-                : ''}"
-              role={line.markable ? "button" : undefined}
-              tabindex={line.markable ? 0 : undefined}
-              onclick={() => line.markable && toggleLine(line)}
-              onkeydown={(e) => {
-                if (line.markable && (e.key === "Enter" || e.key === " ")) {
-                  e.preventDefault();
-                  toggleLine(line);
-                }
-              }}
-            >
-              <span class="w-12 shrink-0 select-none px-2 text-right text-muted-foreground/50">
-                {line.number}
-              </span>
-              <span class="min-w-0 flex-1 pr-4"><CodeLine text={line.text} /></span>
-              {#if line.markable}
+            {#if line.markable}
+              <div
+                class="group flex cursor-pointer items-baseline font-mono text-xs leading-relaxed hover:bg-secondary/40 {lineClass(
+                  line,
+                )}"
+                role="button"
+                tabindex="0"
+                aria-label="{line.redacted ? 'Show' : 'Hide'} line {line.number}"
+                onclick={() => toggleLine(line)}
+                onkeydown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleLine(line);
+                  }
+                }}
+              >
+                {@render cells(line)}
                 <span class="shrink-0 px-2 text-[10px] text-muted-foreground/60">{reasonLabel(line)}</span>
                 <!-- Visible rather than hover-only: nothing else signals that
                      these lines can be clicked at all. -->
@@ -377,8 +406,12 @@
                 >
                   {busyLine === line.number ? "…" : line.redacted ? "show" : "hide"}
                 </span>
-              {/if}
-            </div>
+              </div>
+            {:else}
+              <div class="flex items-baseline font-mono text-xs leading-relaxed {lineClass(line)}">
+                {@render cells(line)}
+              </div>
+            {/if}
           {/each}
         </div>
 

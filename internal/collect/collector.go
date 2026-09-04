@@ -180,26 +180,21 @@ func (c *Collector) recordDockerEvent(ctx context.Context, e docker.Event) {
 // projectID resolves a compose project name to its database id. Events can
 // arrive before the project has ever been snapshotted, in which case they are
 // still recorded, just without the link.
+//
+// One indexed lookup rather than listing every host and every project. This
+// runs on every Docker event, and a `compose up` across a forty-project host
+// produces a burst of them — on the hardware Silt is built for, that was a
+// table scan per event to answer a question the UNIQUE (host_id, name) index
+// already answers.
 func (c *Collector) projectID(ctx context.Context, name string) (int64, bool) {
 	if name == "" {
 		return 0, false
 	}
-	hosts, err := c.Snapshotter.Store.RQ.ListHosts(ctx)
+	id, err := c.Snapshotter.Store.RQ.GetProjectIDByName(ctx, name)
 	if err != nil {
 		return 0, false
 	}
-	for _, h := range hosts {
-		projects, err := c.Snapshotter.Store.RQ.ListProjects(ctx, h.ID)
-		if err != nil {
-			continue
-		}
-		for _, p := range projects {
-			if p.Name == name {
-				return p.ID, true
-			}
-		}
-	}
-	return 0, false
+	return id, true
 }
 
 // snapshotProject snapshots one project by name, looking it up from the

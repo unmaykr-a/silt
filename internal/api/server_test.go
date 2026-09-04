@@ -56,6 +56,18 @@ func newFixture(t *testing.T) *fixture {
 // probes that report on them.
 func newFixtureWithRoots(t *testing.T, roots []string) *fixture {
 	t.Helper()
+	return newFixtureWith(t, roots, "")
+}
+
+// newFixtureWithHostName is newFixture with a host label, which reaches the
+// export's Content-Disposition header.
+func newFixtureWithHostName(t *testing.T, hostName string) *fixture {
+	t.Helper()
+	return newFixtureWith(t, nil, hostName)
+}
+
+func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
+	t.Helper()
 	ctx := context.Background()
 
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "silt.db"))
@@ -129,6 +141,7 @@ func newFixtureWithRoots(t *testing.T, roots []string) *fixture {
 		SessionTTL:             720 * time.Hour,
 		SessionIdleTTL:         168 * time.Hour,
 		ComposeRoots:           roots,
+		HostName:               hostName,
 	}
 	server := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, hub, cfg, snaps)
 	// The settings layer is part of the surface under test: without it every

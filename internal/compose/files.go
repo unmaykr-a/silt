@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/unmaykr-a/silt/internal/redact"
 )
@@ -107,6 +108,10 @@ type FileReader struct {
 	// MaxBytes caps a single file.
 	MaxBytes int64
 	Redactor *redact.Redactor
+
+	// resolved is Roots plus each root's symlink-resolved form, computed once.
+	once     sync.Once
+	resolved []string
 }
 
 // Enabled reports whether any root is configured.
@@ -211,11 +216,37 @@ func (f *FileReader) resolve(path string) (string, error) {
 	return resolved, nil
 }
 
-func (f *FileReader) underRoot(path string) bool {
-	for _, root := range f.Roots {
-		if root == "" {
-			continue
+// rootPaths is what a path is compared against: every configured root, and
+// the symlink-resolved form of each.
+//
+// The resolved form matters because the path being checked has already been
+// through EvalSymlinks. If a root is itself a symlink — /srv pointing at
+// external storage, which is the ordinary shape on a Pi — then every file
+// under it resolved to a path outside the literal root and was refused as
+// "outside the configured roots" while sitting plainly inside one. That failed
+// closed, so nothing leaked; it just captured nothing, and said so in a status
+// that reads like a misconfiguration on the operator's part.
+//
+// Adding the resolved root does not widen the allowlist: it is the same
+// directory, named the way the filesystem names it.
+func (f *FileReader) rootPaths() []string {
+	f.once.Do(func() {
+		for _, root := range f.Roots {
+			if root == "" {
+				continue
+			}
+			clean := filepath.Clean(root)
+			f.resolved = append(f.resolved, clean)
+			if actual, err := filepath.EvalSymlinks(clean); err == nil && actual != clean {
+				f.resolved = append(f.resolved, actual)
+			}
 		}
+	})
+	return f.resolved
+}
+
+func (f *FileReader) underRoot(path string) bool {
+	for _, root := range f.rootPaths() {
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			continue

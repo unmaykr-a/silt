@@ -5,6 +5,32 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.17.0 — 2026-09-04
+
+A pass over the whole thing: one privilege escalation, several quiet wrong answers, and the documentation that had stopped matching the code.
+
+### Added
+
+- The config reference and .env.example are now checked against the struct the process actually reads. Sixteen settings were documented nowhere but the source — the entire OpenID Connect block among them, which is precisely what someone is hunting for when a login will not work — and four were missing from the example file. A setting that is read but undocumented works perfectly, so nothing else was ever going to notice.
+- The demo now has a .env beside each compose file. Per-line redaction of a file that is nothing but secrets is the case that screen exists for, and the demo could only show it on compose files, where most lines are structure.
+- Tests for the parts that had none: the collector's event path, the retention loop, the audit trail's own retention window, the OpenID Connect callback and issuer rules, and the account-to-provider link. Linking is worth naming — a linked subject is the built-in account, so it is the one place a string from an identity provider grants administrator rights by matching a stored value, and nothing tested it.
+
+### Changed
+
+- Every Docker event listed every host and then every project on each of them to find the one project the event was about. It is now a single indexed lookup, on the path that runs on every container start, stop and health transition.
+
+### Fixed
+
+- A weekly VACUUM was a vacuum on every restart. The clock started at zero rather than at the last one, so the first retention pass after each start rewrote the entire database file. On a host that pulls images nightly that is a nightly rewrite of the whole file, which is not what an SD card wants. The time of the last vacuum is now recorded, so the cadence means what it says across restarts.
+- A compose root that is itself a symlink captured nothing at all. The path being checked has been through symlink resolution and the root it was compared against had not, so every file under /srv pointing at external storage — an ordinary shape — resolved outside the root it was plainly inside, and was refused. It failed closed, so nothing leaked; it just silently recorded no files.
+- A request to an API path that does not exist, or to a real one with the wrong method, was answered with the single-page app and a 200. A caller then had a success it could not parse instead of being told what was wrong. These are now 404 and 405, with the accepted methods named.
+- Opening a file from a search hit while the Files screen was already open left the previous file on screen. The screen seeds its selection from the address once and then owns it, which is right for the file picker and was wrong for a link.
+- The settings export filename came from the host name unescaped, so a host named with a quote or a slash produced a broken — and, given a determined enough host name, a forgeable — download header.
+
+### Security
+
+- Claiming the built-in account needed only a session, not an administrator's. On an install where an identity provider is the way in and the built-in account was never claimed, anyone the provider admitted — including a read-only viewer — could set its password and sign in as an administrator. Claiming it now requires an administrator when there is already another way in; on a fresh install, where the setup form is the only thing there is, it stays open, because it has to be.
+
 ## 0.16.0 — 2026-09-04
 
 Read-only access, checks that test rather than infer, and settings you can move.

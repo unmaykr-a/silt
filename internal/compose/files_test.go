@@ -221,3 +221,37 @@ func TestPreviewMatchesCapture(t *testing.T) {
 		t.Errorf("preview and capture disagree:\npreview:\n%s\ncapture:\n%s", preview.Content, captured.Content)
 	}
 }
+
+// A root that is itself a symlink is the ordinary shape on a host with the
+// data on external storage, and it used to capture nothing at all: the path
+// under test comes back from EvalSymlinks, so it never matched the literal
+// root it was plainly inside.
+func TestASymlinkedRootStillCaptures(t *testing.T) {
+	real := t.TempDir()
+	stack := filepath.Join(real, "media")
+	if err := os.MkdirAll(stack, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(stack, "docker-compose.yml")
+	if err := os.WriteFile(path, []byte("services:\n  app:\n    image: app:1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// /srv -> the real directory.
+	link := filepath.Join(t.TempDir(), "srv")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("this filesystem will not make symlinks: %v", err)
+	}
+
+	f := &compose.FileReader{Roots: []string{link}, MaxBytes: 1 << 20}
+	got := f.Capture([]string{filepath.Join(link, "media", "docker-compose.yml")}, nil)
+	if len(got) != 1 {
+		t.Fatalf("captured %d files, want 1", len(got))
+	}
+	if got[0].Status != compose.FileOK {
+		t.Fatalf("status = %q, want %q", got[0].Status, compose.FileOK)
+	}
+	if !strings.Contains(string(got[0].Content), "image: app:1") {
+		t.Errorf("content = %q", got[0].Content)
+	}
+}

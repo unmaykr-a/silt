@@ -12,6 +12,17 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
 
+  // Focused from an effect rather than with the autofocus attribute.
+  //
+  // Same behaviour, and the attribute is worth avoiding: it fires before the
+  // page has settled and a screen reader is still announcing it, which is why
+  // the compiler warns about it. Here it is the only field on the only screen
+  // there is, so focusing it is right — just not that way.
+  let firstField = $state<HTMLInputElement | null>(null);
+  $effect(() => {
+    firstField?.focus();
+  });
+
   // A failed provider login comes back as a redirect carrying the reason,
   // because the browser arrived by navigation and a JSON error would be a dead
   // end. Read it once and clean the URL, so a reload does not replay it.
@@ -109,7 +120,7 @@
           type="password"
           bind:value={password}
           autocomplete="new-password"
-          autofocus
+          bind:this={firstField}
           class={input}
         />
         {#if tooShort}

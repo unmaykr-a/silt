@@ -100,20 +100,59 @@ test("every settings section renders", async ({ page }) => {
   await page.goto("/settings", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(900);
 
-  for (const section of [
-    "Appearance",
-    "Collection",
-    "Retention",
-    "Notifications",
-    "Ingest webhook",
-    "Security",
-    "Environment only",
-    "Storage",
-  ]) {
-    await page.click(`button:has-text("${section}")`);
-    await page.waitForTimeout(500);
-    await expect(page.locator("main")).toContainText(section);
+  // Read the sections off the rail rather than listing them here. A hardcoded
+  // copy had already gone stale twice — it was missing Setup and
+  // Authentication within a release of their being added — and a section that
+  // nothing opens is a section nothing checks.
+  const rail = page.getByLabel("Settings sections");
+  const buttons = rail.getByRole("button");
+  const count = await buttons.count();
+  expect(count).toBeGreaterThanOrEqual(9);
+
+  // By index rather than by name: a section with overrides carries a count
+  // badge, so its accessible name is "Setup 1" and matching on the label alone
+  // finds nothing.
+  for (let i = 0; i < count; i++) {
+    const button = buttons.nth(i);
+    const name = (await button.innerText()).split("\n")[0].trim();
+    await button.click();
+    await page.waitForTimeout(400);
+    await expect(page.locator("main"), `${name} rendered nothing`).not.toBeEmpty();
   }
+  expect(errors).toEqual([]);
+});
+
+test("settings search finds a setting by its environment variable", async ({ page }) => {
+  // The compose file is where people know these by name, so the variable has
+  // to be searchable — and searching it must land on the section that holds it.
+  const errors = watchForErrors(page);
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  await page.getByPlaceholder("Search settings\u2026").fill("SILT_KEEP_KEYS");
+  await page.waitForTimeout(400);
+
+  const rail = page.getByLabel("Settings sections");
+  await expect(rail).toContainText("Keys kept readable");
+  await rail.getByRole("button", { name: /Keys kept readable/ }).click();
+  await page.waitForTimeout(400);
+
+  await expect(page.locator("main")).toContainText("Collection");
+  expect(errors).toEqual([]);
+});
+
+test("the live checks report on the endpoints they test", async ({ page }) => {
+  // The suite runs against a deliberately unreachable Docker host, so the
+  // probe has to say so rather than reporting healthy — which is the whole
+  // reason it exists: an unreachable engine and an empty host look identical
+  // everywhere else.
+  const errors = watchForErrors(page);
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  await page.getByRole("button", { name: "Run checks" }).click();
+  await expect(page.locator("main")).toContainText("Docker endpoint", { timeout: 10_000 });
+  await expect(page.locator("main")).toContainText("Database");
   expect(errors).toEqual([]);
 });
 
@@ -181,4 +220,27 @@ test("a POSIX browser locale does not blank the page", async ({ page }) => {
   // The chart is the thing that threw, so its presence is the assertion.
   await expect(page.locator(".uplot").first()).toBeVisible();
   expect(errors, "the page threw on a POSIX locale").toEqual([]);
+});
+
+test("a link to a different file changes the file on screen", async ({ page }) => {
+  // The Files screen seeds its selection from the address once and then owns
+  // it, which is right for the file picker and was wrong for a link: arriving
+  // from a search hit at a different file while the screen was already open
+  // changed the address and nothing else.
+  await page.goto("/projects/1/files", { waitUntil: "domcontentloaded" });
+
+  const picker = page.getByLabel("File", { exact: true });
+  await expect(picker).toBeVisible({ timeout: 10_000 });
+
+  const paths = await picker.locator("option").evaluateAll((options) =>
+    options.map((o) => (o as HTMLOptionElement).value),
+  );
+  test.skip(paths.length < 2, "this project captured only one file");
+
+  const current = await picker.inputValue();
+  const other = paths.find((p) => p !== current) ?? paths[1];
+  await page.goto(`/projects/1/files?path=${encodeURIComponent(other)}`, {
+    waitUntil: "domcontentloaded",
+  });
+  await expect(page.getByLabel("File", { exact: true })).toHaveValue(other, { timeout: 10_000 });
 });
