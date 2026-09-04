@@ -20,6 +20,17 @@ import (
 	"github.com/unmaykr-a/silt/internal/redact"
 )
 
+// How the Secure flag on the session cookie is decided.
+const (
+	// CookieSecureAuto infers it from the request.
+	CookieSecureAuto = "auto"
+	// CookieSecureAlways sets it whatever the request looked like.
+	CookieSecureAlways = "always"
+	// CookieSecureNever is for a plain-HTTP install on a trusted network,
+	// where a Secure cookie would simply never be sent back.
+	CookieSecureNever = "never"
+)
+
 // Config is the fully validated runtime configuration.
 type Config struct {
 	// ListenAddr is the address the HTTP server binds to.
@@ -139,6 +150,39 @@ type Config struct {
 	SessionTTL time.Duration `env:"SILT_SESSION_TTL" envDefault:"720h"`
 	// SessionIdleTTL ends an unused session early. Zero disables it.
 	SessionIdleTTL time.Duration `env:"SILT_SESSION_IDLE_TTL" envDefault:"168h"`
+	// OIDCAdminTTL bounds how long a provider-granted administrator role stays
+	// good without signing in again. Zero disables the lapse.
+	//
+	// The groups an identity provider reports are read once, at sign-in, and
+	// there is nothing to re-read them from afterwards. With a 720h session
+	// that made "remove them from the admin group" a change that took effect
+	// up to a month later, which is not what anyone doing it believes.
+	//
+	// Only the administrator half lapses, and only for provider sessions.
+	// Signing everyone out on a timer would be a worse tool for a worse
+	// reason: reading the journal is not the dangerous part, forward auth
+	// asserts its groups on every request already, and the built-in account
+	// has no external source to have changed its mind.
+	OIDCAdminTTL time.Duration `env:"SILT_OIDC_ADMIN_TTL" envDefault:"12h"`
+
+	// CookieSecure decides the Secure flag on the session cookie: auto,
+	// always, or never.
+	//
+	// auto infers it from the request — TLS terminated here, or an
+	// X-Forwarded-Proto of https from the proxy. That is right almost always
+	// and wrong in the one direction that matters: a proxy that terminates TLS
+	// and forgets the header makes Silt ship the session cookie without
+	// Secure, over a connection the browser would happily repeat in the clear.
+	// always is the setting for anyone who knows their install is HTTPS and
+	// would rather Silt not guess.
+	CookieSecure string `env:"SILT_COOKIE_SECURE" envDefault:"auto"`
+
+	// IngestRatePerMinute caps webhook events accepted from one source address.
+	//
+	// The token is the authentication and this is the blast radius when it
+	// leaks: without it, one copied token is unbounded writes into the
+	// timeline. Zero disables the limit.
+	IngestRatePerMinute int `env:"SILT_INGEST_RATE_PER_MINUTE" envDefault:"60"`
 
 	// MetricsPublic leaves /metrics reachable without authentication.
 	//
@@ -241,6 +285,19 @@ func (c *Config) Validate() error {
 	}
 	if c.SessionTTL < time.Minute {
 		return fmt.Errorf("SILT_SESSION_TTL %v is too short; use at least 1m", c.SessionTTL)
+	}
+	switch c.CookieSecure {
+	case "", CookieSecureAuto:
+		c.CookieSecure = CookieSecureAuto
+	case CookieSecureAlways, CookieSecureNever:
+	default:
+		return fmt.Errorf("SILT_COOKIE_SECURE %q must be one of auto, always, never", c.CookieSecure)
+	}
+	if c.OIDCAdminTTL < 0 {
+		return fmt.Errorf("SILT_OIDC_ADMIN_TTL must not be negative, got %v", c.OIDCAdminTTL)
+	}
+	if c.IngestRatePerMinute < 0 {
+		return fmt.Errorf("SILT_INGEST_RATE_PER_MINUTE must not be negative, got %d", c.IngestRatePerMinute)
 	}
 	if c.SessionIdleTTL < 0 {
 		return fmt.Errorf("SILT_SESSION_IDLE_TTL must not be negative, got %v", c.SessionIdleTTL)

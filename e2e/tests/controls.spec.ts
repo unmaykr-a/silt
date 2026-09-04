@@ -244,3 +244,54 @@ test("a link to a different file changes the file on screen", async ({ page }) =
   });
   await expect(page.getByLabel("File", { exact: true })).toHaveValue(other, { timeout: 10_000 });
 });
+
+test("the storage section offers a database backup", async ({ page }) => {
+  // The one thing Silt could not previously answer about its own data. The
+  // button is a plain navigation, so what this checks is that it is there, it
+  // is reachable, and the endpoint behind it returns a database rather than an
+  // error page.
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  const rail = page.getByLabel("Settings sections");
+  await rail.getByRole("button", { name: /^Storage/ }).click();
+  await page.waitForTimeout(400);
+
+  await expect(page.locator("main")).toContainText("Back up the history");
+  await expect(page.getByRole("button", { name: "Download backup" })).toBeVisible();
+
+  const resp = await page.request.get("/api/maintenance/backup");
+  expect(resp.status()).toBe(200);
+  expect(resp.headers()["content-type"]).toContain("sqlite");
+  // The SQLite file header. An error page would sail past a status check.
+  const head = (await resp.body()).subarray(0, 15).toString();
+  expect(head).toBe("SQLite format 3");
+});
+
+test("the ingest section reports its rate limit", async ({ page }) => {
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  const rail = page.getByLabel("Settings sections");
+  await rail.getByRole("button", { name: /^Ingest webhook/ }).click();
+  await page.waitForTimeout(400);
+
+  await expect(page.locator("main")).toContainText("Events per minute");
+  await expect(page.locator("main")).toContainText("SILT_INGEST_RATE_PER_MINUTE");
+});
+
+test("the authentication section reports the administrator window", async ({ page }) => {
+  // The setting that bounds how long a removed administrator stays one. It is
+  // read-only and invisible everywhere else, which is exactly why it is here.
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  const rail = page.getByLabel("Settings sections");
+  await rail.getByRole("button", { name: /^Authentication/ }).click();
+  await page.waitForTimeout(400);
+
+  await expect(page.locator("main")).toContainText("Administrator rights expire after");
+  await expect(page.locator("main")).toContainText("SILT_OIDC_ADMIN_TTL");
+  await expect(page.locator("main")).toContainText("Secure cookie");
+  await expect(page.locator("main")).toContainText("SILT_COOKIE_SECURE");
+});

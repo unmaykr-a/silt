@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/auth"
+	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/store"
 )
 
@@ -170,6 +171,11 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 		}
 		if id, ok := s.identify(r); ok {
 			if !s.mayWrite(id, r) {
+				if id.AdminLapsed {
+					writeError(w, http.StatusForbidden,
+						"your administrator rights have expired; sign in again to refresh them")
+					return
+				}
 				writeError(w, http.StatusForbidden,
 					"read-only access: changing Silt's configuration needs an administrator")
 				return
@@ -196,7 +202,7 @@ func (g *Gate) origins() []string {
 }
 
 // setSessionCookie writes the session cookie for this request's scheme.
-func setSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxAge time.Duration) {
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxAge time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    value,
@@ -209,19 +215,19 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, value string, maxA
 		// is worse than one relying on the operator's own network boundary —
 		// and never setting it would waste the protection where it is
 		// available.
-		Secure: auth.SecureRequest(r),
+		Secure: s.cookieSecure(r),
 		MaxAge: int(maxAge.Seconds()),
 	})
 }
 
-func clearCookie(w http.ResponseWriter, r *http.Request, name string) {
+func (s *Server) clearCookie(w http.ResponseWriter, r *http.Request, name string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   auth.SecureRequest(r),
+		Secure:   s.cookieSecure(r),
 		MaxAge:   -1,
 	})
 }
@@ -340,17 +346,23 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Role stated rather than defaulted. It would be admin either way —
+	// ParseRole treats an unset role as one, deliberately — but leaving it
+	// unset is precisely how SILT_OIDC_ADMIN_GROUPS came to do nothing, and
+	// the built-in account being an administrator is a decision worth reading
+	// in the code that makes it.
 	token, err := s.gate.Sessions.Issue(r.Context(), auth.Identity{
 		Subject: auth.LocalSubject,
 		Name:    "local",
 		Method:  auth.MethodPassword,
+		Role:    auth.RoleAdmin,
 	})
 	if err != nil {
 		s.log.Error("issue session", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
-	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.log.Info("signed in", "method", "password", "remote", client)
 	s.audit(r, store.AuditSignIn, map[string]any{"method": "password"})
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
@@ -365,7 +377,7 @@ func (s *Server) postLogout(w http.ResponseWriter, r *http.Request) {
 			s.log.Error("revoke session", "error", err)
 		}
 	}
-	clearCookie(w, r, sessionCookie)
+	s.clearCookie(w, r, sessionCookie)
 	s.audit(r, store.AuditSignOut, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
@@ -423,7 +435,7 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// One use, whatever the outcome: a flow that failed should not be
 	// retryable with the same state.
-	defer clearFlowCookie(w, r)
+	defer s.clearFlowCookie(w, r)
 
 	if reason := r.URL.Query().Get("error"); reason != "" {
 		s.log.Warn("provider refused the login", "error", reason,
@@ -476,15 +488,8 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A linked identity is the built-in account, whatever the group rules say:
-	// an explicit link is a more specific statement than a group membership.
-	var id auth.Identity
-	switch {
-	case s.gate.Account.LinkedTo(claims.Subject):
-		id = auth.Identity{Subject: auth.LocalSubject, Name: claims.Display(), Method: auth.MethodOIDC}
-	case s.gate.OIDC.Allowed(claims):
-		id = auth.Identity{Subject: claims.Subject, Name: claims.Display(), Method: auth.MethodOIDC}
-	default:
+	id, ok := auth.IdentityFor(s.gate.OIDC, s.gate.Account, claims)
+	if !ok {
 		s.log.Warn("login refused", "subject", claims.Display(), "reason", "not in an allowed group")
 		s.failLogin(w, r, "your account is not allowed to sign in to this Silt")
 		return
@@ -496,7 +501,7 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		s.failLogin(w, r, "could not start a session")
 		return
 	}
-	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.log.Info("signed in", "method", "oidc", "subject", id.Name)
 	s.audit(r, store.AuditSignIn, map[string]any{"method": "oidc", "subject": id.Name})
 	http.Redirect(w, r, auth.SafeNext(flow.Next), http.StatusFound)
@@ -510,14 +515,14 @@ func (s *Server) failLogin(w http.ResponseWriter, r *http.Request, message strin
 	http.Redirect(w, r, "/?login_error="+url.QueryEscape(message), http.StatusFound)
 }
 
-func clearFlowCookie(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearFlowCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     flowCookie,
 		Value:    "",
 		Path:     "/api/auth",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   auth.SecureRequest(r),
+		Secure:   s.cookieSecure(r),
 		MaxAge:   -1,
 	})
 }
@@ -561,7 +566,7 @@ func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not revoke sessions")
 		return
 	}
-	clearCookie(w, r, sessionCookie)
+	s.clearCookie(w, r, sessionCookie)
 	s.log.Info("all sessions revoked", "subject", id.Subject, "count", removed)
 	s.audit(r, store.AuditSessionsRevoked, map[string]any{"count": removed})
 	writeJSON(w, http.StatusOK, map[string]int64{"revoked": removed})
@@ -651,14 +656,15 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 	// Signed in immediately: making someone type the password they just chose
 	// is ceremony, and they have already proved they know it.
 	token, err := s.gate.Sessions.Issue(r.Context(), auth.Identity{
-		Subject: auth.LocalSubject, Name: "admin", Method: auth.MethodPassword,
+		Subject: auth.LocalSubject, Name: "admin",
+		Method: auth.MethodPassword, Role: auth.RoleAdmin,
 	})
 	if err != nil {
 		s.log.Error("issue session", "error", err)
 		writeError(w, http.StatusInternalServerError, "the password was set but the session could not start")
 		return
 	}
-	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.log.Info("built-in account claimed", "remote", clientKey(r))
 	s.audit(r, store.AuditAccountClaimed, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
@@ -699,7 +705,7 @@ func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the password changed but the session could not restart")
 		return
 	}
-	setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
 	s.audit(r, store.AuditPasswordChanged, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"changed": true})
 }
@@ -815,4 +821,29 @@ func firstValue(header string) string {
 		header = header[:idx]
 	}
 	return strings.TrimSpace(header)
+}
+
+// cookieSecure decides the Secure flag on the session cookie.
+//
+// auto infers it from the request, which is right almost always and wrong in
+// the one direction that matters: a reverse proxy that terminates TLS and does
+// not set X-Forwarded-Proto makes Silt look at a plain HTTP request and ship
+// the session cookie without Secure — over a connection a browser will then
+// happily repeat in the clear. SILT_COOKIE_SECURE=always is how someone who
+// knows their install is HTTPS stops Silt guessing.
+//
+// A base URL of https is treated as knowing: someone who has told Silt its
+// public address is https has already answered this question.
+func (s *Server) cookieSecure(r *http.Request) bool {
+	cfg := s.conf()
+	switch cfg.CookieSecure {
+	case config.CookieSecureAlways:
+		return true
+	case config.CookieSecureNever:
+		return false
+	}
+	if strings.HasPrefix(cfg.BaseURL, "https://") {
+		return true
+	}
+	return auth.SecureRequest(r)
 }

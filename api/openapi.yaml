@@ -1159,6 +1159,33 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PruneResult" }
 
+  /api/maintenance/backup:
+    get:
+      tags: [system]
+      summary: Download a consistent snapshot of the database
+      description: |
+        A SQLite database file, written with `VACUUM INTO` so it is a single
+        consistent snapshot rather than a copy of a file being written to.
+        Copying `silt.db` while Silt is running produces a database that opens
+        cleanly and is missing whatever the write-ahead log had not
+        checkpointed; this does not.
+
+        Restore it by putting it where `SILT_DB_PATH` points. Administrator
+        only: the file is every project, every captured compose file and the
+        audit trail in one download.
+      operationId: backup
+      responses:
+        "200":
+          description: The database
+          content:
+            application/vnd.sqlite3:
+              schema: { type: string, format: binary }
+        "403":
+          description: Not an administrator
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /healthz:
     get:
       tags: [system]
@@ -1713,7 +1740,8 @@ components:
         [snapshot_interval_ms, retention_days, unchanged_retention_days,
          event_retention_days, audit_retention_days, retention_interval_ms,
          vacuum_interval_ms, keep_keys, base_url, log_level, notify_targets,
-         notify_on, notify_min_severity, ingest_configured]
+         notify_on, notify_min_severity, ingest_configured,
+         ingest_rate_per_minute]
       properties:
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }
@@ -1741,6 +1769,12 @@ components:
         ingest_configured:
           type: boolean
           description: Whether an ingest token is set. The token itself is never returned.
+        ingest_rate_per_minute:
+          type: integer
+          description: |
+            Events accepted per minute from one source address. The token is the
+            authentication; this is the blast radius when it leaks. 0 disables
+            the limit.
 
     SettingsFixed:
       type: object
@@ -1858,7 +1892,7 @@ components:
          oidc_redirect_url, oidc_scopes, oidc_username_claim, oidc_groups_claim,
          oidc_allowed_groups, oidc_allowed_users, oidc_admin_groups,
          admin_groups, auth_groups_header, roles_enabled, session_ttl_ms,
-         session_idle_ttl_ms, metrics_public]
+         session_idle_ttl_ms, oidc_admin_ttl_ms, cookie_secure, metrics_public]
       properties:
         mode:
           type: string
@@ -1902,6 +1936,20 @@ components:
           description: Whether anyone is a viewer rather than an administrator.
         session_ttl_ms: { type: integer, format: int64 }
         session_idle_ttl_ms: { type: integer, format: int64 }
+        oidc_admin_ttl_ms:
+          type: integer
+          format: int64
+          description: |
+            How long a provider-granted administrator role survives without a
+            fresh sign-in. The session keeps working, read-only, after it. OIDC
+            only; 0 means it does not lapse.
+        cookie_secure:
+          type: string
+          enum: [auto, always, never]
+          description: |
+            How the Secure flag on the session cookie is decided. `auto` infers
+            it from the request, which a proxy that terminates TLS without
+            setting X-Forwarded-Proto gets wrong.
         metrics_public: { type: boolean }
 
     SetupCheck:

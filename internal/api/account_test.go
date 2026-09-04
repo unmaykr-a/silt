@@ -30,7 +30,25 @@ type accountFixture struct {
 	db      *store.Store
 }
 
-func newAccountFixture(t *testing.T, envHash string, opts ...func(*api.Gate)) *accountFixture {
+// fixtureOpt adjusts the fixture before it starts. Two things need adjusting —
+// the gate and the configuration — and a single function type could only reach
+// one of them.
+type fixtureOpt struct {
+	gate func(*api.Gate)
+	cfg  func(*config.Config)
+}
+
+func withGate(f func(*api.Gate)) fixtureOpt { return fixtureOpt{gate: f} }
+
+func withCookieSecure(mode string) fixtureOpt {
+	return fixtureOpt{cfg: func(c *config.Config) { c.CookieSecure = mode }}
+}
+
+func withBaseURL(url string) fixtureOpt {
+	return fixtureOpt{cfg: func(c *config.Config) { c.BaseURL = url }}
+}
+
+func newAccountFixture(t *testing.T, envHash string, opts ...fixtureOpt) *accountFixture {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "silt.db"))
@@ -52,11 +70,17 @@ func newAccountFixture(t *testing.T, envHash string, opts ...func(*api.Gate)) *a
 		Account:  account,
 		Proxy:    proxy,
 	}
+	cfg := config.Config{}
 	for _, opt := range opts {
-		opt(gate)
+		if opt.gate != nil {
+			opt.gate(gate)
+		}
+		if opt.cfg != nil {
+			opt.cfg(&cfg)
+		}
 	}
 
-	srv := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, nil, config.Config{}, nil)
+	srv := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, nil, cfg, nil)
 	srv.SetAuth(gate)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -250,13 +274,13 @@ func TestDisablingTheAccountIsRefusedWhenNothingElseWouldLetYouIn(t *testing.T) 
 }
 
 func TestDisablingTheAccountIsAllowedWhenAProxyCanLetYouIn(t *testing.T) {
-	f := newAccountFixture(t, "", func(g *api.Gate) {
+	f := newAccountFixture(t, "", withGate(func(g *api.Gate) {
 		proxy, err := auth.NewProxy(true, "X-Remote-User", nil)
 		if err != nil {
 			t.Fatalf("NewProxy: %v", err)
 		}
 		g.Proxy = proxy
-	})
+	}))
 	// A proxy is configured, so claiming the account needs a session — see
 	// TestSetupRequiresASessionWhenAProviderCanLetYouIn.
 	proxied := map[string]string{"X-Remote-User": "andri"}
@@ -331,13 +355,13 @@ func bcryptOf(t *testing.T, password string) string {
 // the built-in account: that would be taking an account which bypasses the
 // provider, rather than bootstrapping the only way in.
 func TestSetupRequiresASessionWhenAProviderCanLetYouIn(t *testing.T) {
-	f := newAccountFixture(t, "", func(g *api.Gate) {
+	f := newAccountFixture(t, "", withGate(func(g *api.Gate) {
 		proxy, err := auth.NewProxy(true, "X-Remote-User", nil)
 		if err != nil {
 			t.Fatalf("NewProxy: %v", err)
 		}
 		g.Proxy = proxy
-	})
+	}))
 
 	code, body := f.do(t, "POST", "/api/auth/setup", `{"password":"`+goodPassword+`"}`)
 	if code != http.StatusUnauthorized {
@@ -376,13 +400,13 @@ func TestSetupOnlyIsFalseWhenAProviderExists(t *testing.T) {
 		t.Errorf("with nothing else configured: %v, want both true", state)
 	}
 
-	withProxy := newAccountFixture(t, "", func(g *api.Gate) {
+	withProxy := newAccountFixture(t, "", withGate(func(g *api.Gate) {
 		proxy, err := auth.NewProxy(true, "X-Remote-User", nil)
 		if err != nil {
 			t.Fatalf("NewProxy: %v", err)
 		}
 		g.Proxy = proxy
-	})
+	}))
 	state = withProxy.state(t)
 	if state["setup_required"] != true || state["setup_only"] != false {
 		t.Errorf("with a proxy configured: %v, want setup_required without setup_only", state)

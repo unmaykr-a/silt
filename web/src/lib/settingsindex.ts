@@ -87,6 +87,7 @@ export const SETTINGS: SettingEntry[] = [
 
   // Ingest.
   { name: "ingest_token", section: "ingest", label: "Token", env: "SILT_INGEST_TOKEN", keywords: "webhook uptime kuma external events api" },
+  { name: "ingest_rate", section: "ingest", label: "Events per minute", env: "SILT_INGEST_RATE_PER_MINUTE", keywords: "rate limit flood throttle abuse leaked token 429" },
 
   // Security and identity — read-only, and the reason the index exists: an
   // operator hunting for why forward auth is not working has no idea these
@@ -104,6 +105,8 @@ export const SETTINGS: SettingEntry[] = [
   { name: "oidc_allowed", section: "identity", label: "Who may sign in", env: "SILT_OIDC_ALLOWED_GROUPS", keywords: "allowlist groups users restrict" },
   { name: "roles", section: "identity", label: "Roles", keywords: "admin administrator viewer read only readonly permissions who can change" },
   { name: "oidc_admin_groups", section: "identity", label: "Administrator groups", env: "SILT_OIDC_ADMIN_GROUPS", keywords: "admin role viewer read only oidc" },
+  { name: "oidc_admin_ttl", section: "identity", label: "Administrator rights expire after", env: "SILT_OIDC_ADMIN_TTL", keywords: "admin lapse stale demote revoke role expiry groups refresh sign in again" },
+  { name: "cookie_secure", section: "identity", label: "Secure cookie", env: "SILT_COOKIE_SECURE", keywords: "https tls cookie secure proxy forwarded proto" },
   { name: "admin_groups", section: "identity", label: "Administrator groups (forward auth)", env: "SILT_ADMIN_GROUPS", keywords: "admin role viewer read only proxy" },
   { name: "auth_groups_header", section: "identity", label: "Groups header", env: "SILT_AUTH_GROUPS_HEADER", keywords: "x-remote-groups forward auth admin" },
   { name: "local_account", section: "identity", label: "Built-in account", env: "SILT_LOCAL_ACCOUNT" },
@@ -120,7 +123,8 @@ export const SETTINGS: SettingEntry[] = [
   // Storage.
   { name: "usage", section: "storage", label: "Storage used", keywords: "size disk blobs deduplicated" },
   { name: "prune", section: "storage", label: "Prune now", keywords: "delete old garbage collect vacuum reclaim" },
-  { name: "export", section: "storage", label: "Download settings", keywords: "export import backup restore move migrate json" },
+  { name: "backup", section: "storage", label: "Back up the history", keywords: "backup restore snapshot database sqlite copy silt.db disaster recovery save" },
+  { name: "export", section: "storage", label: "Download settings", keywords: "export import move migrate json configuration" },
 ];
 
 export type SearchHit = SettingEntry & { sectionLabel: string };

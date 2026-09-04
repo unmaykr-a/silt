@@ -295,7 +295,7 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 	}
 
 	gate := &api.Gate{
-		Sessions:       auth.NewSessions(db, cfg.SessionTTL, cfg.SessionIdleTTL),
+		Sessions:       sessions(db, cfg),
 		Account:        account,
 		Proxy:          proxy,
 		OIDC:           provider,
@@ -359,4 +359,12 @@ type dockerProbe struct{ client *docker.Client }
 
 func (p dockerProbe) DockerVersion(ctx context.Context) (string, error) {
 	return p.client.Version(ctx)
+}
+
+// sessions builds the session issuer, including how long a provider-granted
+// administrator role is good for.
+func sessions(db *store.Store, cfg config.Config) *auth.Sessions {
+	s := auth.NewSessions(db, cfg.SessionTTL, cfg.SessionIdleTTL)
+	s.AdminTTL = cfg.OIDCAdminTTL
+	return s
 }

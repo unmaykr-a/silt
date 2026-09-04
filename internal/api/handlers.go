@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -498,6 +499,16 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.ingestAuthorised(r) {
 		writeError(w, http.StatusUnauthorized, "invalid or missing token")
+		return
+	}
+
+	// After the token, not before: an unauthenticated caller must not be able
+	// to use up a real source's window, which would turn the limiter into a
+	// way to silence someone's monitoring.
+	if ok, wait := s.ingestRate.allow(clientKey(r), s.conf().IngestRatePerMinute); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		writeError(w, http.StatusTooManyRequests,
+			"too many events from this address; the limit is SILT_INGEST_RATE_PER_MINUTE per minute")
 		return
 	}
 

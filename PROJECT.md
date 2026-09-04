@@ -994,6 +994,8 @@ read but undocumented works perfectly and so nothing else ever notices.
 | `SILT_TRUSTED_PROXIES` | *(empty)* | Addresses or CIDRs whose auth header is believed. Empty with forward auth on means any client can assert an identity |
 | `SILT_SESSION_TTL` | `720h` | Session lifetime regardless of activity |
 | `SILT_SESSION_IDLE_TTL` | `168h` | Ends an unused session early. `0` disables |
+| `SILT_OIDC_ADMIN_TTL` | `12h` | How long a provider-granted administrator role survives without a fresh sign-in. The session keeps working read-only after it. OIDC only; `0` disables |
+| `SILT_COOKIE_SECURE` | `auto` | `Secure` on the session cookie: `auto` infers it from the request, `always` never guesses, `never` is for plain HTTP on a trusted network |
 
 **OpenID Connect**
 
@@ -1015,6 +1017,7 @@ read but undocumented works perfectly and so nothing else ever notices.
 | Env var | Default | Purpose |
 |---|---|---|
 | `SILT_INGEST_TOKEN` | *(empty)* | Required for `POST /api/ingest`; empty ⇒ endpoint returns 503 |
+| `SILT_INGEST_RATE_PER_MINUTE` | `60` | Events accepted per minute from one source address. `0` disables |
 | `SILT_METRICS_PUBLIC` | `false` | `/metrics` without a session. It names every project on the host |
 
 ---
@@ -2052,7 +2055,104 @@ Changed:
     remounts; two a11y build warnings fixed rather than suppressed, so the next
     real one is visible.
 
-100. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+100. **A role nobody read (0.18.0)** — `SILT_OIDC_ADMIN_GROUPS` shipped as the
+    headline of 0.16.0, was reported as in effect on the settings screen, and did
+    nothing. The callback built its `auth.Identity` by hand and left `Role`
+    unset; `ParseRole("")` defaults to admin, deliberately and for good reasons,
+    so every account the provider admitted became an administrator.
+
+    Everything around it was tested. `RoleFromGroups` had its own tests, the
+    middleware had six, and `OIDC.Finish` — which does set the role — had a full
+    fake provider behind it. Nothing tested the one line that mattered, because
+    the handler had quietly stopped calling `Finish` when the account-linking
+    flow needed `Exchange` instead, and taken the identity-building with it.
+
+    The lesson is not "test more". It is that a decision with two callers wants
+    one implementation: `auth.IdentityFor` is now the only way claims become an
+    identity, it lives beside the rules it applies, and a source-level test
+    fails if `internal/api` grows its own again. Duplicating a decision to reach
+    a different half of it is how a security control becomes decorative.
+
+101. **The link says which account, not whether (0.18.0)** — checked first and on
+    its own, the account link skipped the sign-in allowlist entirely. Removing
+    someone from the permitted group left them signing in as the administrator.
+
+    Two questions that look like one: may this person in, and which account do
+    they land in. The link is still the more specific statement — it should beat
+    a group membership about *identity* — but it was never authority to be
+    admitted. Ordering the checks is the whole fix.
+
+102. **An answer read once needs an expiry (0.18.0)** — a provider's groups are
+    read at sign-in and nothing re-reads them, because there is nothing to
+    re-read them from without storing a refresh token. With a 720h session that
+    made a demotion take up to a month.
+
+    `SILT_OIDC_ADMIN_TTL` expires the administrator half rather than the session:
+    after 12h the session keeps working, read-only, until the next sign-in.
+    Shortening `SILT_SESSION_TTL` instead would have signed everyone out on a
+    timer to fix a problem that is not about reading, and re-checking groups per
+    request would put an outage at the identity provider between a reader and a
+    page they are allowed to read.
+
+    Scoped to OIDC admins on purpose. Forward auth re-reads its groups from the
+    header every request and is never stale; the built-in account has no
+    provider to have changed its mind, and expiring its rights would lock the
+    sole operator out of their own settings screen on a timer.
+
+103. **A token is not a rate limit (0.18.0)** — the ingest webhook checked the
+    token, capped the body at 64 KiB, compared in constant time, and had no
+    limit on how often. PROJECT.md said "rate-limit per source IP" and had said
+    it since M4; nobody built it. A webhook token lives in an Uptime Kuma
+    config, a cron script and a Home Assistant automation, so it is the
+    credential most likely to be read by someone who should not have it, and
+    one copy was unbounded writes into the timeline.
+
+    Checked *after* the token, which is the part worth stating: a limit an
+    unauthenticated caller could spend would be a way to silence someone's
+    monitoring rather than a way to protect it.
+
+104. **Inference that fails open is not a default (0.18.0)** — the `Secure` flag
+    on the session cookie was inferred from the request, and the inference is
+    right almost always. The exception is a reverse proxy that terminates TLS
+    and does not set `X-Forwarded-Proto`, which is a configuration people arrive
+    at by accident: Silt sees plain HTTP and sends the session cookie without
+    `Secure`, over a connection the browser will happily repeat in the clear.
+
+    `SILT_COOKIE_SECURE=always` is the way to stop it guessing, and an
+    `https://` base URL now counts as having answered — someone who told Silt
+    its public address is HTTPS should not have to say so twice.
+
+105. **The history needs a way out (0.18.0)** — Silt's entire pitch is a record
+    you cannot reconstruct, and there was no supported way to keep a copy of it.
+    "Copy `silt.db`" is the obvious answer and it is wrong: the database runs in
+    WAL mode, so the committed state is spread across three files, and a copy of
+    the first one opens cleanly while missing whatever had not been
+    checkpointed. The failure surfaces on the day you restore it.
+
+    `VACUUM INTO` is the right primitive — a read transaction, so one consistent
+    snapshot including the WAL, written as a single compacted file with no
+    sidecars. It runs on the read pool, because putting it on the single writer
+    would block every snapshot for the length of the copy.
+
+    A download rather than a scheduled job writing somewhere: Silt does not know
+    where your backups live, and a tool that writes files into paths it was given
+    is a tool with a new class of bug. Administrator only — redaction means the
+    values are digests rather than secrets, but "may read the screens" and "may
+    walk off with the database" are not the same permission.
+
+106. **A read that is not a screen (0.18.0)** — the write guard is one rule:
+    every safe method is readable by anyone signed in. That is right for
+    everything it guards, and the backup endpoint is the exception it could not
+    see. A GET that hands over the whole database is not a page, and the guard
+    waved it past — a viewer could download every project, every captured
+    compose file, the audit trail and the session table.
+
+    Found by writing the test that asserts otherwise, which is the argument for
+    writing that test even when the answer looks obvious. The check is now
+    explicit in the handler, with a comment saying why it is not left to the
+    guard, because the next endpoint of this shape will want the same.
+
+107. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't
