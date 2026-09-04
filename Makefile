@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 SQLC_VERSION ?= v1.31.1
 
-.PHONY: check fmtcheck build web run test fmt tidy clean docker sqlc changelog demo demo-site demo-site-verify e2e
+.PHONY: check fmtcheck build web run test fmt tidy clean docker sqlc changelog release demo demo-site demo-site-verify e2e
 
 ## check: the gate every milestone must pass
 ##
@@ -115,6 +115,25 @@ e2e: web
 E2E_ENV = SILT_DB_PATH=../.e2e/silt.db SILT_LISTEN_ADDR=127.0.0.1:8410 \
           SILT_DOCKER_HOST=tcp://127.0.0.1:1 SILT_LOCAL_ACCOUNT=false \
           SILT_INGEST_TOKEN=demo SILT_LOG_LEVEL=warn
+
+## release: tag the version at the top of the changelog and push it
+##
+## Pushing the tag is the whole trigger: CI builds the multi-arch image and
+## publishes a GitHub release whose notes come from internal/changelog, so
+## there is nothing to write twice and nothing to keep in step by hand.
+##
+## Refuses a dirty tree and a tag that already exists, because both mean the
+## release would not be what the changelog says it is.
+release:
+	@version=$$($(GO) run ./internal/changelog/cmd/gen --version); \
+	if [ -z "$$version" ]; then echo "no release in internal/changelog"; exit 1; fi; \
+	if [ -n "$$(git status --porcelain)" ]; then \
+	  echo "working tree is dirty; commit before tagging v$$version"; exit 1; fi; \
+	if git rev-parse "v$$version" >/dev/null 2>&1; then \
+	  echo "v$$version already exists"; exit 1; fi; \
+	echo "tagging v$$version"; \
+	git tag -a "v$$version" -m "Silt v$$version"; \
+	git push origin "v$$version"
 
 ## changelog: regenerate CHANGELOG.md from internal/changelog
 changelog:

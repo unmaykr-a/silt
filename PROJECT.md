@@ -1800,7 +1800,66 @@ Changed:
     was about 3.5:1, under AA, so a comfort change and an accessibility fix
     pointed in opposite directions and both were needed.
 
-85. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+85. **The settings screen needed an index, not more sections (0.15.0)** —
+    nine sections and forty-odd fields is past the point where "it is in here
+    somewhere" works, and the answer is not fewer sections: every one of them
+    earns its place. `web/src/lib/settingsindex.ts` is the screen's contents as
+    data — every setting, the section it lives in, the environment variable
+    behind it, and the words someone would actually type.
+
+    The variable matters as much as the label. The compose file is where people
+    know these by name, so the string in hand when the question comes up is
+    `SILT_KEEP_KEYS`, not "keys kept readable" — and nothing on the screen could
+    be searched by it.
+
+    Substring rather than fuzzy, deliberately: a settings search that answers
+    "keep" with "Vacuum" because the letters appear in order is worse than one
+    that answers nothing. And the index is kept beside the screen rather than
+    generated from it, because the screen is markup and a test that reads
+    markup pins the markup. The one drift that matters — a field rendered with
+    no entry here, invisible to search and noticed by nothing — is what
+    `settingsindex.test.ts` checks, by reading the field names out of the
+    component and asserting the index covers them.
+
+86. **Twelve settings were readable nowhere (0.15.0)** — the whole OIDC client,
+    the trusted-proxy list, the identity header, the session lifetimes. Not
+    editable, correctly: they are the boundary protecting the settings screen,
+    and a UI that could edit them would be a way in rather than a setting. But
+    not *shown* either, which is a different decision that nobody made.
+
+    When forward auth is not working the first question is what Silt thinks it
+    was told, and the only way to answer it was to go and read the compose file
+    on the host. The Authentication section answers it, with secrets reported
+    as configured-or-not exactly as the notification targets and the ingest
+    token already were.
+
+87. **A configuration review, because unset is not the same as unmeant
+    (0.15.0)** — Silt is thirty-odd environment variables, most of which do
+    something sensible when unset. That is the right default and it hides a
+    specific failure: a setting that is *almost* right produces no error at
+    startup and no symptom until the day it matters.
+
+    `config.Config.Checks` is the reading of the whole environment that an
+    operator would otherwise have to do from memory. Forward auth trusted with
+    no proxy list. Notifications configured with no base URL, so the one
+    message that needed to be useful links nowhere. Runtime-only snapshots
+    outliving the changes they sit between.
+
+    Deliberately not validation — `Validate` refuses to start on anything
+    wrong, and these are the things that are legal and probably not what was
+    meant, which is why they are advice. Each names the variables involved,
+    because a finding you cannot act on is a finding that gets ignored.
+
+88. **Releases are the changelog, rendered twice (0.15.0)** — the repository
+    published images from the first milestone and never published a release,
+    so the README's release badge pointed at an empty page. The fix is not a
+    release-notes file: `changelog.Notes(version)` renders one entry from the
+    same data `CHANGELOG.md` is generated from, and the workflow fails the job
+    when a tag names a release the changelog does not have — which is the shape
+    of every "tagged the wrong thing" mistake. Notes written separately are
+    notes that disagree with the changelog by the second release.
+
+89. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

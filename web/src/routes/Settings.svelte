@@ -11,6 +11,11 @@
   import { prefs, type Clock, type DateStyle, type Layout, type TimeStamps } from "$lib/prefs.svelte";
   import { Button } from "$lib/components/ui/button";
   import AuditLog from "$lib/components/AuditLog.svelte";
+  import SetupChecks from "$lib/components/SetupChecks.svelte";
+  import Segmented from "$lib/components/Segmented.svelte";
+  import Toggle from "$lib/components/Toggle.svelte";
+  import { theme, type Theme } from "$lib/theme.svelte";
+  import { SECTIONS, searchSettings, overrideCounts, type SectionID } from "$lib/settingsindex";
   import type { Snippet } from "svelte";
 
   // The environment is the baseline; anything edited here is stored as an
@@ -29,17 +34,33 @@
   let pruning = $state(false);
   let pruned = $state<PruneResult | null>(null);
 
-  const SECTIONS = [
-    { id: "appearance", label: "Appearance" },
-    { id: "collection", label: "Collection" },
-    { id: "retention", label: "Retention" },
-    { id: "notifications", label: "Notifications" },
-    { id: "ingest", label: "Ingest webhook" },
-    { id: "security", label: "Security" },
-    { id: "environment", label: "Environment only" },
-    { id: "storage", label: "Storage" },
-  ];
-  let section = $state("appearance");
+  // The rail reads its sections from the search index rather than declaring
+  // its own list, so a section can only exist in one place and the two cannot
+  // drift into disagreeing about what this screen contains.
+  let section = $state<SectionID>("setup");
+
+  // Settings search. Nine sections and forty-odd fields is past the point
+  // where "it is in here somewhere" works, and the variable name is what
+  // people have in hand — the compose file is where they know these from.
+  let query = $state("");
+  const hits = $derived(searchSettings(query));
+  let searchBox = $state<HTMLInputElement | null>(null);
+
+  // Sections with nothing to save. Listed once rather than as a chain of
+  // inequalities that quietly grows a hole every time a section is added.
+  const READ_ONLY_SECTIONS = new Set<SectionID>([
+    "setup",
+    "appearance",
+    "security",
+    "identity",
+    "environment",
+    "storage",
+  ]);
+
+  function goTo(id: SectionID) {
+    section = id;
+    query = "";
+  }
 
   // The form's working copy, kept separate from `settings` so a field being
   // typed into is not overwritten by a background refresh.
@@ -147,6 +168,10 @@
   });
 
   const overridden = $derived(new Set(settings?.overridden ?? []));
+  const counts = $derived(overrideCounts(overridden));
+  // Errors and warnings from the setup review, badged on the rail so an
+  // install nobody has authenticated says so from whichever section you open.
+  const attention = $derived((settings?.checks ?? []).filter((c) => c.level !== "info").length);
 
   // Security is read-only here on purpose: every knob on it is the boundary
   // protecting this screen. What it can do is say what is in force, and end
@@ -450,22 +475,96 @@
 <div class="flex flex-col gap-6 lg:flex-row">
   <!-- The section rail. Sticky rather than scrolling with the pane, so you can
        always get from Retention to Storage without scrolling back up. -->
-  <nav class="shrink-0 lg:sticky lg:top-0 lg:w-52 lg:self-start" aria-label="Settings sections">
+  <nav class="shrink-0 lg:sticky lg:top-0 lg:w-56 lg:self-start" aria-label="Settings sections">
     <h2 class="mb-3 hidden text-lg font-semibold tracking-tight lg:block">Settings</h2>
-    <div class="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
-      {#each SECTIONS as s (s.id)}
+
+    <!-- Search before the list, because with nine sections it is the faster
+         route to most settings — and the only route for anyone who knows the
+         setting by its environment variable rather than by which screen it
+         was filed under. -->
+    <div class="relative mb-3">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+      </svg>
+      <input
+        bind:this={searchBox}
+        bind:value={query}
+        type="search"
+        placeholder="Search settings…"
+        aria-label="Search settings"
+        class="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-7 text-xs outline-none
+               focus:ring-2 focus:ring-ring"
+        onkeydown={(e) => {
+          if (e.key === "Escape") query = "";
+          if (e.key === "Enter" && hits.length > 0) goTo(hits[0].section);
+        }}
+      />
+      {#if query}
         <button
           type="button"
-          class="shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm transition-colors
-                 {section === s.id
-            ? 'bg-secondary text-secondary-foreground'
-            : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
-          onclick={() => (section = s.id)}
+          class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label="Clear search"
+          onclick={() => { query = ""; searchBox?.focus(); }}
         >
-          {s.label}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
         </button>
-      {/each}
+      {/if}
     </div>
+
+    {#if query}
+      <!-- Results replace the rail rather than sitting beside it: while you
+           are searching, the section list is not what you are looking at. -->
+      <div class="space-y-0.5">
+        {#if hits.length === 0}
+          <p class="px-2.5 py-1.5 text-xs text-muted-foreground">
+            Nothing matches “{query}”.
+          </p>
+        {:else}
+          {#each hits as hit (hit.name)}
+            <button
+              type="button"
+              class="w-full rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-secondary/50"
+              onclick={() => goTo(hit.section)}
+            >
+              <span class="block text-sm">{hit.label}</span>
+              <span class="block text-[11px] text-muted-foreground">
+                {hit.sectionLabel}{#if hit.env}{" · "}<span class="font-mono">{hit.env}</span>{/if}
+              </span>
+            </button>
+          {/each}
+        {/if}
+      </div>
+    {:else}
+      <div class="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+        {#each SECTIONS as s (s.id)}
+          <button
+            type="button"
+            class="flex shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm transition-colors
+                   {section === s.id
+              ? 'bg-secondary text-secondary-foreground'
+              : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'}"
+            onclick={() => (section = s.id)}
+          >
+            {s.label}
+            <!-- How many of this section's settings are set here rather than
+                 by the environment. Without it, finding your own overrides
+                 means opening all nine. -->
+            {#if s.id === "setup" && attention > 0}
+              <span class="rounded bg-amber-500/15 px-1 text-[10px] tabular-nums text-amber-600 dark:text-amber-400">
+                {attention}
+              </span>
+            {:else if counts[s.id]}
+              <span class="rounded bg-background/60 px-1 text-[10px] tabular-nums text-muted-foreground">
+                {counts[s.id]}
+              </span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
     {#if settings && overridden.size > 0}
       <button
         type="button"
@@ -488,6 +587,20 @@
       <p class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-600 dark:text-emerald-300">
         {notice}
       </p>
+    {/if}
+
+    <!-- The draft survives switching section, but the save bar does not: it
+         only renders where there is something to save. So an edit made under
+         Retention and then abandoned for Storage was still pending with
+         nothing on screen saying so. -->
+    {#if dirty && READ_ONLY_SECTIONS.has(section)}
+      <div class="flex flex-wrap items-center gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm">
+        <span>You have unsaved changes in another section.</span>
+        <Button size="sm" onclick={save} disabled={saving}>
+          {saving ? "Saving…" : "Save them"}
+        </Button>
+        <Button variant="ghost" size="sm" onclick={revert} disabled={saving}>Discard</Button>
+      </div>
     {/if}
 
     {#if section === "appearance"}
@@ -516,6 +629,25 @@
               {/each}
             </div>
           {/snippet}
+          {#snippet themeControl()}
+            <Segmented
+              label="Theme"
+              options={[
+                { value: "light", label: "Light" },
+                { value: "dark", label: "Dark" },
+                { value: "system", label: "System" },
+              ]}
+              value={theme.value}
+              onchange={(next) => theme.set(next as Theme)}
+            />
+          {/snippet}
+          {@render choice(
+            "theme",
+            "Theme",
+            "Silt is dark by default. \u201CSystem\u201D follows whatever this device is set to, which a two-way toggle cannot express \u2014 which is why the old one silently pinned you to one or the other.",
+            themeControl,
+          )}
+
           {@render choice(
             "layout",
             "Navigation",
@@ -1101,6 +1233,99 @@
         </section>
       {/if}
 
+      {#if section === "setup"}
+        <SetupChecks checks={settings.checks} />
+      {/if}
+
+      {#if section === "identity"}
+        {@const id = settings.identity}
+        <section>
+          <h3 class="text-sm font-semibold">Authentication</h3>
+          <p class="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+            How this install decides who you are. Read-only, and for the sharper of the two reasons
+            the environment-only settings are: these are the boundary protecting this screen, so a
+            UI that could edit them would be a way in rather than a setting. Shown at all because
+            twelve variables were readable nowhere — and when forward auth is not working, the first
+            question is what Silt thinks it was told.
+          </p>
+
+          {#snippet detail(label: string, value: string, envVar: string, hint?: string)}
+            <div class="grid gap-1 py-2.5 text-sm sm:grid-cols-[15rem_1fr] sm:gap-6">
+              <dt class="min-w-0">
+                {label}
+                {#if hint}
+                  <span class="mt-0.5 block text-xs leading-relaxed text-muted-foreground/70">{hint}</span>
+                {/if}
+                {#if envVar}
+                  <span class="mt-0.5 block font-mono text-[10px] text-muted-foreground/40">{envVar}</span>
+                {/if}
+              </dt>
+              <dd class="min-w-0 break-all font-mono text-xs {value === 'not set' ? 'text-muted-foreground/50' : ''}">
+                {value}
+              </dd>
+            </div>
+          {/snippet}
+
+          {#snippet flag(label: string, on: boolean, envVar: string, hint?: string)}
+            <div class="grid gap-1 py-2.5 text-sm sm:grid-cols-[15rem_1fr] sm:gap-6">
+              <dt class="min-w-0">
+                {label}
+                {#if hint}
+                  <span class="mt-0.5 block text-xs leading-relaxed text-muted-foreground/70">{hint}</span>
+                {/if}
+                <span class="mt-0.5 block font-mono text-[10px] text-muted-foreground/40">{envVar}</span>
+              </dt>
+              <dd class="min-w-0"><Toggle checked={on} readonly label={label} /></dd>
+            </div>
+          {/snippet}
+
+          <h4 class="mt-5 text-xs font-medium uppercase tracking-wide text-muted-foreground">In effect</h4>
+          <dl class="divide-y divide-border">
+            {@render detail(
+              "Method",
+              id.mode === "none" ? "none — anyone who can reach this address can read it" : id.mode,
+              "",
+              "The first of these that is configured wins: an identity provider, then your reverse proxy, then the built-in account.",
+            )}
+            {@render flag("Built-in account", id.local_account, "SILT_LOCAL_ACCOUNT", "Silt's own administrator. Off leaves only the provider.")}
+            {@render flag("Password claimed at startup", id.password_hash_set, "SILT_PASSWORD_HASH", "Set, the account is claimed before Silt starts and the first-run window never exists.")}
+            {@render detail("Session lifetime", duration(id.session_ttl_ms), "SILT_SESSION_TTL")}
+            {@render detail("Idle timeout", duration(id.session_idle_ttl_ms), "SILT_SESSION_IDLE_TTL")}
+            {@render flag("Metrics without signing in", id.metrics_public, "SILT_METRICS_PUBLIC", "/metrics carries counts and names, not values — but a project name is still information about your host.")}
+          </dl>
+
+          <h4 class="mt-6 text-xs font-medium uppercase tracking-wide text-muted-foreground">Reverse proxy</h4>
+          <dl class="divide-y divide-border">
+            {@render flag("Trust an asserted identity", id.trust_proxy_auth, "SILT_TRUST_PROXY_AUTH")}
+            {@render detail("Identity header", id.auth_header || "not set", "SILT_AUTH_HEADER")}
+            {@render detail(
+              "Trusted proxies",
+              id.trusted_proxies.length ? id.trusted_proxies.join(", ") : "not set",
+              "SILT_TRUSTED_PROXIES",
+              "The whole security of forward auth. The header is settable by anything that can open a socket, so with no list here \u201Cauthenticated\u201D means \u201Creached the port\u201D.",
+            )}
+          </dl>
+
+          <h4 class="mt-6 text-xs font-medium uppercase tracking-wide text-muted-foreground">OpenID Connect</h4>
+          <dl class="divide-y divide-border">
+            {@render detail("Issuer", id.oidc_issuer || "not set", "SILT_OIDC_ISSUER")}
+            {@render detail("Client ID", id.oidc_client_id || "not set", "SILT_OIDC_CLIENT_ID")}
+            {@render flag("Client secret", id.oidc_secret_set, "SILT_OIDC_CLIENT_SECRET", "Set or not, never shown \u2014 like the notification targets and the ingest token.")}
+            {@render detail("Redirect URL", id.oidc_redirect_url || "defaults to the base URL + /api/auth/callback", "SILT_OIDC_REDIRECT_URL")}
+            {@render detail("Scopes", id.oidc_scopes.join(", ") || "not set", "SILT_OIDC_SCOPES")}
+            {@render detail("Username claim", id.oidc_username_claim || "not set", "SILT_OIDC_USERNAME_CLAIM", "Providers disagree about these two, which is the usual reason a sign-in works but names nobody.")}
+            {@render detail("Groups claim", id.oidc_groups_claim || "not set", "SILT_OIDC_GROUPS_CLAIM")}
+            {@render detail(
+              "Allowed groups",
+              id.oidc_allowed_groups.join(", ") || "any",
+              "SILT_OIDC_ALLOWED_GROUPS",
+              "Both allowlists empty admits anyone the provider will authenticate.",
+            )}
+            {@render detail("Allowed users", id.oidc_allowed_users.join(", ") || "any", "SILT_OIDC_ALLOWED_USERS")}
+          </dl>
+        </section>
+      {/if}
+
       {#if section === "environment"}
         <section>
           <h3 class="text-sm font-semibold">Environment only</h3>
@@ -1157,7 +1382,7 @@
       <!-- Sticky rather than at the bottom: a save button you have to scroll to
            find is the same complaint as a settings link you have to scroll to
            find. It only shows on the sections that can be saved. -->
-      {#if section !== "appearance" && section !== "environment" && section !== "storage" && section !== "security"}
+      {#if !READ_ONLY_SECTIONS.has(section)}
         <div class="sticky bottom-0 -mx-1 flex items-center gap-3 border-t border-border bg-background/95 px-1 py-3 backdrop-blur-sm">
           <Button size="sm" onclick={save} disabled={!dirty || saving}>
             {saving ? "Saving…" : "Save changes"}
