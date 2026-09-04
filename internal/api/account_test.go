@@ -27,6 +27,7 @@ type accountFixture struct {
 	client  *http.Client
 	account *auth.Account
 	gate    *api.Gate
+	db      *store.Store
 }
 
 func newAccountFixture(t *testing.T, envHash string, opts ...func(*api.Gate)) *accountFixture {
@@ -64,7 +65,7 @@ func newAccountFixture(t *testing.T, envHash string, opts ...func(*api.Gate)) *a
 	if err != nil {
 		t.Fatalf("cookiejar: %v", err)
 	}
-	return &accountFixture{srv: ts, client: &http.Client{Jar: jar}, account: account, gate: gate}
+	return &accountFixture{srv: ts, client: &http.Client{Jar: jar}, account: account, gate: gate, db: db}
 }
 
 func (f *accountFixture) do(t *testing.T, method, path, body string) (int, string) {
@@ -385,5 +386,97 @@ func TestSetupOnlyIsFalseWhenAProviderExists(t *testing.T) {
 	state = withProxy.state(t)
 	if state["setup_required"] != true || state["setup_only"] != false {
 		t.Errorf("with a proxy configured: %v, want setup_required without setup_only", state)
+	}
+}
+
+// Linking the built-in account to a provider identity had no test at all,
+// which is a gap worth closing: a linked subject *is* the built-in account, so
+// this is the one place where a string from an identity provider grants
+// administrator rights by matching a stored value.
+
+func TestALinkedSubjectIsTheBuiltInAccount(t *testing.T) {
+	f := newAccountFixture(t, "")
+	ctx := context.Background()
+	if err := f.account.Claim(ctx, goodPassword); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	if f.account.LinkedTo("") {
+		t.Error("an unlinked account matched the empty subject; every anonymous claim would be an administrator")
+	}
+	if f.account.LinkedTo("alice@example.test") {
+		t.Error("an unlinked account matched a subject")
+	}
+
+	if err := f.account.Link(ctx, "alice@example.test"); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	if !f.account.LinkedTo("alice@example.test") {
+		t.Error("the linked subject does not match")
+	}
+	if f.account.LinkedTo("mallory@example.test") {
+		t.Error("a different subject matched the link")
+	}
+	if f.account.LinkedTo("") {
+		t.Error("the empty subject matched a link; a provider that returns no subject would sign in as the administrator")
+	}
+
+	// Unlinking is passing nothing, and must not leave "" matching.
+	if err := f.account.Link(ctx, ""); err != nil {
+		t.Fatalf("unlink: %v", err)
+	}
+	if f.account.LinkedTo("alice@example.test") || f.account.LinkedTo("") {
+		t.Error("the link survived being removed")
+	}
+}
+
+func TestTheLinkSurvivesAReload(t *testing.T) {
+	// The in-memory copy and the row have to agree, or a restart would forget
+	// the link and lock someone out of the account they sign in to with SSO.
+	f := newAccountFixture(t, "")
+	ctx := context.Background()
+	if err := f.account.Claim(ctx, goodPassword); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := f.account.Link(ctx, "alice@example.test"); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+
+	reloaded, err := auth.LoadAccount(ctx, f.db, "", true)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !reloaded.LinkedTo("alice@example.test") {
+		t.Error("the link was not read back from the database")
+	}
+}
+
+func TestUnlinkingNeedsTheBuiltInAccount(t *testing.T) {
+	f := newAccountFixture(t, "")
+	ctx := context.Background()
+	if err := f.account.Claim(ctx, goodPassword); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := f.account.Link(ctx, "alice@example.test"); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+
+	// Not signed in at all: refused by the middleware before the handler ever
+	// runs, so this is 401 rather than the handler's own 403.
+	if code, _ := f.do(t, "DELETE", "/api/auth/link", ""); code != http.StatusUnauthorized {
+		t.Errorf("an anonymous unlink = %d, want 401", code)
+	}
+	if !f.account.LinkedTo("alice@example.test") {
+		t.Fatal("the link was removed by a request that should not have been allowed")
+	}
+
+	if code, body := f.do(t, "POST", "/api/login", `{"password":"`+goodPassword+`"}`); code != 200 {
+		t.Fatalf("login = %d %s", code, body)
+	}
+	if code, body := f.do(t, "DELETE", "/api/auth/link", ""); code != 200 {
+		t.Fatalf("unlink = %d %s", code, body)
+	}
+	if f.account.LinkedTo("alice@example.test") {
+		t.Error("the link is still there after unlinking")
 	}
 }

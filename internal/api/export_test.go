@@ -95,3 +95,20 @@ func TestExportRoundTripsThroughTheOrdinaryPatchEndpoint(t *testing.T) {
 		t.Errorf("the restore did not take:\n%s", after)
 	}
 }
+
+func TestTheExportFilenameSurvivesAnAwkwardHostName(t *testing.T) {
+	// SILT_HOST_NAME is a free-text label and a header value is not: a quote
+	// closes the filename early, a newline is not allowed in a header at all.
+	// Nothing here is an attack — the value is the operator's own — but naming
+	// your host `my "prod" box` should not break the download.
+	f := newFixtureWithHostName(t, `my "prod" box/../etc`)
+
+	resp, _ := f.get(t, "/api/settings/export")
+	got := resp.Header.Get("Content-Disposition")
+	if strings.ContainsAny(got, "\n\r") {
+		t.Fatalf("the header carries a line break: %q", got)
+	}
+	if got != `attachment; filename="silt-settings-my--prod--box----etc.json"` {
+		t.Errorf("Content-Disposition = %q", got)
+	}
+}

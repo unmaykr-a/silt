@@ -595,19 +595,36 @@ func (g *Gate) otherWayIn() bool {
 // it is used — the same first-run window every setup screen has, narrowed by
 // refusing every other endpoint until it closes.
 //
-// The moment a provider or a proxy could let someone in, an anonymous claim
-// would be an escalation rather than a bootstrap: a stranger would be taking
-// an account that bypasses the provider. So it requires a session, which means
-// signing in the way the install is already set up to do.
+// The moment a provider or a proxy could let someone in, that window closes
+// and the claim becomes an administrative act: it sets the password on an
+// account that bypasses the provider, and hands back a session for it. So it
+// needs an administrator — signing in is not enough, because on such an
+// install signing in is something every reader can do.
 func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 	if s.gate == nil || !s.gate.setupRequired() {
 		writeError(w, http.StatusConflict, "this Silt has already been set up")
 		return
 	}
 	if s.gate.otherWayIn() {
-		if _, ok := s.identify(r); !ok {
+		// An administrator, not merely someone signed in.
+		//
+		// This endpoint is public because it has to be reachable before anyone
+		// can sign in, so the write guard never sees it — which made its own
+		// check the only thing between a reader and the built-in
+		// administrator account. Claiming that account sets its password and
+		// hands back a session for it, so "authenticated" was enough to
+		// promote a reader to an administrator, on the default configuration
+		// of any install with a provider that had never claimed its local
+		// account.
+		id, ok := s.identify(r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized,
 				"sign in with your identity provider first, then set a password under Settings → Security")
+			return
+		}
+		if !id.IsAdmin() {
+			writeError(w, http.StatusForbidden,
+				"claiming the built-in account needs an administrator")
 			return
 		}
 	}

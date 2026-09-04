@@ -379,7 +379,9 @@ type identity struct{ name, dir string }
 
 func (i identity) ProjectName() string       { return i.name }
 func (i identity) ProjectWorkingDir() string { return i.dir }
-func (i identity) ConfigFiles() []string     { return []string{i.dir + "/compose.yaml"} }
+func (i identity) ConfigFiles() []string {
+	return []string{i.dir + "/compose.yaml", i.dir + "/.env"}
+}
 
 // Seed writes the demo host into db, with enough history for the graphs to
 // have shape and one project carrying an unapplied compose edit.
@@ -540,23 +542,51 @@ func build(r *redact.Redactor, name, dir string, services []Service, file string
 	}
 
 	obs, err := compose.Build(
-		docker.Project{Name: name, WorkingDir: dir, ConfigFiles: []string{dir + "/compose.yaml"}},
+		docker.Project{Name: name, WorkingDir: dir, ConfigFiles: identity{name, dir}.ConfigFiles()},
 		inputs, r)
 	if err != nil {
 		return compose.Observation{}, fmt.Errorf("build %s: %w", name, err)
 	}
 	if file != "" {
-		// Through the same redaction the real capture path uses, rather than
-		// stored as written. The seed contains a literal API key, and a demo
-		// that showed it in cleartext would contradict the one claim the
-		// project leads with — on the page anyone evaluating Silt reads first.
-		path := dir + "/compose.yaml"
-		content, lines := r.ComposeText([]byte(file), compose.NewRuleSet(nil, path))
-		obs.Files = []compose.CapturedFile{{
-			Path: path, Status: compose.FileOK,
-			Content: content, Lines: lines, LineCount: len(lines), Size: int64(len(file)),
-		}}
+		// Both halves of what a stack is on disk, and both through the same
+		// redaction the real capture path uses rather than stored as written.
+		// The seed contains a literal API key, and a demo that showed it in
+		// cleartext would contradict the one claim the project leads with — on
+		// the page anyone evaluating Silt reads first.
+		obs.Files = []compose.CapturedFile{
+			capture(r, dir+"/compose.yaml", file),
+			capture(r, dir+"/.env", envFileFor(name)),
+		}
 		obs.Project.Source = compose.SourceFiles
 	}
 	return obs, nil
+}
+
+func capture(r *redact.Redactor, path, body string) compose.CapturedFile {
+	content, lines := r.ComposeText([]byte(body), compose.NewRuleSet(nil, path))
+	return compose.CapturedFile{
+		Path: path, Status: compose.FileOK,
+		Content: content, Lines: lines, LineCount: len(lines), Size: int64(len(body)),
+	}
+}
+
+// envFileFor is the .env beside the compose file.
+//
+// Every stack has one and the demo had none, so the screen built to show
+// per-line redaction of a file that is nothing but secrets had only compose
+// files to show it on — the easy case, where most lines are structure. It is
+// also what makes the file picker a picker rather than a label.
+func envFileFor(name string) string {
+	return "# Environment for the " + name + " stack.\n" +
+		"# Read by docker compose for ${VAR} interpolation.\n" +
+		"\n" +
+		"TZ=Europe/Tallinn\n" +
+		"PUID=1000\n" +
+		"PGID=1000\n" +
+		"DATA_ROOT=/srv/" + name + "\n" +
+		"\n" +
+		"# Stored as a keyed digest, like every value Silt does not recognise\n" +
+		"# as safe. Click a line on \"What to hide\" to change its mind either way.\n" +
+		"POSTGRES_PASSWORD=b8Xk2s-" + name + "-9fQ\n" +
+		"SMTP_PASSWORD=correct-horse-battery-staple\n"
 }

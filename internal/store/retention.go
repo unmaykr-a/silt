@@ -169,7 +169,18 @@ func (r *Retainer) Run(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	var lastVacuum time.Time
+	// Read from the database rather than starting at zero.
+	//
+	// The zero time is an infinitely long time ago, so a fresh Retainer would
+	// vacuum on its first pass whatever the configured cadence — and since
+	// this restarts with the container, a weekly vacuum on a host that pulls
+	// images nightly was a nightly vacuum. VACUUM rewrites the entire file,
+	// which is the one thing an SD card does not want done to it hourly.
+	//
+	// Starting at time.Now() instead has the opposite failure: a container
+	// restarted more often than the interval would never vacuum at all.
+	// Persisting it is the only version where the cadence means what it says.
+	lastVacuum := r.lastVacuum(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -210,7 +221,36 @@ func (r *Retainer) Run(ctx context.Context) error {
 			} else {
 				log.Info("vacuumed")
 			}
+			// Recorded even when it failed, so a database that cannot be
+			// vacuumed is retried on the next cadence rather than on every
+			// single pass.
 			lastVacuum = time.Now()
+			r.recordVacuum(ctx, lastVacuum, log)
 		}
+	}
+}
+
+// lastVacuumSetting is where the time of the last VACUUM is kept, so the
+// cadence survives a restart.
+const lastVacuumSetting = "last_vacuum_at"
+
+// lastVacuum is the zero time when nothing is recorded, which on a database
+// that has never been vacuumed is the right answer: vacuum on the first pass.
+func (r *Retainer) lastVacuum(ctx context.Context) time.Time {
+	raw, err := r.Store.GetSetting(ctx, lastVacuumSetting)
+	if err != nil {
+		return time.Time{}
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
+func (r *Retainer) recordVacuum(ctx context.Context, at time.Time, log *slog.Logger) {
+	if err := r.Store.PutSetting(ctx, lastVacuumSetting, at.UTC().Format(time.RFC3339)); err != nil {
+		// Not fatal: the worst case is one extra vacuum after a restart.
+		log.Warn("could not record the vacuum time", "error", err)
 	}
 }

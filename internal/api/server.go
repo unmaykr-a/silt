@@ -132,6 +132,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/version", s.getVersion)
 	mux.HandleFunc("POST /api/maintenance/prune", s.postPrune)
 
+	// Anything under /api/ that no route claimed is an error, not a page.
+	//
+	// Without this it fell through to the SPA handler below, so a POST to a
+	// GET-only endpoint — or a typo'd path — came back 200 with a document of
+	// HTML. A caller then sees a success it cannot parse, which is a much
+	// longer walk to the actual mistake than being told what it was.
+	mux.HandleFunc("/api/", apiNotFound(mux))
+
 	// Anything not claimed by an API route belongs to the SPA.
 	mux.Handle("/", web.Handler())
 	// Security headers wrap everything, including the refusals: a 401 is still
@@ -307,3 +315,35 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 }
 
 var errNotFound = errors.New("not found")
+
+// apiNotFound answers an unrouted /api/ request, saying which of 404 and 405
+// it is.
+//
+// The method list is asked of the mux rather than kept beside it, because a
+// second list of routes is a list that goes stale.
+func apiNotFound(mux *http.ServeMux) http.HandlerFunc {
+	methods := []string{
+		http.MethodGet, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete,
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		var allowed []string
+		for _, m := range methods {
+			if m == r.Method {
+				continue
+			}
+			probe := r.Clone(r.Context())
+			probe.Method = m
+			if _, pattern := mux.Handler(probe); strings.HasPrefix(pattern, m+" ") {
+				allowed = append(allowed, m)
+			}
+		}
+		if len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			writeError(w, http.StatusMethodNotAllowed,
+				r.Method+" is not accepted here; this endpoint takes "+strings.Join(allowed, ", "))
+			return
+		}
+		writeError(w, http.StatusNotFound, "no such endpoint")
+	}
+}

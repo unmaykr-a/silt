@@ -1346,6 +1346,9 @@
                 ? "on — administrators change Silt's configuration, everyone else reads"
                 : "off — everyone admitted may change everything",
               "SILT_OIDC_ADMIN_GROUPS / SILT_ADMIN_GROUPS",
+              id.roles_enabled
+                ? "A provider sign-in records the role in the session, so removing someone from the administrator group takes effect at their next sign-in rather than immediately — end their session under Security to make it now. A forward-auth proxy asserts the groups on every request, so there it is immediate."
+                : undefined,
             )}
             {@render detail(
               "Method",
