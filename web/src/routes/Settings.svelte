@@ -242,6 +242,15 @@
     window.location.href = "/api/settings/export";
   }
 
+  /** Download a consistent snapshot of the database.
+   *
+   *  A plain navigation rather than fetch-and-blob: the file is the whole
+   *  history and holding it in memory to hand it to the same browser that
+   *  already knows how to save a download would be work for nothing. */
+  function downloadBackup() {
+    window.location.href = "/api/maintenance/backup";
+  }
+
   /** Restore one. The file's `settings` object is exactly what PUT takes, so
       the import is the ordinary write and gets the ordinary validation. */
   async function importSettings(event: Event) {
@@ -1074,6 +1083,25 @@
                 : "Guards POST /api/ingest. Not configured, so the endpoint refuses every request.",
               tokenControl,
             )}
+
+            <!-- Read-only: this is a limit protecting the endpoint, and a UI
+                 that could raise it from inside would be a way around it. -->
+            {#snippet rateControl()}
+              <!-- Optional chaining because a snippet is a hoisted function
+                   that no {#if} above it can narrow into. -->
+              <span class="font-mono text-xs">
+                {(settings?.effective.ingest_rate_per_minute ?? 0) > 0
+                  ? `${settings?.effective.ingest_rate_per_minute} per minute`
+                  : "unlimited"}
+              </span>
+            {/snippet}
+            {@render field(
+              "ingest_rate",
+              "Events per minute",
+              "SILT_INGEST_RATE_PER_MINUTE",
+              "Per source address, applied after the token. A webhook token lives in every config that calls it, so this is the blast radius when one leaks. Over the limit, Silt answers 429 with a Retry-After.",
+              rateControl,
+            )}
           </div>
         </section>
       {/if}
@@ -1347,7 +1375,7 @@
                 : "off — everyone admitted may change everything",
               "SILT_OIDC_ADMIN_GROUPS / SILT_ADMIN_GROUPS",
               id.roles_enabled
-                ? "A provider sign-in records the role in the session, so removing someone from the administrator group takes effect at their next sign-in rather than immediately — end their session under Security to make it now. A forward-auth proxy asserts the groups on every request, so there it is immediate."
+                ? "A provider sign-in records the role in the session, so removing someone from the administrator group is not instant — it lapses within the window below, or immediately if you end their session under Security. A forward-auth proxy asserts the groups on every request, so there it is always immediate."
                 : undefined,
             )}
             {@render detail(
@@ -1360,6 +1388,22 @@
             {@render flag("Password claimed at startup", id.password_hash_set, "SILT_PASSWORD_HASH", "Set, the account is claimed before Silt starts and the first-run window never exists.")}
             {@render detail("Session lifetime", duration(id.session_ttl_ms), "SILT_SESSION_TTL")}
             {@render detail("Idle timeout", duration(id.session_idle_ttl_ms), "SILT_SESSION_IDLE_TTL")}
+            {@render detail(
+              "Administrator rights expire after",
+              id.oidc_admin_ttl_ms > 0 ? duration(id.oidc_admin_ttl_ms) : "never",
+              "SILT_OIDC_ADMIN_TTL",
+              id.oidc_admin_ttl_ms > 0
+                ? "A provider's groups are read once, at sign-in. After this the session keeps working, read-only, until they sign in again — which is what bounds how long a removed administrator stays one."
+                : "A provider's groups are read once, at sign-in, and with no window here a removed administrator stays one for the whole session lifetime.",
+            )}
+            {@render detail(
+              "Secure cookie",
+              id.cookie_secure === "auto" ? "auto — inferred from the request" : id.cookie_secure,
+              "SILT_COOKIE_SECURE",
+              id.cookie_secure === "auto"
+                ? "A proxy that terminates TLS without setting X-Forwarded-Proto makes this look like plain HTTP, and the session cookie ships without Secure. Set it to always if you know your install is HTTPS."
+                : undefined,
+            )}
             {@render flag("Metrics without signing in", id.metrics_public, "SILT_METRICS_PUBLIC", "/metrics carries counts and names, not values — but a project name is still information about your host.")}
           </dl>
 
@@ -1445,6 +1489,29 @@
               </div>
             {/each}
           </dl>
+
+          <!-- Above the settings export on purpose: settings can be retyped,
+               and the history is the thing that cannot be reconstructed. -->
+          <div class="mt-6 border-t border-border pt-5">
+            <h4 class="text-sm font-medium">Back up the history</h4>
+            <p class="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+              A SQLite file written as one consistent snapshot, safe to take while Silt is
+              running. Copying <code class="font-mono text-[11px]">silt.db</code> off the
+              volume is not: the database runs in WAL mode, so a copy of that one file opens
+              cleanly and is quietly missing whatever had not been checkpointed. Restore it
+              by putting this where <code class="font-mono text-[11px]">SILT_DB_PATH</code>
+              points.
+            </p>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+              <Button variant="outline" size="sm" onclick={downloadBackup} disabled={readOnly}>
+                Download backup
+              </Button>
+              <span class="text-xs text-muted-foreground">
+                about {bytes(settings.usage.stored_bytes)} — or point your own backup at
+                <code class="font-mono text-[11px]">/api/maintenance/backup</code>
+              </span>
+            </div>
+          </div>
 
           <!-- Settings are already a sparse patch on top of the environment, so
                the export is that document with a header. There is no import

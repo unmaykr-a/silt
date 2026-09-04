@@ -39,6 +39,20 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "0.18.0",
+		Date:    "2026-09-04",
+		Summary: "Somewhere to put your backups, a bound on stale administrators, and the read-only role finally doing something.",
+		Entries: []Entry{
+			{Security, "Read-only access did not work over OpenID Connect. The callback built the identity by hand and never set the role, and an unset role reads as administrator — so SILT_OIDC_ADMIN_GROUPS was configured, reported as in effect on the settings screen, and had no effect at all: everyone the provider admitted could change every setting. Forward auth was fine, because it reads its groups from the header on every request and never went through that path. There is now one function that turns provider claims into an identity, and a test that fails if the handler grows its own again."},
+			{Security, "A linked provider identity skipped the sign-in allowlist. The link was checked first and on its own, so removing that person from the permitted group left them still signing in — as the administrator, which is the opposite of what removing them meant. The allowlist decides whether you get in; the link only decides which account you land in once you are."},
+			{Security, "A provider-granted administrator role now expires. Groups are read once, at sign-in, and nothing re-reads them, so with the default 720h session \"remove them from the admin group\" was a change that took up to a month to matter. SILT_OIDC_ADMIN_TTL (12h) bounds it: after that the session keeps working, read-only, until they sign in again. Only the administrator half, and only for provider sessions — signing everyone out on a timer would be a worse tool for a worse reason."},
+			{Security, "The ingest webhook is rate limited per source address — SILT_INGEST_RATE_PER_MINUTE, default 60, checked after the token so nobody can spend a real sender's allowance. A webhook token lives in an Uptime Kuma config, a cron script and a Home Assistant automation, and without a limit one copy of it was unbounded writes into the timeline."},
+			{Security, "SILT_COOKIE_SECURE decides the Secure flag on the session cookie instead of only inferring it. Inference is right until a reverse proxy terminates TLS and forgets X-Forwarded-Proto, at which point Silt saw plain HTTP and sent the session cookie without Secure — failing open in the one direction that matters. A base URL beginning https:// now counts as an answer too."},
+			{Security, "The backup endpoint needed its own permission check. The write guard lets every read method through — correctly, for every other endpoint — so the one read that is not a screen was waved past, and a viewer could download the whole database. Found by writing the test that says otherwise."},
+			{Added, "A database backup you can actually take. Silt's whole value is a history nobody can reconstruct, and the only answer to \"how do I keep a copy\" was to copy silt.db — which, in WAL mode and while Silt is running, produces a file that opens cleanly and is quietly missing whatever had not been checkpointed. GET /api/maintenance/backup writes one consistent snapshot with VACUUM INTO and hands it over as a file; restore it by putting it where SILT_DB_PATH points. There is a button under Settings → Storage, and the URL works from whatever already backs up your host."},
+		},
+	},
+	{
 		Version: "0.17.0",
 		Date:    "2026-09-04",
 		Summary: "A pass over the whole thing: one privilege escalation, several quiet wrong answers, and the documentation that had stopped matching the code.",

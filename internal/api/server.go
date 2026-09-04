@@ -40,6 +40,7 @@ type Server struct {
 	files       FileReader
 	live        *settings.Live
 	prober      Prober
+	ingestRate  *rateLimiter
 }
 
 // conf returns the configuration in force right now.
@@ -65,7 +66,11 @@ func New(log *slog.Logger, db *store.Store, hub *Hub, cfg config.Config, snap Sn
 	if hub == nil {
 		hub = NewHub(log)
 	}
-	return &Server{log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap, started: time.Now(), version: "dev"}
+	return &Server{
+		log: log, store: db, hub: hub, cfg: cfg, snapshotter: snap,
+		started: time.Now(), version: "dev",
+		ingestRate: newRateLimiter(time.Minute),
+	}
 }
 
 // SetSettings installs the live settings layer. Without it the server serves
@@ -131,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings/notifications/test", s.testNotifications)
 	mux.HandleFunc("GET /api/version", s.getVersion)
 	mux.HandleFunc("POST /api/maintenance/prune", s.postPrune)
+	mux.HandleFunc("GET /api/maintenance/backup", s.getBackup)
 
 	// Anything under /api/ that no route claimed is an error, not a page.
 	//

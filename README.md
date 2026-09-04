@@ -145,6 +145,8 @@ events land on the same axis as your config changes.
   compose roots are really mounted.
 - **Settings you can move**: a file of everything set here rather than by the environment,
   restored through the ordinary settings write. Secrets are left out and named.
+- **Backups that are actually consistent** — one endpoint, one file, safe to take while
+  Silt is running. Copying `silt.db` off the volume is not, and does not say so.
 - **Sessions are rows, not signed cookies** — they survive a restart, signing out revokes
   them server-side, and one button ends all of them.
 - **An audit log** of who changed a setting, who pruned history, who signed in and who was
@@ -244,6 +246,8 @@ table is in [`PROJECT.md`](PROJECT.md#13-config-reference); the ones people actu
 | `SILT_KEEP_KEYS` | *(empty)* | Extra env keys kept readable |
 | `SILT_NOTIFY_URLS` | *(empty)* | shoutrrr targets |
 | `SILT_INGEST_TOKEN` | *(empty)* | Enables the webhook |
+| `SILT_INGEST_RATE_PER_MINUTE` | `60` | Webhook events per source address; `0` disables |
+| `SILT_COOKIE_SECURE` | `auto` | `Secure` on the session cookie — set `always` if TLS terminates at your proxy |
 | `SILT_LOG_LEVEL` | `info` | |
 
 <details>
@@ -307,6 +311,7 @@ exists.
 | `SILT_OIDC_REDIRECT_URL` | Defaults to `$SILT_BASE_URL/api/auth/callback`. |
 | `SILT_OIDC_ALLOWED_GROUPS` / `SILT_OIDC_ALLOWED_USERS` | Optional. Both empty admits anyone the provider authenticates. |
 | `SILT_OIDC_ADMIN_GROUPS` | Read-only for everyone else. Empty means everyone admitted may change everything. |
+| `SILT_OIDC_ADMIN_TTL` | Default `12h`. Groups are read at sign-in, so this bounds how long a removed administrator stays one. The session keeps working, read-only. |
 | `SILT_ADMIN_GROUPS` + `SILT_AUTH_GROUPS_HEADER` | The same split behind a forward-auth proxy. |
 | `SILT_OIDC_GROUPS_CLAIM` / `SILT_OIDC_USERNAME_CLAIM` | Default `groups` and `preferred_username`; providers disagree. |
 | `SILT_TRUST_PROXY_AUTH` + `SILT_AUTH_HEADER` | Believe an identity your reverse proxy asserts. |
@@ -359,6 +364,27 @@ misconfigured volume, a shared debug bundle.
 A test plants a sentinel string in every secret-shaped field, runs a full snapshot write
 plus prune and GC, then byte-scans the database file, its WAL, every decompressed blob and
 captured debug logs. It runs in CI.
+
+<br />
+
+## Backing it up
+
+**Do not copy `silt.db`.** The database runs in WAL mode, so at any moment the committed
+state is spread across `silt.db`, `silt.db-wal` and `silt.db-shm`. A copy of the first one
+taken while Silt is running opens cleanly, reports no error, and is missing whatever had
+not been checkpointed — a failure that surfaces on the day you restore it.
+
+Use the backup endpoint, which writes one consistent snapshot with `VACUUM INTO`:
+
+```bash
+curl -fsSL --cookie "silt_session=$TOKEN" \
+  https://silt.example.lan/api/maintenance/backup -o silt-backup.db
+```
+
+Or press **Download backup** under Settings → Storage. The result is an ordinary SQLite
+database: restore it by stopping Silt and putting it where `SILT_DB_PATH` points. It needs
+an administrator — the file is every project, every captured Compose file and the audit
+trail in one download.
 
 <br />
 

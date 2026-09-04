@@ -1,7 +1,9 @@
 package api_test
 
 import (
+	"bytes"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -71,5 +73,27 @@ func TestTheSinglePageAppStillOwnsEverythingElse(t *testing.T) {
 		default:
 			t.Errorf("GET %s = %d %.80s; the API fallback answered a client-side route", path, code, body)
 		}
+	}
+}
+
+// The OIDC identity is built in exactly one place.
+//
+// This is a source-level guard because the bug it prevents is not visible in
+// any response: the callback used to construct auth.Identity by hand and leave
+// Role unset, which ParseRole reads as administrator. Every account the
+// provider admitted became an administrator while the settings screen happily
+// reported SILT_OIDC_ADMIN_GROUPS as configured. Nothing observable was wrong
+// until someone checked what a viewer could do.
+func TestTheHandlerDoesNotBuildAnOIDCIdentityItself(t *testing.T) {
+	source, err := os.ReadFile("auth.go")
+	if err != nil {
+		t.Fatalf("read auth.go: %v", err)
+	}
+	if bytes.Contains(source, []byte("Method: auth.MethodOIDC")) {
+		t.Error("internal/api/auth.go constructs an OIDC identity directly; " +
+			"use auth.IdentityFor, which reads the role from the claims")
+	}
+	if !bytes.Contains(source, []byte("auth.IdentityFor(")) {
+		t.Error("the callback no longer goes through auth.IdentityFor")
 	}
 }

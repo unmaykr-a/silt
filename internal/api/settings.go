@@ -37,6 +37,9 @@ type settingsValues struct {
 	NotifyOn               []string `json:"notify_on"`
 	NotifyMinSeverity      string   `json:"notify_min_severity"`
 	IngestConfigured       bool     `json:"ingest_configured"`
+	// IngestRatePerMinute is the per-source cap on webhook events. It is a
+	// value rather than a secret, so unlike the token it is readable.
+	IngestRatePerMinute int `json:"ingest_rate_per_minute"`
 }
 
 // settingsFixed is the half that cannot be edited here.
@@ -95,7 +98,11 @@ type settingsIdentity struct {
 	RolesEnabled     bool  `json:"roles_enabled"`
 	SessionTTLMS     int64 `json:"session_ttl_ms"`
 	SessionIdleTTLMS int64 `json:"session_idle_ttl_ms"`
-	MetricsPublic    bool  `json:"metrics_public"`
+	// OIDCAdminTTLMS bounds how long a provider-granted administrator role
+	// survives without a fresh sign-in. 0 means it does not lapse.
+	OIDCAdminTTLMS int64  `json:"oidc_admin_ttl_ms"`
+	CookieSecure   string `json:"cookie_secure"`
+	MetricsPublic  bool   `json:"metrics_public"`
 }
 
 type settingsUsage struct {
@@ -144,6 +151,7 @@ func toValues(c config.Config) settingsValues {
 		NotifyOn:               c.NotifyOn,
 		NotifyMinSeverity:      c.NotifyMinSeverity,
 		IngestConfigured:       c.IngestToken != "",
+		IngestRatePerMinute:    c.IngestRatePerMinute,
 	}
 	if v.KeepKeys == nil {
 		v.KeepKeys = []string{}
@@ -235,6 +243,8 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 		RolesEnabled:      len(effective.OIDCAdminGroups) > 0 || len(effective.AdminGroups) > 0,
 		SessionTTLMS:      effective.SessionTTL.Milliseconds(),
 		SessionIdleTTLMS:  effective.SessionIdleTTL.Milliseconds(),
+		OIDCAdminTTLMS:    effective.OIDCAdminTTL.Milliseconds(),
+		CookieSecure:      effective.CookieSecure,
 		MetricsPublic:     effective.MetricsPublic,
 	}
 	out.Checks = effective.Checks()

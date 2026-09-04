@@ -28,6 +28,10 @@ func (p proj) ProjectName() string       { return p.name }
 func (p proj) ProjectWorkingDir() string { return "/srv/" + p.name }
 func (p proj) ConfigFiles() []string     { return []string{"/srv/" + p.name + "/compose.yaml"} }
 
+// testIngestLimit is the fixture's per-minute ingest allowance. Small so a
+// test can send all of it without sending sixty requests.
+const testIngestLimit = 5
+
 type fakeSnapshotter struct{ calls []int64 }
 
 func (f *fakeSnapshotter) SnapshotProject(_ context.Context, id int64) error {
@@ -45,6 +49,8 @@ type fixture struct {
 	snapshotA int64
 	snapshotB int64
 	ingestTok string
+	// Small on purpose: the rate-limit tests send the whole allowance.
+	ingestLimit int
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -125,14 +131,15 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 	hub := api.NewHub(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	snaps := &fakeSnapshotter{}
 	cfg := config.Config{
-		IngestToken:       "test-token",
-		ListenAddr:        ":8375",
-		LogLevel:          "info",
-		DockerHost:        "tcp://docker-socket-proxy:2375",
-		DBPath:            filepath.Join(t.TempDir(), "silt.db"),
-		SnapshotInterval:  5 * time.Minute,
-		RetentionInterval: time.Hour,
-		RetentionDays:     365,
+		IngestToken:         "test-token",
+		IngestRatePerMinute: testIngestLimit,
+		ListenAddr:          ":8375",
+		LogLevel:            "info",
+		DockerHost:          "tcp://docker-socket-proxy:2375",
+		DBPath:              filepath.Join(t.TempDir(), "silt.db"),
+		SnapshotInterval:    5 * time.Minute,
+		RetentionInterval:   time.Hour,
+		RetentionDays:       365,
 
 		UnchangedRetentionDays: 7,
 		EventRetentionDays:     90,
@@ -179,6 +186,7 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 	return &fixture{
 		srv: ts, api: server, store: db, hub: hub, snapshots: snaps,
 		projectID: projectID, snapshotA: a.ID, snapshotB: b.ID, ingestTok: "test-token",
+		ingestLimit: testIngestLimit,
 	}
 }
 

@@ -32,6 +32,7 @@ const (
 	AuditNotifyTested    = "settings.notifications_tested"
 
 	AuditPrune           = "maintenance.prune"
+	AuditBackup          = "maintenance.backup"
 	AuditSnapshotForced  = "maintenance.snapshot"
 	AuditRedactionAdded  = "redaction.rule_added"
 	AuditRedactionRemove = "redaction.rule_removed"

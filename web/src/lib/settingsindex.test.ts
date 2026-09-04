@@ -103,9 +103,16 @@ describe("the words people actually type", () => {
     ["viewer", "roles"],
     ["SILT_OIDC_ADMIN_GROUPS", "oidc_admin_groups"],
     ["export", "export"],
-    ["backup", "export"],
+    // "backup" used to land on the settings export, which is the wrong answer
+    // to it: the settings can be retyped and the history cannot.
+    ["backup", "backup"],
+    ["restore", "backup"],
+    ["sqlite", "backup"],
     ["does it work", "probes"],
     ["mounted", "probes"],
+    ["rate limit", "ingest_rate"],
+    ["stale", "oidc_admin_ttl"],
+    ["https", "cookie_secure"],
   ];
 
   for (const [query, want] of cases) {

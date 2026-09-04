@@ -164,6 +164,10 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 			method: "POST", url: "/api/ingest", body: `{"type":"contract.test"}`,
 			headers: auth, wantStatus: 202,
 		},
+		// A SQLite file rather than JSON, so there is no schema to check —
+		// that it is a database and not an error page is what matters, and
+		// backup_test.go asserts that.
+		"backup":  {method: "GET", url: "/api/maintenance/backup", wantStatus: 200},
 		"healthz": {method: "GET", url: "/healthz", wantStatus: 200},
 		"readyz":  {method: "GET", url: "/readyz", wantStatus: 200},
 		"metrics": {method: "GET", url: "/metrics", wantStatus: 200},

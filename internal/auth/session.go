@@ -68,6 +68,14 @@ type Identity struct {
 	Name    string
 	Method  Method
 	Role    Role
+	// AdminLapsed marks a session that was issued as an administrator and has
+	// been one for longer than the provider's answer is good for.
+	//
+	// Carried rather than inferred so the refusal can say why. "Read-only
+	// access" to someone who signed in as an administrator this morning is a
+	// bug report; "your administrator rights expired, sign in again" is an
+	// instruction.
+	AdminLapsed bool
 }
 
 // IsAdmin reports whether this identity may change Silt's configuration.
@@ -89,6 +97,9 @@ type Sessions struct {
 	TTL time.Duration
 	// IdleTTL ends a session that has not been used. Zero disables it.
 	IdleTTL time.Duration
+	// AdminTTL bounds how long a provider-granted administrator role survives
+	// without a fresh sign-in. Zero disables the lapse. See config.Config.
+	AdminTTL time.Duration
 	// Now is swappable for tests.
 	Now func() time.Time
 }
@@ -180,12 +191,32 @@ func (s *Sessions) Lookup(ctx context.Context, token string) (Identity, error) {
 		})
 	}
 
-	return Identity{
+	id := Identity{
 		Subject: row.Subject,
 		Name:    row.Name,
 		Method:  Method(row.Method),
 		Role:    ParseRole(row.Role),
-	}, nil
+	}
+	if s.adminLapsed(id, time.UnixMilli(row.CreatedAt), now) {
+		id.Role = RoleViewer
+		id.AdminLapsed = true
+	}
+	return id, nil
+}
+
+// adminLapsed reports whether this session's administrator rights have outlived
+// the answer that granted them.
+//
+// Only OIDC, and only admin. Forward auth re-reads its groups from the header
+// on every request, so it is never stale. The built-in account has no external
+// source that could have changed its mind, and expiring its rights would lock
+// the sole operator out of their own settings on a timer. A viewer has nothing
+// to lose.
+func (s *Sessions) adminLapsed(id Identity, issued, now time.Time) bool {
+	if s.AdminTTL <= 0 || id.Method != MethodOIDC || id.Role != RoleAdmin {
+		return false
+	}
+	return now.Sub(issued) > s.AdminTTL
 }
 
 // Revoke ends one session. Unknown tokens are not an error: signing out twice

@@ -302,6 +302,13 @@ func (o *OIDC) extract(subject string, raw map[string]any) Claims {
 // provider authenticated, which is a deliberate default: the point of pointing
 // Silt at a provider is to let the provider decide.
 func (o *OIDC) Allowed(c Claims) bool {
+	// A disabled provider admits nobody. Nothing reaches this with a nil
+	// receiver today, because the callback is only routed when OIDC is on —
+	// but Enabled() is explicitly nil-safe, so the rest of the type should be,
+	// and the safe answer for "is this person allowed" is no.
+	if o == nil {
+		return false
+	}
 	if len(o.cfg.AllowedGroups) == 0 && len(o.cfg.AllowedUsers) == 0 {
 		return true
 	}
@@ -327,7 +334,49 @@ func (o *OIDC) Allowed(c Claims) bool {
 // lockout for the person who configured it would be the worst possible
 // default.
 func (o *OIDC) RoleFor(c Claims) Role {
+	if o == nil {
+		return RoleViewer
+	}
 	return RoleFromGroups(o.cfg.AdminGroups, c.Groups)
+}
+
+// IdentityFor decides which identity a set of verified provider claims signs in
+// as, and whether they sign in at all.
+//
+// Two separate questions, in this order, because conflating them was a bug in
+// both directions.
+//
+// The allowlist decides whether you get in. The link decides which account you
+// land in once you are. The callback used to check the link first and on its
+// own, so a linked subject skipped the allowlist entirely — removing that
+// person from the permitted group in the provider left them still signing in,
+// as the administrator, which is the opposite of what removing them meant.
+//
+// And the role has to be read from the claims here. The callback used to build
+// the Identity by hand and leave Role unset, which ParseRole reads as
+// administrator: SILT_OIDC_ADMIN_GROUPS was configured, reported on the
+// settings screen, and did nothing at all. That is why this lives beside the
+// rules it applies rather than in the handler — there is one way to turn claims
+// into an identity, and it is this.
+func IdentityFor(o *OIDC, account *Account, claims Claims) (Identity, bool) {
+	if !o.Allowed(claims) {
+		return Identity{}, false
+	}
+	id := Identity{
+		Subject: claims.Subject,
+		Name:    claims.Display(),
+		Method:  MethodOIDC,
+		Role:    o.RoleFor(claims),
+	}
+	// The link stays more specific than a group — an explicit statement about
+	// one identity should beat a membership rule — and the built-in account is
+	// the operator's own, so reaching it is administrator access whatever the
+	// group rules would have said about the provider identity that got here.
+	if account.LinkedTo(claims.Subject) {
+		id.Subject = LocalSubject
+		id.Role = RoleAdmin
+	}
+	return id, true
 }
 
 // RoleFromGroups is the rule itself, shared with forward auth: the same split
