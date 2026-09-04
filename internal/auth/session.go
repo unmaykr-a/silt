@@ -32,12 +32,46 @@ const (
 	MethodProxy    Method = "proxy"
 )
 
-// Identity is who is asking.
+// Role is what an identity may do.
+//
+// Silt is already read-only against Docker; the split that matters is between
+// reading the journal and changing Silt's own configuration. There is no roles
+// table: the provider already manages groups, and duplicating them here would
+// be two sources of truth that agree until they do not. See PROJECT.md
+// Section 14.
+type Role string
+
+const (
+	// RoleAdmin may change Silt's configuration.
+	RoleAdmin Role = "admin"
+	// RoleViewer may read every screen and change nothing but their own
+	// appearance preferences, which live in their browser anyway.
+	RoleViewer Role = "viewer"
+)
+
+// ParseRole reads a stored or configured role, defaulting to admin.
+//
+// Defaulting to admin rather than viewer on purpose: every path that reaches
+// here predates roles or is the operator's own account, and silently demoting
+// someone who could previously change everything looks like Silt breaking. A
+// viewer is only ever produced by a rule that explicitly says so.
+func ParseRole(v string) Role {
+	if Role(v) == RoleViewer {
+		return RoleViewer
+	}
+	return RoleAdmin
+}
+
+// Identity is who is asking, and what they may do.
 type Identity struct {
 	Subject string
 	Name    string
 	Method  Method
+	Role    Role
 }
+
+// IsAdmin reports whether this identity may change Silt's configuration.
+func (i Identity) IsAdmin() bool { return i.Role != RoleViewer }
 
 // LocalSubject is the subject recorded for the password login. There is one
 // password, so there is one account behind it.
@@ -97,6 +131,7 @@ func (s *Sessions) Issue(ctx context.Context, id Identity) (string, error) {
 		Subject:    id.Subject,
 		Name:       id.Name,
 		Method:     string(id.Method),
+		Role:       string(ParseRole(string(id.Role))),
 		CreatedAt:  now.UnixMilli(),
 		LastSeenAt: now.UnixMilli(),
 		ExpiresAt:  now.Add(s.TTL).UnixMilli(),
@@ -145,7 +180,12 @@ func (s *Sessions) Lookup(ctx context.Context, token string) (Identity, error) {
 		})
 	}
 
-	return Identity{Subject: row.Subject, Name: row.Name, Method: Method(row.Method)}, nil
+	return Identity{
+		Subject: row.Subject,
+		Name:    row.Name,
+		Method:  Method(row.Method),
+		Role:    ParseRole(row.Role),
+	}, nil
 }
 
 // Revoke ends one session. Unknown tokens are not an error: signing out twice

@@ -21,8 +21,8 @@ func (q *Queries) CountSessions(ctx context.Context) (int64, error) {
 }
 
 const createSession = `-- name: CreateSession :exec
-INSERT INTO sessions (token_hash, subject, name, method, created_at, last_seen_at, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO sessions (token_hash, subject, name, method, role, created_at, last_seen_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateSessionParams struct {
@@ -30,6 +30,7 @@ type CreateSessionParams struct {
 	Subject    string
 	Name       string
 	Method     string
+	Role       string
 	CreatedAt  int64
 	LastSeenAt int64
 	ExpiresAt  int64
@@ -41,6 +42,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 		arg.Subject,
 		arg.Name,
 		arg.Method,
+		arg.Role,
 		arg.CreatedAt,
 		arg.LastSeenAt,
 		arg.ExpiresAt,
@@ -87,19 +89,31 @@ func (q *Queries) DeleteSessionsForSubject(ctx context.Context, subject string) 
 }
 
 const getSession = `-- name: GetSession :one
-SELECT token_hash, subject, name, method, created_at, last_seen_at, expires_at
+SELECT token_hash, subject, name, method, role, created_at, last_seen_at, expires_at
 FROM sessions
 WHERE token_hash = ?
 `
 
-func (q *Queries) GetSession(ctx context.Context, tokenHash string) (Session, error) {
+type GetSessionRow struct {
+	TokenHash  string
+	Subject    string
+	Name       string
+	Method     string
+	Role       string
+	CreatedAt  int64
+	LastSeenAt int64
+	ExpiresAt  int64
+}
+
+func (q *Queries) GetSession(ctx context.Context, tokenHash string) (GetSessionRow, error) {
 	row := q.db.QueryRowContext(ctx, getSession, tokenHash)
-	var i Session
+	var i GetSessionRow
 	err := row.Scan(
 		&i.TokenHash,
 		&i.Subject,
 		&i.Name,
 		&i.Method,
+		&i.Role,
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.ExpiresAt,

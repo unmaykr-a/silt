@@ -158,6 +158,8 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"overview":            {method: "GET", url: "/api/overview", wantStatus: 200, schema: "Overview"},
 		"listAudit":           {method: "GET", url: "/api/audit", wantStatus: 200, schema: "AuditLog"},
 		"testNotifications":   {method: "POST", url: "/api/settings/notifications/test", wantStatus: 200, schema: "NotifyTestResults"},
+		"getProbes":           {method: "GET", url: "/api/settings/probes", wantStatus: 200, schema: "Probes"},
+		"exportSettings":      {method: "GET", url: "/api/settings/export", wantStatus: 200, schema: "SettingsExport"},
 		"ingest": {
 			method: "POST", url: "/api/ingest", body: `{"type":"contract.test"}`,
 			headers: auth, wantStatus: 202,

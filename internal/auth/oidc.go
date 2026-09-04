@@ -34,6 +34,10 @@ type OIDCConfig struct {
 	// because the provider is doing the deciding.
 	AllowedGroups []string
 	AllowedUsers  []string
+	// AdminGroups splits reading from administering. Empty means everyone
+	// admitted is an administrator, which is what Silt did before roles
+	// existed.
+	AdminGroups []string
 }
 
 // OIDC is a configured provider, ready to start and finish a login.
@@ -221,7 +225,12 @@ func (o *OIDC) Finish(ctx context.Context, flow Flow, state, code string) (Ident
 	if !o.Allowed(claims) {
 		return Identity{}, &ErrNotAllowed{Subject: claims.Display()}
 	}
-	return Identity{Subject: claims.Subject, Name: claims.Display(), Method: MethodOIDC}, nil
+	return Identity{
+		Subject: claims.Subject,
+		Name:    claims.Display(),
+		Method:  MethodOIDC,
+		Role:    o.RoleFor(claims),
+	}, nil
 }
 
 // Exchange completes the round trip and returns the verified claims, without
@@ -309,6 +318,32 @@ func (o *OIDC) Allowed(c Claims) bool {
 		}
 	}
 	return false
+}
+
+// RoleFor decides what an admitted identity may do.
+//
+// No admin group configured means everyone admitted is an administrator: that
+// is what Silt did before roles existed, and turning an upgrade into a
+// lockout for the person who configured it would be the worst possible
+// default.
+func (o *OIDC) RoleFor(c Claims) Role {
+	return RoleFromGroups(o.cfg.AdminGroups, c.Groups)
+}
+
+// RoleFromGroups is the rule itself, shared with forward auth: the same split
+// should not be spelled differently depending on which proxy asserted it.
+func RoleFromGroups(adminGroups, has []string) Role {
+	if len(adminGroups) == 0 {
+		return RoleAdmin
+	}
+	for _, want := range adminGroups {
+		for _, group := range has {
+			if equalFold(want, group) {
+				return RoleAdmin
+			}
+		}
+	}
+	return RoleViewer
 }
 
 func equalFold(a, b string) bool {

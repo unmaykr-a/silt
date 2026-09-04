@@ -39,6 +39,7 @@ type Server struct {
 	gate        *Gate
 	files       FileReader
 	live        *settings.Live
+	prober      Prober
 }
 
 // conf returns the configuration in force right now.
@@ -123,6 +124,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/sessions", s.getSessions)
 	mux.HandleFunc("DELETE /api/auth/sessions", s.deleteSessions)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("GET /api/settings/probes", s.getProbes)
+	mux.HandleFunc("GET /api/settings/export", s.exportSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("DELETE /api/settings", s.deleteSettings)
 	mux.HandleFunc("POST /api/settings/notifications/test", s.testNotifications)

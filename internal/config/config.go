@@ -79,6 +79,16 @@ type Config struct {
 	TrustProxyAuth bool `env:"SILT_TRUST_PROXY_AUTH" envDefault:"false"`
 	// AuthHeader is the forward-auth header name.
 	AuthHeader string `env:"SILT_AUTH_HEADER" envDefault:"X-Remote-User"`
+	// AuthGroupsHeader carries the groups a forward-auth proxy asserts, so
+	// the same admin split works there as under OIDC. Authelia and authentik
+	// both send one; the value is comma-separated.
+	//
+	// Only consulted when AdminGroups is set — without it there is nothing to
+	// compare against, and reading an attacker-settable header for no reason
+	// is a habit worth not having.
+	AuthGroupsHeader string `env:"SILT_AUTH_GROUPS_HEADER" envDefault:"X-Remote-Groups"`
+	// AdminGroups is the forward-auth equivalent of OIDCAdminGroups.
+	AdminGroups []string `env:"SILT_ADMIN_GROUPS" envSeparator:","`
 	// TrustedProxies are the addresses or CIDR ranges whose forward-auth
 	// header is believed.
 	//
@@ -112,6 +122,14 @@ type Config struct {
 	// OIDCUsernameClaim and OIDCGroupsClaim differ between providers.
 	OIDCUsernameClaim string `env:"SILT_OIDC_USERNAME_CLAIM" envDefault:"preferred_username"`
 	OIDCGroupsClaim   string `env:"SILT_OIDC_GROUPS_CLAIM" envDefault:"groups"`
+	// OIDCAdminGroups splits reading from administering. Empty means everyone
+	// admitted is an administrator, which is what Silt did before roles
+	// existed and what a provider carrying only your own accounts wants.
+	//
+	// A group rather than a roles table: the provider already manages groups,
+	// and duplicating them here would be two sources of truth that agree until
+	// they do not. See PROJECT.md Section 14.
+	OIDCAdminGroups []string `env:"SILT_OIDC_ADMIN_GROUPS" envSeparator:","`
 	// OIDCAllowedGroups and OIDCAllowedUsers restrict who may sign in. Both
 	// empty admits anyone the provider authenticates.
 	OIDCAllowedGroups []string `env:"SILT_OIDC_ALLOWED_GROUPS" envSeparator:","`

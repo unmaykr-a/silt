@@ -984,6 +984,51 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AuditLog" }
 
+  /api/settings/probes:
+    get:
+      tags: [system]
+      summary: Live configuration probes
+      description: |
+        Asks rather than infers: does the Docker endpoint answer, is the
+        database readable, is each configured compose root actually mounted?
+        The setup checks read the configuration; these test it.
+
+        On demand rather than on the settings payload, because each touches the
+        network or the filesystem and a settings screen that hits the Docker
+        socket every render is one nobody should open during an incident.
+      operationId: getProbes
+      responses:
+        "200":
+          description: Probe results
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Probes" }
+
+  /api/settings/export:
+    get:
+      tags: [system]
+      summary: The override document, portable
+      description: |
+        Settings are stored as a sparse patch on top of the environment, so
+        this is that document with a header saying where it came from. Import
+        it with `PUT /api/settings`.
+
+        Secrets are stripped and named in `omitted`: a shoutrrr URL carries the
+        credential for the service it points at, and neither it nor the ingest
+        token becomes readable by being called an export.
+      operationId: exportSettings
+      responses:
+        "200":
+          description: The export document
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SettingsExport" }
+        "503":
+          description: Settings are read-only in this configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/settings:
     get:
       tags: [system]
@@ -1758,6 +1803,48 @@ components:
             legal, working, and probably not what was meant. Not validation —
             anything actually wrong refuses to start.
 
+    Probes:
+      type: object
+      required: [checked_at, probes]
+      properties:
+        checked_at: { type: integer, format: int64 }
+        probes:
+          type: array
+          items:
+            type: object
+            required: [id, label, ok, detail, took_ms]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              ok: { type: boolean }
+              detail:
+                type: string
+                description: The answer when ok, the reason when not.
+              took_ms:
+                type: integer
+                format: int64
+                description: |
+                  Its own signal: a Docker endpoint answering in four seconds
+                  is working and worth knowing about.
+
+    SettingsExport:
+      type: object
+      required: [silt, release, host_name, exported_at, settings, note]
+      properties:
+        silt: { type: string, enum: [settings] }
+        release: { type: string }
+        host_name: { type: string }
+        exported_at: { type: integer, format: int64 }
+        settings: { $ref: "#/components/schemas/SettingsPatch" }
+        omitted:
+          type: array
+          items: { type: string }
+          description: |
+            Secret fields that were set and left out, named rather than
+            silently dropped — a file that quietly omits your notification
+            targets is a restore that quietly stops notifying.
+        note: { type: string }
+
     SettingsIdentity:
       type: object
       description: |
@@ -1769,7 +1856,8 @@ components:
         [mode, local_account, password_hash_set, trust_proxy_auth, auth_header,
          trusted_proxies, oidc_issuer, oidc_client_id, oidc_secret_set,
          oidc_redirect_url, oidc_scopes, oidc_username_claim, oidc_groups_claim,
-         oidc_allowed_groups, oidc_allowed_users, session_ttl_ms,
+         oidc_allowed_groups, oidc_allowed_users, oidc_admin_groups,
+         admin_groups, auth_groups_header, roles_enabled, session_ttl_ms,
          session_idle_ttl_ms, metrics_public]
       properties:
         mode:
@@ -1797,6 +1885,21 @@ components:
         oidc_allowed_users:
           type: array
           items: { type: string }
+        oidc_admin_groups:
+          type: array
+          items: { type: string }
+          description: |
+            Membership of one of these makes an OIDC identity an administrator.
+            Empty means everyone admitted is one, which is what Silt did before
+            roles existed.
+        admin_groups:
+          type: array
+          items: { type: string }
+          description: The forward-auth equivalent.
+        auth_groups_header: { type: string }
+        roles_enabled:
+          type: boolean
+          description: Whether anyone is a viewer rather than an administrator.
         session_ttl_ms: { type: integer, format: int64 }
         session_idle_ttl_ms: { type: integer, format: int64 }
         metrics_public: { type: boolean }
@@ -1894,7 +1997,7 @@ components:
       required:
         [required, password_enabled, oidc_enabled, proxy_enabled, authenticated,
          setup_required, setup_only, min_password_length, local_available,
-         local_enabled, local_managed, local_linked]
+         local_enabled, local_managed, local_linked, role]
       properties:
         required:
           type: boolean
@@ -1944,6 +2047,16 @@ components:
         local_linked:
           type: boolean
           description: Whether a provider identity reaches this account.
+        role:
+          type: string
+          enum: [admin, viewer]
+          description: |
+            What this identity may do. An administrator changes Silt's
+            configuration; a viewer reads every screen and changes nothing but
+            their own appearance preferences, which live in their browser.
+
+            The UI reads it to stop offering controls that would be refused —
+            a save button that always fails is worse than no save button.
 
     SessionCount:
       type: object

@@ -210,6 +210,10 @@ func run() error {
 	apiServer.SetSettings(live)
 	apiServer.SetAuth(gate)
 	apiServer.SetFiles(fileReader)
+	// The live probe answers "does the Docker endpoint respond right now?",
+	// which no other screen can tell you apart from a host that simply has
+	// nothing running on it.
+	apiServer.SetProber(dockerProbe{dc})
 	srv := apiServer.HTTPServer(cfg)
 
 	errc := make(chan error, 1)
@@ -262,6 +266,7 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 	if err != nil {
 		return nil, err
 	}
+	proxy = proxy.WithAdminGroups(cfg.AuthGroupsHeader, cfg.AdminGroups)
 
 	// Discovery reaches the network, so a provider that is down is a warning
 	// and a disabled login rather than a refusal to start. Silt's job is to
@@ -277,6 +282,7 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 		GroupsClaim:   cfg.OIDCGroupsClaim,
 		AllowedGroups: cfg.OIDCAllowedGroups,
 		AllowedUsers:  cfg.OIDCAllowedUsers,
+		AdminGroups:   cfg.OIDCAdminGroups,
 	})
 	oidcError := ""
 	if err != nil {
@@ -345,4 +351,12 @@ func originsOf(baseURL string) []string {
 		return nil
 	}
 	return []string{u.Scheme + "://" + u.Host}
+}
+
+// dockerProbe adapts the Docker client to the API's live-probe interface,
+// which keeps the API package free of a Docker dependency.
+type dockerProbe struct{ client *docker.Client }
+
+func (p dockerProbe) DockerVersion(ctx context.Context) (string, error) {
+	return p.client.Version(ctx)
 }

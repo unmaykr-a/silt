@@ -57,6 +57,7 @@ export const SECTIONS: { id: SectionID; label: string }[] = [
 
 export const SETTINGS: SettingEntry[] = [
   { name: "checks", section: "setup", label: "Configuration review", keywords: "warnings problems health is this set up correctly" },
+  { name: "probes", section: "setup", label: "Live checks", keywords: "does it work docker reachable mounted test connection probe" },
 
   // Appearance — this browser, not the install.
   { name: "theme", section: "appearance", label: "Theme", keywords: "dark light system colour color" },
@@ -101,6 +102,10 @@ export const SETTINGS: SettingEntry[] = [
   { name: "oidc_client", section: "identity", label: "OIDC client", env: "SILT_OIDC_CLIENT_ID", keywords: "client id secret" },
   { name: "oidc_claims", section: "identity", label: "OIDC claims", env: "SILT_OIDC_USERNAME_CLAIM", keywords: "groups username claim" },
   { name: "oidc_allowed", section: "identity", label: "Who may sign in", env: "SILT_OIDC_ALLOWED_GROUPS", keywords: "allowlist groups users restrict" },
+  { name: "roles", section: "identity", label: "Roles", keywords: "admin administrator viewer read only readonly permissions who can change" },
+  { name: "oidc_admin_groups", section: "identity", label: "Administrator groups", env: "SILT_OIDC_ADMIN_GROUPS", keywords: "admin role viewer read only oidc" },
+  { name: "admin_groups", section: "identity", label: "Administrator groups (forward auth)", env: "SILT_ADMIN_GROUPS", keywords: "admin role viewer read only proxy" },
+  { name: "auth_groups_header", section: "identity", label: "Groups header", env: "SILT_AUTH_GROUPS_HEADER", keywords: "x-remote-groups forward auth admin" },
   { name: "local_account", section: "identity", label: "Built-in account", env: "SILT_LOCAL_ACCOUNT" },
   { name: "metrics_public", section: "identity", label: "Public metrics", env: "SILT_METRICS_PUBLIC", keywords: "prometheus scrape unauthenticated" },
 
@@ -115,6 +120,7 @@ export const SETTINGS: SettingEntry[] = [
   // Storage.
   { name: "usage", section: "storage", label: "Storage used", keywords: "size disk blobs deduplicated" },
   { name: "prune", section: "storage", label: "Prune now", keywords: "delete old garbage collect vacuum reclaim" },
+  { name: "export", section: "storage", label: "Download settings", keywords: "export import backup restore move migrate json" },
 ];
 
 export type SearchHit = SettingEntry & { sectionLabel: string };

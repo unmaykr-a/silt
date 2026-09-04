@@ -39,6 +39,19 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "0.16.0",
+		Date:    "2026-09-04",
+		Summary: "Read-only access, checks that test rather than infer, and settings you can move.",
+		Entries: []Entry{
+			{Added, "Read-only access. SILT_OIDC_ADMIN_GROUPS — or SILT_ADMIN_GROUPS behind a forward-auth proxy — splits reading the journal from changing Silt's own configuration. Everyone else reads every screen and changes nothing but their own appearance preferences, which live in their browser anyway. No roles table: the provider already manages groups, and duplicating them here would be two sources of truth that agree until they do not."},
+			{Security, "The write guard is one rule rather than a list of protected routes: every unsafe method under /api that is not part of authenticating needs an administrator. A per-route list is a list that grows a hole the next time an endpoint is added, and the hole is silent — the endpoint simply works for everyone."},
+			{Added, "Live checks on the Setup screen. The configuration review reads your settings; these ask them: does the Docker endpoint answer, is the database readable, is each compose root actually mounted? A root you configured and never mounted looks exactly like a project with no files from every other screen, and until now nothing could tell you which it was."},
+			{Added, "Settings export. Silt stores settings as a sparse patch on top of the environment, so the file is that document with a header — restore it through the ordinary settings write, which gets the ordinary validation. Secrets are left out and named in the file rather than silently dropped: a notification target restored as a blank is a restore that quietly stops notifying."},
+			{Fixed, "Searching the settings for \"admin\", \"read only\", \"backup\" or \"mounted\" found nothing, because the index had no entry for anything added after it was written. The terms are now pinned by tests."},
+			{Changed, "Releases publish themselves when a version bump reaches main, rather than waiting for someone to push a tag. Tagging by hand is a step that gets forgotten — it had been, for fifteen releases — and it needs a working git remote from wherever the release is cut. The changelog already names the version; CI creates the tag and publishes the notes from it."},
+		},
+	},
+	{
 		Version: "0.15.0",
 		Date:    "2026-09-04",
 		Summary: "Settings you can search, an authentication screen that shows what is in effect, and a review that says whether the install is set up.",

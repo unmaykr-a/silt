@@ -131,6 +131,28 @@ func (s *Server) isPublic(path string) bool {
 	}
 }
 
+// mayWrite applies the reader/administrator split.
+//
+// One rule rather than a list of protected routes: every safe method is
+// readable by anyone signed in, and every unsafe one under /api that is not
+// part of authenticating needs an administrator. A per-route list is a list
+// that grows a hole the next time an endpoint is added, and the hole is
+// silent — the endpoint simply works for everyone.
+//
+// The public paths are already past this point, so login, logout, setup and
+// the token-authenticated ingest webhook are not affected. What is left is
+// exactly what PROJECT.md Section 14 names: changing Silt's own configuration.
+func (s *Server) mayWrite(id auth.Identity, r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		return true
+	}
+	return id.IsAdmin()
+}
+
 // requireAuth wraps the route tree.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +168,12 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, ok := s.identify(r); ok {
+		if id, ok := s.identify(r); ok {
+			if !s.mayWrite(id, r) {
+				writeError(w, http.StatusForbidden,
+					"read-only access: changing Silt's configuration needs an administrator")
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -233,6 +260,11 @@ type authStateResponse struct {
 	LocalEnabled   bool `json:"local_enabled"`
 	LocalManaged   bool `json:"local_managed"`
 	LocalLinked    bool `json:"local_linked"`
+	// Role is what this identity may do: "admin" changes Silt's configuration,
+	// "viewer" reads every screen and changes nothing. The UI reads it to stop
+	// offering controls that would be refused — a save button that always
+	// fails is worse than no save button.
+	Role string `json:"role"`
 }
 
 func (s *Server) getAuthState(w http.ResponseWriter, r *http.Request) {
@@ -255,11 +287,15 @@ func (s *Server) getAuthState(w http.ResponseWriter, r *http.Request) {
 		out.OIDCIssuer = s.gate.OIDC.Issuer()
 		out.OIDCError = s.gate.OIDCError
 	}
+	out.Role = string(auth.RoleAdmin)
 	if id, ok := s.identify(r); ok && s.gate.Enabled() {
 		out.Authenticated = true
 		out.Subject = id.Name
 		out.Method = string(id.Method)
+		out.Role = string(auth.ParseRole(string(id.Role)))
 	} else if !s.gate.Enabled() {
+		// An install with no authentication has one visitor as far as Silt is
+		// concerned, and they configured it.
 		out.Authenticated = true
 	}
 	writeJSON(w, http.StatusOK, out)

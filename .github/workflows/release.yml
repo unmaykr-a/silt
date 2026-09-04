@@ -80,34 +80,75 @@ jobs:
   # CHANGELOG.md is generated from. Notes written separately are notes that
   # disagree with the changelog by the second release.
   #
-  # Tags only: a push to main publishes an image, which is not a release.
+  # Triggered by the merge, not by a tag. Tagging by hand is a step that gets
+  # forgotten — it was, for fifteen releases — and it is a step that needs a
+  # working git remote from wherever the release is being cut. The changelog
+  # already names the version; if a release for it does not exist yet, this
+  # creates the tag and publishes it. Merging a version bump is the whole
+  # ceremony.
+  #
+  # Idempotent on purpose: every push to main runs this, and all but the one
+  # that bumped the version find the release already there and stop.
   release:
     name: publish the release
-    if: github.ref_type == 'tag'
+    if: github.ref == 'refs/heads/main' || github.ref_type == 'tag'
     needs: publish
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Tags, so an existing release is visible rather than being
+          # published a second time.
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
           cache: true
 
-      - name: Render the notes
-        id: notes
+      - name: Resolve the version
+        id: version
         run: |
-          # Fails the job when the tag names a release the changelog does not
-          # have, which is the shape of every "tagged the wrong thing" mistake.
-          go run ./internal/changelog/cmd/gen --notes "${{ github.ref_name }}" > notes.md
-          echo "--- notes for ${{ github.ref_name }} ---"
-          cat notes.md
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            version="${{ github.ref_name }}"
+          else
+            version="v$(go run ./internal/changelog/cmd/gen --version)"
+          fi
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
+          echo "resolved $version"
 
-      - name: Publish
+      - name: Has it already been published?
+        id: existing
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "Silt ${{ github.ref_name }}" \
-            --notes-file notes.md \
-            --verify-tag
-          gh release view "${{ github.ref_name }}" --json url --jq .url
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.version.outputs.tag }} is already released; nothing to do"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render the notes
+        if: steps.existing.outputs.published == 'false'
+        run: |
+          # Fails the job when the version names a release the changelog does
+          # not have, which is the shape of every "tagged the wrong thing"
+          # mistake.
+          go run ./internal/changelog/cmd/gen --notes "${{ steps.version.outputs.tag }}" > notes.md
+          echo "--- notes for ${{ steps.version.outputs.tag }} ---"
+          cat notes.md
+
+      - name: Publish
+        if: steps.existing.outputs.published == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --target creates the tag at this commit when it does not exist, so
+          # there is no separate tag push to get wrong or to be blocked.
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "${{ github.sha }}" \
+            --title "Silt ${{ steps.version.outputs.tag }}" \
+            --notes-file notes.md
+          gh release view "${{ steps.version.outputs.tag }}" --json url --jq .url

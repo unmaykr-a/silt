@@ -1,5 +1,7 @@
 <script lang="ts">
-  import type { SetupCheck } from "$lib/api/client";
+  import { api, type SetupCheck, type Probes } from "$lib/api/client";
+  import { Button } from "$lib/components/ui/button";
+  import Timestamp from "./Timestamp.svelte";
 
   /**
    * What is worth knowing about this configuration.
@@ -18,6 +20,30 @@
    * off" is worth being able to find and not worth a panel every visit.
    */
   let { checks }: { checks: SetupCheck[] } = $props();
+
+  // The checks read the configuration. These test it — and the difference
+  // matters for the one failure that looks identical to a working install from
+  // every other screen: a compose root configured and never mounted renders
+  // exactly like a project with no files.
+  //
+  // On demand rather than on load: each probe touches the network or the
+  // filesystem, and a settings screen that hits the Docker socket every time
+  // it opens is one nobody should open during an incident.
+  let probes = $state<Probes | null>(null);
+  let probing = $state(false);
+  let probeError = $state<string | null>(null);
+
+  async function runProbes() {
+    probing = true;
+    probeError = null;
+    try {
+      probes = await api.probes();
+    } catch (err) {
+      probeError = (err as Error).message;
+    } finally {
+      probing = false;
+    }
+  }
 
   const attention = $derived(checks.filter((c) => c.level !== "info"));
   const notes = $derived(checks.filter((c) => c.level === "info"));
@@ -97,4 +123,50 @@
       {/if}
     {/if}
   </div>
+</section>
+
+<section class="mt-8">
+  <div class="flex flex-wrap items-baseline justify-between gap-3">
+    <div>
+      <h3 class="text-sm font-semibold">Does it work?</h3>
+      <p class="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+        The review above reads your configuration. This asks it: does the Docker endpoint
+        answer, is the database readable, is each compose root actually mounted? A root you
+        configured and never mounted looks exactly like a project with no files from every
+        other screen.
+      </p>
+    </div>
+    <Button variant="outline" size="sm" onclick={runProbes} disabled={probing}>
+      {probing ? "Checking…" : probes ? "Check again" : "Run checks"}
+    </Button>
+  </div>
+
+  {#if probeError}
+    <p class="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm text-red-500 dark:text-red-300">
+      {probeError}
+    </p>
+  {/if}
+
+  {#if probes}
+    <dl class="mt-3 divide-y divide-border rounded-lg border border-border">
+      {#each probes.probes as probe (probe.id)}
+        <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3.5 py-2.5">
+          <span
+            class="mt-1.5 size-1.5 shrink-0 self-start rounded-full {probe.ok ? 'bg-emerald-500' : 'bg-red-500'}"
+            aria-hidden="true"
+          ></span>
+          <dt class="text-sm">{probe.label}</dt>
+          <dd class="min-w-0 flex-1 font-mono text-xs {probe.ok ? 'text-muted-foreground' : 'text-red-500 dark:text-red-300'}">
+            {probe.detail}
+          </dd>
+          <!-- Its own signal: an endpoint answering in four seconds is
+               working, and worth knowing about. -->
+          <dd class="shrink-0 text-[11px] tabular-nums text-muted-foreground/50">{probe.took_ms} ms</dd>
+        </div>
+      {/each}
+    </dl>
+    <p class="mt-2 text-[11px] text-muted-foreground/60">
+      Checked <Timestamp ts={probes.checked_at} />.
+    </p>
+  {/if}
 </section>

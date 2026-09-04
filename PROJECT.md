@@ -1859,7 +1859,65 @@ Changed:
     of every "tagged the wrong thing" mistake. Notes written separately are
     notes that disagree with the changelog by the second release.
 
-89. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+90. **One rule, not a list of protected routes (0.16.0)** — the reader/
+    administrator split could have been a per-route allowlist. It is a single
+    predicate instead: every safe method is readable by anyone signed in, and
+    every unsafe one under `/api` that is not part of authenticating needs an
+    administrator.
+
+    A per-route list is a list that grows a hole the next time an endpoint is
+    added, and the hole is silent — the endpoint simply works for everyone, and
+    nothing fails to tell you. The tests are written against the same shape:
+    they enumerate the write endpoints and assert 403, so an endpoint added
+    without a test is still covered by the rule.
+
+    The role is stored on the session rather than looked up per request. The
+    answer comes from the provider's groups at sign-in, and asking again on
+    every request would put an outage at the identity provider between a reader
+    and a page they are allowed to read. The column defaults to `admin` so an
+    existing session survives the upgrade: everyone who could sign in before
+    could change everything, and silently demoting them would look like Silt
+    breaking.
+
+91. **Probes ask; checks read (0.16.0)** — the setup review added in 0.15.0
+    reads the configuration and says what looks unintended. It cannot say
+    whether the Docker endpoint answers or whether the compose root you
+    configured is actually mounted, and that second failure is the nastiest one
+    Silt has: a root that was never mounted renders exactly like a project with
+    no files, on every screen.
+
+    On demand rather than on the settings payload, because each probe touches
+    the network or the filesystem and a settings screen that hits the Docker
+    socket every render is one nobody should open during an incident. The
+    elapsed time is reported alongside the result: an endpoint answering in
+    four seconds is working, and worth knowing about.
+
+92. **The export is the override document (0.16.0)** — settings are already
+    stored as a sparse patch on top of the environment, so "export" is that
+    document with a header rather than a new format, and there is no import
+    endpoint at all: `PUT /api/settings` already takes this shape, and a second
+    write path would be a second set of validation rules to keep in step.
+
+    Secrets are stripped and *named*. A shoutrrr URL carries the credential for
+    the service it points at and does not become readable by being called an
+    export — but a file that silently omits your notification targets is a
+    restore that silently stops notifying, so the file says which ones you will
+    have to set again.
+
+93. **Releases publish on merge, not on a tag (0.16.0)** — the tag-triggered
+    workflow added in 0.15.0 was correct and never ran, because pushing the tag
+    is a manual step and manual steps get forgotten. It had been forgotten for
+    fifteen releases; the release badge in the README pointed at an empty page
+    the whole time.
+
+    The changelog already names the version, so the merge is the trigger: if no
+    release exists for the version at the top of `internal/changelog`, CI
+    creates the tag and publishes the notes. Idempotent, so every other push to
+    main finds the release already there and stops. Tagging by hand still
+    works, and `make release` still does it — it is just no longer the only
+    path, and no longer the one that has to be remembered.
+
+94. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't
