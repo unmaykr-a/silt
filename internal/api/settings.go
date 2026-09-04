@@ -55,6 +55,40 @@ type settingsFixed struct {
 	AuthMode            string   `json:"auth_mode"`
 }
 
+// settingsIdentity is how this install decides who you are.
+//
+// Read-only, like the rest of settingsFixed and for the sharper of its two
+// reasons: these are the boundary protecting this screen, so a UI that could
+// edit them would be a way in rather than a setting.
+//
+// Shown at all because twelve environment variables were readable nowhere.
+// When forward auth is not working, or the provider is rejecting everyone, the
+// first question is what Silt thinks it was told — and the only way to answer
+// it was to go and read the compose file on the host.
+//
+// Secrets are reported as configured-or-not, never echoed, exactly as the
+// notification targets and the ingest token already are.
+type settingsIdentity struct {
+	Mode              string   `json:"mode"`
+	LocalAccount      bool     `json:"local_account"`
+	PasswordHashSet   bool     `json:"password_hash_set"`
+	TrustProxyAuth    bool     `json:"trust_proxy_auth"`
+	AuthHeader        string   `json:"auth_header"`
+	TrustedProxies    []string `json:"trusted_proxies"`
+	OIDCIssuer        string   `json:"oidc_issuer"`
+	OIDCClientID      string   `json:"oidc_client_id"`
+	OIDCSecretSet     bool     `json:"oidc_secret_set"`
+	OIDCRedirectURL   string   `json:"oidc_redirect_url"`
+	OIDCScopes        []string `json:"oidc_scopes"`
+	OIDCUsernameClaim string   `json:"oidc_username_claim"`
+	OIDCGroupsClaim   string   `json:"oidc_groups_claim"`
+	OIDCAllowedGroups []string `json:"oidc_allowed_groups"`
+	OIDCAllowedUsers  []string `json:"oidc_allowed_users"`
+	SessionTTLMS      int64    `json:"session_ttl_ms"`
+	SessionIdleTTLMS  int64    `json:"session_idle_ttl_ms"`
+	MetricsPublic     bool     `json:"metrics_public"`
+}
+
 type settingsUsage struct {
 	Blobs             int64 `json:"blobs"`
 	StoredBytes       int64 `json:"stored_bytes"`
@@ -75,9 +109,14 @@ type settingsResponse struct {
 	// Overridden names the fields whose value comes from the database.
 	Overridden []string `json:"overridden"`
 	// Editable is false when there is nowhere to store an override.
-	Editable bool          `json:"editable"`
-	Fixed    settingsFixed `json:"fixed"`
-	Usage    settingsUsage `json:"usage"`
+	Editable bool             `json:"editable"`
+	Fixed    settingsFixed    `json:"fixed"`
+	Identity settingsIdentity `json:"identity"`
+	Usage    settingsUsage    `json:"usage"`
+	// Checks is what is worth knowing about this configuration: the settings
+	// that are legal, working, and probably not what was meant. See
+	// config.Config.Checks.
+	Checks []config.Check `json:"checks"`
 }
 
 func toValues(c config.Config) settingsValues {
@@ -102,6 +141,15 @@ func toValues(c config.Config) settingsValues {
 	}
 	if v.NotifyOn == nil {
 		v.NotifyOn = []string{}
+	}
+	return v
+}
+
+// orEmpty keeps an unset list out of the payload as [] rather than null: the
+// screen renders "none", and null would render as a gap.
+func orEmpty(v []string) []string {
+	if v == nil {
+		return []string{}
 	}
 	return v
 }
@@ -154,6 +202,31 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 	}
 	if out.Fixed.ComposeRoots == nil {
 		out.Fixed.ComposeRoots = []string{}
+	}
+
+	out.Identity = settingsIdentity{
+		Mode:              s.authMode(effective),
+		LocalAccount:      effective.LocalAccount,
+		PasswordHashSet:   effective.PasswordHash != "",
+		TrustProxyAuth:    effective.TrustProxyAuth,
+		AuthHeader:        effective.AuthHeader,
+		TrustedProxies:    orEmpty(effective.TrustedProxies),
+		OIDCIssuer:        effective.OIDCIssuer,
+		OIDCClientID:      effective.OIDCClientID,
+		OIDCSecretSet:     effective.OIDCClientSecret != "",
+		OIDCRedirectURL:   effective.OIDCRedirectURL,
+		OIDCScopes:        orEmpty(effective.OIDCScopes),
+		OIDCUsernameClaim: effective.OIDCUsernameClaim,
+		OIDCGroupsClaim:   effective.OIDCGroupsClaim,
+		OIDCAllowedGroups: orEmpty(effective.OIDCAllowedGroups),
+		OIDCAllowedUsers:  orEmpty(effective.OIDCAllowedUsers),
+		SessionTTLMS:      effective.SessionTTL.Milliseconds(),
+		SessionIdleTTLMS:  effective.SessionIdleTTL.Milliseconds(),
+		MetricsPublic:     effective.MetricsPublic,
+	}
+	out.Checks = effective.Checks()
+	if out.Checks == nil {
+		out.Checks = []config.Check{}
 	}
 
 	if usage, err := s.store.Usage(r.Context()); err == nil {

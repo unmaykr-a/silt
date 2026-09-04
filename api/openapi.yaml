@@ -1717,7 +1717,7 @@ components:
 
     Settings:
       type: object
-      required: [version, release, effective, environment, overridden, editable, fixed, usage]
+      required: [version, release, effective, environment, overridden, editable, fixed, identity, usage, checks]
       properties:
         version:
           type: string
@@ -1741,6 +1741,7 @@ components:
           type: boolean
           description: False when there is nowhere to store an override.
         fixed: { $ref: "#/components/schemas/SettingsFixed" }
+        identity: { $ref: "#/components/schemas/SettingsIdentity" }
         usage:
           type: object
           required: [blobs, stored_bytes, uncompressed_bytes, events]
@@ -1749,6 +1750,73 @@ components:
             stored_bytes: { type: integer, format: int64 }
             uncompressed_bytes: { type: integer, format: int64 }
             events: { type: integer, format: int64 }
+        checks:
+          type: array
+          items: { $ref: "#/components/schemas/SetupCheck" }
+          description: |
+            What is worth knowing about this configuration: settings that are
+            legal, working, and probably not what was meant. Not validation —
+            anything actually wrong refuses to start.
+
+    SettingsIdentity:
+      type: object
+      description: |
+        How this install decides who you are. Read-only: these are the boundary
+        protecting the settings screen, so a UI that could edit them would be a
+        way in rather than a setting. Secrets are reported as configured-or-not
+        and never echoed.
+      required:
+        [mode, local_account, password_hash_set, trust_proxy_auth, auth_header,
+         trusted_proxies, oidc_issuer, oidc_client_id, oidc_secret_set,
+         oidc_redirect_url, oidc_scopes, oidc_username_claim, oidc_groups_claim,
+         oidc_allowed_groups, oidc_allowed_users, session_ttl_ms,
+         session_idle_ttl_ms, metrics_public]
+      properties:
+        mode:
+          type: string
+          enum: [none, password, proxy, proxy+password]
+        local_account: { type: boolean }
+        password_hash_set: { type: boolean }
+        trust_proxy_auth: { type: boolean }
+        auth_header: { type: string }
+        trusted_proxies:
+          type: array
+          items: { type: string }
+        oidc_issuer: { type: string }
+        oidc_client_id: { type: string }
+        oidc_secret_set: { type: boolean }
+        oidc_redirect_url: { type: string }
+        oidc_scopes:
+          type: array
+          items: { type: string }
+        oidc_username_claim: { type: string }
+        oidc_groups_claim: { type: string }
+        oidc_allowed_groups:
+          type: array
+          items: { type: string }
+        oidc_allowed_users:
+          type: array
+          items: { type: string }
+        session_ttl_ms: { type: integer, format: int64 }
+        session_idle_ttl_ms: { type: integer, format: int64 }
+        metrics_public: { type: boolean }
+
+    SetupCheck:
+      type: object
+      required: [id, level, title, detail]
+      properties:
+        id:
+          type: string
+          description: Stable, so the UI can key on it and a test can name it.
+        level:
+          type: string
+          enum: [error, warn, info]
+        title: { type: string, description: The finding. }
+        detail: { type: string, description: What to do about it. }
+        env_vars:
+          type: array
+          items: { type: string }
+          description: The variables involved, so the reader knows where to go.
 
     SettingsPatch:
       type: object

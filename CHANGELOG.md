@@ -5,6 +5,23 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.15.0 — 2026-09-04
+
+Settings you can search, an authentication screen that shows what is in effect, and a review that says whether the install is set up.
+
+### Added
+
+- Search on the settings screen. Nine sections and forty-odd fields is past the point where "it is in here somewhere" works, and the environment variable is searchable as well as the label — the compose file is where people know these by name, so SILT_KEEP_KEYS finds the keep-list without knowing it is filed under Collection.
+- A Setup section that reviews the configuration and says what is legal, working, and probably not what you meant: forward auth trusted with no proxy list, notifications that will link nowhere because no base URL is set, retention windows that keep runtime-only snapshots longer than the changes they sit between. Each finding names the variables involved. Nothing here is an outage — anything actually wrong still refuses to start.
+- An Authentication section. Twelve settings — the whole OIDC client, the trusted-proxy list, the identity header, session lifetimes — were readable nowhere in the UI, so the first question when forward auth is not working, what Silt thinks it was told, could only be answered by reading the compose file on the host. Read-only, because these are the boundary protecting that screen, and secrets shown as set-or-not exactly as the notification targets already are.
+- The theme belongs in Appearance. It was only ever in the status menu, which made an Appearance section that could not set the theme.
+- Each section in the rail shows how many of its settings are set here rather than by the environment, so finding your own overrides no longer means opening all nine.
+- Releases are published on GitHub, with notes rendered from the same changelog CHANGELOG.md is generated from — `make release` tags the version and CI does the rest. Notes written separately are notes that disagree with the changelog by the second release.
+
+### Fixed
+
+- Unsaved changes went invisible the moment you left the section you made them in. The draft survived the switch and the save bar did not, so an edit made under Retention and abandoned for Storage was still pending with nothing on screen saying so.
+
 ## 0.14.0 — 2026-09-03
 
 A readable front page, a demo that demonstrates something, and a light theme you can look at.

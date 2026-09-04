@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 # One publish at a time; a queued run for an older commit must not overwrite
@@ -75,3 +75,39 @@ jobs:
           # package listing, which reads as a broken build to anyone browsing
           # it. Two platforms, nothing else.
           provenance: false
+
+  # The GitHub release, published from the same changelog the repository's
+  # CHANGELOG.md is generated from. Notes written separately are notes that
+  # disagree with the changelog by the second release.
+  #
+  # Tags only: a push to main publishes an image, which is not a release.
+  release:
+    name: publish the release
+    if: github.ref_type == 'tag'
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Render the notes
+        id: notes
+        run: |
+          # Fails the job when the tag names a release the changelog does not
+          # have, which is the shape of every "tagged the wrong thing" mistake.
+          go run ./internal/changelog/cmd/gen --notes "${{ github.ref_name }}" > notes.md
+          echo "--- notes for ${{ github.ref_name }} ---"
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Silt ${{ github.ref_name }}" \
+            --notes-file notes.md \
+            --verify-tag
+          gh release view "${{ github.ref_name }}" --json url --jq .url
