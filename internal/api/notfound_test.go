@@ -52,15 +52,24 @@ func TestAnEndpointThatDoesNotExistIsA404(t *testing.T) {
 
 func TestTheSinglePageAppStillOwnsEverythingElse(t *testing.T) {
 	// The fallback must not have eaten the app's own routes: /projects/3 is a
-	// client-side path and has to render the app, not a 404.
+	// client-side path and belongs to the web handler, not to a 404.
+	//
+	// What the web handler *answers* depends on whether this binary embeds a
+	// built frontend, and the go job deliberately does not build one — a clean
+	// checkout carries only dist/.gitkeep, so there it serves its own 503
+	// explaining that. Asserting the served page would make this test a test
+	// of the build. What it means to assert is which handler replied.
 	f := newAccountFixture(t, "")
 	for _, path := range []string{"/", "/projects/3", "/settings"} {
 		code, body := f.do(t, "GET", path, "")
-		if code != http.StatusOK {
-			t.Errorf("GET %s = %d, want the app", path, code)
-		}
-		if !strings.Contains(strings.ToLower(body), "<!doctype html") {
-			t.Errorf("GET %s did not return the app", path)
+		switch {
+		case code == http.StatusOK && strings.Contains(strings.ToLower(body), "<!doctype html"):
+			// The app, from a binary that embeds it.
+		case code == http.StatusServiceUnavailable && strings.Contains(body, "built without the web UI"):
+			// The web handler saying there is no app embedded, which is still
+			// the web handler.
+		default:
+			t.Errorf("GET %s = %d %.80s; the API fallback answered a client-side route", path, code, body)
 		}
 	}
 }
