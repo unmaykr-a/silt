@@ -2152,7 +2152,49 @@ Changed:
     explicit in the handler, with a comment saying why it is not left to the
     guard, because the next endpoint of this shape will want the same.
 
-107. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+107. **One file per section (0.19.0)** — the settings screen reached 1,586 lines
+    with ten sections inlined into it, so every change to Notifications was a
+    change to the file Retention was in. Each section is its own component now
+    and the screen is 270 lines of rail, search and save bar.
+
+    Worth being honest about the accounting: the total went *up*, by about 340
+    lines. Sixteen files cost sixteen sets of imports and prop declarations, and
+    each one carries the comment explaining what it is for. What went down is
+    the size of the thing you have to hold in your head to change one section,
+    which was the actual complaint — "bloat" measured in total lines was never
+    the problem, and optimising for it would have argued against the split.
+
+    The shared state is a factory rather than module-level state, because
+    module-level state outlives the screen: navigating away and back would show
+    the previous visit's unsaved draft and stale error. It is passed to panels
+    as a prop rather than through context, so a panel's dependencies are visible
+    where it is used.
+
+108. **Extract the part that can be tested (0.19.0)** — `buildPatch` decides
+    which fields a save actually sends, and it had no tests, because it lived in
+    a `.svelte` file and the test runner deliberately has no Svelte plugin.
+
+    Being wrong there is silent in a specific way: a patch that restates a field
+    nobody touched writes an override for it, and that field then stops tracking
+    the environment it was set from. Nothing looks different until the next
+    container recreate, when an environment change does not take and there is no
+    obvious reason why.
+
+    It is a plain `patch.ts` beside `store.svelte.ts` now — the same split
+    already used for `clockcore.ts`, `marker.ts` and `settingsindex.ts`. The
+    rule is worth stating as a rule: reactive glue in the rune module, the
+    decision the glue is wrapping in a plain one.
+
+109. **Three renderers for one idea (0.19.0)** — "a setting Silt reports but will
+    not let you change" was written three times, in two sections, and had
+    drifted: the hint sat under the value in Security and under the label in
+    Authentication. Two lists of the same kind of thing did not look like it.
+
+    The label's version won. A hint explains what the setting is; the value is
+    the answer. Prose in the answer column makes the column you are scanning
+    ragged, which is the whole reason to have a column.
+
+110. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

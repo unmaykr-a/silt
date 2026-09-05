@@ -5,6 +5,25 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 0.19.0 — 2026-09-05
+
+The settings screen, taken apart. Same screen, ten files instead of one, and the part that decides what a save sends is finally tested.
+
+### Added
+
+- Tests for what a save actually sends. buildPatch decides which fields travel, and it had none: being wrong there is silent, because a patch that restates a field nobody touched writes an override for it, and that field then stops tracking the environment it was set from — visible only on the next container recreate, when the environment change everyone expected does not take. It is a plain module now, beside the runes rather than inside them, because the test runner cannot import a rune module.
+- An end-to-end test that edits a setting, saves it, checks the value survived and that the field says it is set here rather than by the environment, then puts it back. The whole write path had no test at all, which is a strange gap for a screen whose entire job is writing settings.
+
+### Changed
+
+- The settings screen was one 1,586-line file with ten sections inlined into it, which meant every change to Notifications was a change to the file Retention was in. Each section is now its own component and the screen itself is 270 lines of rail, search and save bar. Nothing on it moved, with one exception below.
+- Three separate renderers for "a setting Silt reports but will not let you change" had drifted apart — the hint sat under the value in Security and under the label in Authentication, so two lists of the same kind of thing did not look like it. They are one component now, and Security follows Authentication: a hint explains what a setting is, and prose in the answer column makes the column you are scanning ragged.
+
+### Fixed
+
+- Four retention windows and three duration menus were written out longhand, identical but for which field they bound. A number and the word "days" needed saying once, not four times.
+- The settings search's drift guard read one file, and the sections now live in ten. It reads all of them, and a field rendered with no search entry still fails the build — which is what it was for.
+
 ## 0.18.0 — 2026-09-04
 
 Somewhere to put your backups, a bound on stale administrators, and the read-only role finally doing something.

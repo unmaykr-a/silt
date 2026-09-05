@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { SETTINGS, SECTIONS, searchSettings, overrideCounts } from "./settingsindex";
 
 describe("searchSettings", () => {
@@ -70,12 +70,26 @@ describe("overrideCounts", () => {
 });
 
 describe("the index and the screen agree", () => {
-  const source = readFileSync(new URL("../routes/Settings.svelte", import.meta.url), "utf8");
+  // Every panel, not just the screen: the sections used to be inlined into
+  // Settings.svelte and now each has its own file, so a matcher that read one
+  // file would silently stop seeing nine tenths of the fields — and would keep
+  // passing while it did.
+  const dir = new URL("./settings/", import.meta.url);
+  const sources = readdirSync(dir)
+    .filter((f) => f.endsWith(".svelte"))
+    .map((f) => readFileSync(new URL(f, dir), "utf8"))
+    .join("\n");
 
   it("has an entry for every field the screen renders", () => {
     // The one way these can drift: a field added to the screen and not to the
     // index is a setting the search cannot find, which nothing else notices.
-    const rendered = [...source.matchAll(/@render (?:field|choice)\(\s*"([a-z_A-Z]+)"/g)].map((m) => m[1]);
+    //
+    // The tag body allows quoted strings so a hint containing ">" cannot end
+    // the match early — several of them do.
+    const tag = /<(?:Field|Choice|DaysField|IntervalField)\b((?:[^<>"]|"[^"]*")*)>/g;
+    const rendered = [...sources.matchAll(tag)]
+      .map((m) => /\bname="([a-zA-Z_]+)"/.exec(m[1])?.[1])
+      .filter((name): name is string => !!name);
     expect(rendered.length).toBeGreaterThan(10);
 
     const known = new Set(SETTINGS.map((s) => s.name));

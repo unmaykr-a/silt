@@ -295,3 +295,46 @@ test("the authentication section reports the administrator window", async ({ pag
   await expect(page.locator("main")).toContainText("Secure cookie");
   await expect(page.locator("main")).toContainText("SILT_COOKIE_SECURE");
 });
+
+test("editing a setting saves it and says where the value now comes from", async ({ page }) => {
+  // The whole write path in one test: a field bound through the shared draft,
+  // the dirty check that decides whether Save is live, the patch that carries
+  // only what changed, and the override badge that says this field has stopped
+  // tracking the environment. Nothing else exercises it end to end, and every
+  // piece of it moved when the screen was split into panels.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+  await page.getByLabel("Settings sections").getByRole("button", { name: /^Retention/ }).click();
+  await page.waitForTimeout(400);
+
+  const field = page.locator("#event_retention_days");
+  await expect(field).toBeVisible();
+  const before = await field.inputValue();
+  const after = String(Number(before) + 5);
+
+  // Nothing to save until something changes.
+  const save = page.getByRole("button", { name: "Save changes" });
+  await expect(save).toBeDisabled();
+
+  await field.fill(after);
+  await expect(save).toBeEnabled();
+  await expect(page.locator("main")).toContainText("Unsaved changes");
+
+  await save.click();
+  await expect(page.locator("body")).toContainText("In force now", { timeout: 10_000 });
+
+  // The value survived the round trip, and the field now says it is set here
+  // rather than by the environment.
+  await expect(page.locator("#event_retention_days")).toHaveValue(after);
+  await expect(page.locator("main")).toContainText("set here");
+  await expect(page.getByText("use the environment value").first()).toBeVisible();
+
+  // And back, so the suite can run twice.
+  await page.getByText("use the environment value").first().click();
+  await expect(page.locator("#event_retention_days")).toHaveValue(before, { timeout: 10_000 });
+
+  expect(errors).toEqual([]);
+});
