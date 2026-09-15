@@ -1,0 +1,82 @@
+name: wiki
+
+# Publish docs/wiki to the GitHub wiki.
+#
+# The repository is the source of truth and the wiki is a render of it, for the
+# same reason CHANGELOG.md is generated: two copies of the same prose disagree
+# by the second edit. Pages go through review with the code that changes their
+# meaning, and the wiki is what readers get.
+#
+# The consequence is worth stating: an edit made in the wiki's own web editor is
+# overwritten by the next publish. Every page's footer says so, and says where
+# to edit instead.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/wiki.yml"
+  # So the wiki can be rebuilt without a commit — after enabling it for the
+  # first time, for instance.
+  workflow_dispatch:
+
+# One publish at a time. Two pushes in quick succession would otherwise race to
+# push to the same wiki repository and one would fail on a stale ref.
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone the wiki
+        run: |
+          set -euo pipefail
+          # GitHub does not create <repo>.wiki.git until the wiki has one page.
+          # Enabling the feature is not enough, so say exactly what to do rather
+          # than failing with git's "repository not found".
+          if ! git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki 2>clone.log; then
+            cat clone.log
+            echo "::error::The wiki repository does not exist yet. Open https://github.com/${{ github.repository }}/wiki, click 'Create the first page', save anything, then re-run this workflow. GitHub only creates <repo>.wiki.git once a first page exists."
+            exit 1
+          fi
+
+      - name: Sync the pages
+        run: |
+          set -euo pipefail
+          # Delete first, so a page removed from the repo leaves the wiki. Keep
+          # .git, obviously.
+          find wiki -mindepth 1 -maxdepth 1 -not -name .git -exec rm -rf {} +
+          cp docs/wiki/*.md wiki/
+          # Images the pages reference, so a screenshot works in the wiki too.
+          if [ -d docs/screenshots ]; then
+            mkdir -p wiki/screenshots
+            cp docs/screenshots/*.png wiki/screenshots/ 2>/dev/null || true
+          fi
+
+      - name: Push
+        working-directory: wiki
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The wiki already matches docs/wiki; nothing to publish."
+            exit 0
+          fi
+          # Three -m flags rather than one with newlines in it: an unindented
+          # continuation line ends a YAML block scalar, so the obvious version
+          # is a parse error. git joins them with blank lines.
+          git commit \
+            -m "Publish docs/wiki from ${GITHUB_SHA::7}" \
+            -m "Source: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}" \
+            -m "Edit the pages in docs/wiki/ — changes made here are overwritten."
+          git push

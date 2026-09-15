@@ -2233,7 +2233,32 @@ Changed:
     observation was identical to the last one and became a touch. A unit test of
     the watcher alone would have passed.
 
-112. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+112. **The wiki is generated, not maintained (1.0.1)** — the README had grown to
+    461 lines with four collapsed sections, which is the shape a README takes
+    when it is doing a manual's job badly: too long to read as an introduction
+    and too cramped to explain anything properly.
+
+    Eighteen wiki pages now carry the manual, and they live in `docs/wiki/` and
+    are published by CI. The repository is the source of truth for the same
+    reason `CHANGELOG.md` is generated from Go: two copies of the same prose
+    disagree by the second edit. Pages go through review with the code that
+    changes their meaning.
+
+    The cost is stated plainly rather than hidden: an edit made in the wiki's own
+    web editor is overwritten by the next publish. Every page's footer says so
+    and says where to edit instead. The alternative — the wiki as source of truth
+    — means documentation that cannot be reviewed alongside the change it
+    describes, and that is the worse trade for a project whose recurring failure
+    is prose describing code that does not exist.
+
+    A wiki rots in two ways neither the author nor a reviewer can see, because
+    both already know where everything is: a page stops being linked and nobody
+    finds it again, and a link points at a page that was renamed — which GitHub
+    renders as a live link that 404s. So the tests assert every page is in the
+    sidebar, reachable from Home, longer than a stub, and that every internal
+    link resolves. Each was verified by breaking it.
+
+113. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't
