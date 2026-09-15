@@ -25,9 +25,11 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/unmaykr-a/silt/internal/config"
+	"github.com/unmaykr-a/silt/internal/secret"
 )
 
 // storeKey is the row in the settings table holding the override document.
@@ -163,6 +165,64 @@ func (o Overrides) WithoutSecrets() (Overrides, []string) {
 	return out, dropped
 }
 
+// seal encrypts every secret-tagged value, and is applied on the way to the
+// database rather than in memory: the running configuration needs the real
+// values, and Apply decoding a ciphertext into a field would mean Silt
+// presenting "enc:v1:…" to an identity provider.
+//
+// The whole JSON value is sealed and stored as a JSON string, whatever its type,
+// so a list of notification targets is one ciphertext rather than a list of them.
+// That keeps the shape uniform and stops the number of targets leaking through
+// the length of the stored array.
+func (o Overrides) seal(c *secret.Cipher) (Overrides, error) {
+	if !c.Enabled() {
+		return o, nil
+	}
+	out := Overrides{values: maps.Clone(o.values)}
+	for _, f := range config.Editable() {
+		if !f.Secret || !o.Has(f.Name) {
+			continue
+		}
+		sealed, err := c.Seal(string(o.values[f.Name]))
+		if err != nil {
+			return Overrides{}, fmt.Errorf("setting %q: %w", f.Name, err)
+		}
+		encoded, err := json.Marshal(sealed)
+		if err != nil {
+			return Overrides{}, fmt.Errorf("setting %q: %w", f.Name, err)
+		}
+		out.values[f.Name] = encoded
+	}
+	return out, nil
+}
+
+// open reverses seal. A value that was stored before a key was configured has no
+// prefix and comes back as it is, which is what lets a key be added to an
+// install that already has settings saved.
+func (o Overrides) open(c *secret.Cipher) (Overrides, error) {
+	out := Overrides{values: maps.Clone(o.values)}
+	for _, f := range config.Editable() {
+		if !f.Secret || !o.Has(f.Name) {
+			continue
+		}
+		// Only a JSON string can be a sealed value; anything else was stored
+		// unsealed and is already the value.
+		var sealed string
+		if err := json.Unmarshal(o.values[f.Name], &sealed); err != nil {
+			continue
+		}
+		if !strings.HasPrefix(sealed, secret.Prefix) {
+			continue
+		}
+		plain, err := c.Open(sealed)
+		if err != nil {
+			return Overrides{}, fmt.Errorf("setting %q: %w", f.Name, err)
+		}
+		out.values[f.Name] = json.RawMessage(plain)
+	}
+	return out, nil
+}
+
 // Apply merges the patch onto base and returns the effective configuration,
 // unvalidated. A value that will not decode into its field is an error here
 // rather than a zero value there.
@@ -215,6 +275,7 @@ type Live struct {
 	overrides Overrides
 
 	db        Storer
+	cipher    *secret.Cipher
 	observers []func(config.Config)
 }
 
@@ -224,9 +285,21 @@ type Live struct {
 // in a later version, say — is reported rather than silently dropped, but the
 // baseline still comes up, because refusing to start over a bad retention
 // value would lock someone out of the screen that fixes it.
-func Load(ctx context.Context, base config.Config, db Storer) (*Live, error) {
-	l := &Live{base: base.Clone(), effective: base.Clone(), db: db}
+func Load(ctx context.Context, base config.Config, db Storer, cipher *secret.Cipher) (*Live, error) {
+	if cipher == nil {
+		cipher = &secret.Cipher{}
+	}
+	l := &Live{base: base.Clone(), effective: base.Clone(), db: db, cipher: cipher}
 	if db == nil {
+		return l, nil
+	}
+	// The way back in from a save that locked someone out. Checked before the
+	// stored document is read at all, so a document that will not even decode
+	// is still recoverable.
+	if base.SettingsReset {
+		if err := db.PutSetting(ctx, storeKey, "{}"); err != nil {
+			return l, fmt.Errorf("SILT_SETTINGS_RESET is set but the overrides could not be dropped: %w", err)
+		}
 		return l, nil
 	}
 	raw, err := db.GetSetting(ctx, storeKey)
@@ -234,8 +307,12 @@ func Load(ctx context.Context, base config.Config, db Storer) (*Live, error) {
 		// No row is the normal case on a fresh install.
 		return l, nil //nolint:nilerr // absence is not a failure
 	}
-	var o Overrides
-	if err := json.Unmarshal([]byte(raw), &o); err != nil {
+	var stored Overrides
+	if err := json.Unmarshal([]byte(raw), &stored); err != nil {
+		return l, fmt.Errorf("stored settings are not readable, using the environment: %w", err)
+	}
+	o, err := stored.open(cipher)
+	if err != nil {
 		return l, fmt.Errorf("stored settings are not readable, using the environment: %w", err)
 	}
 	merged, err := o.Apply(base)
@@ -329,7 +406,12 @@ func (l *Live) Update(ctx context.Context, patch Overrides, clear []string) (con
 		l.mu.Unlock()
 		return config.Config{}, err
 	}
-	encoded, err := json.Marshal(merged)
+	sealed, err := merged.seal(l.cipher)
+	if err != nil {
+		l.mu.Unlock()
+		return config.Config{}, err
+	}
+	encoded, err := json.Marshal(sealed)
 	if err != nil {
 		l.mu.Unlock()
 		return config.Config{}, fmt.Errorf("encode settings: %w", err)

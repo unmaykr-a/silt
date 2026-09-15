@@ -85,6 +85,26 @@ func TestEverySettingSurvivesADecodeEncodeCycle(t *testing.T) {
 		"metrics_public":           `true`,
 		"ingest_rate_per_minute":   `120`,
 		"max_compose_file_bytes":   `2097152`,
+		"trust_proxy_auth":         `true`,
+		"auth_header":              `"X-Forwarded-User"`,
+		"auth_groups_header":       `"X-Forwarded-Groups"`,
+		"admin_groups":             `["silt-admins"]`,
+		"trusted_proxies":          `["10.0.0.0/8"]`,
+		"local_account":            `false`,
+		"oidc_issuer":              `"https://auth.example.invalid/application/o/silt/"`,
+		"oidc_client_id":           `"silt"`,
+		"oidc_client_secret":       `"a-client-secret"`,
+		"oidc_redirect_url":        `"https://silt.example/api/auth/callback"`,
+		"oidc_scopes":              `["openid","profile"]`,
+		"oidc_username_claim":      `"email"`,
+		"oidc_groups_claim":        `"roles"`,
+		"oidc_admin_groups":        `["silt-admins"]`,
+		"oidc_allowed_groups":      `["silt-users"]`,
+		"oidc_allowed_users":       `["someone@example.invalid"]`,
+		"session_ttl_ms":           `604800000`,
+		"session_idle_ttl_ms":      `86400000`,
+		"oidc_admin_ttl_ms":        `3600000`,
+		"cookie_secure":            `"always"`,
 	}
 	for _, f := range config.Editable() {
 		raw, ok := values[f.Name]
@@ -160,5 +180,52 @@ func TestValuesAreNormalisedOnTheWayIn(t *testing.T) {
 	}
 	if c.BaseURL != "https://silt.example" {
 		t.Errorf("base_url = %q, want it trimmed", c.BaseURL)
+	}
+}
+
+// TestThePackageDocExplainsEverySettingItWithholds.
+//
+// Not editable is the interesting claim, because it is the one that used to be
+// policy: twenty-nine settings were described as deliberately environment-only
+// when two of them were, one was an allowlist tied to a volume mount, and the
+// rest were the price of a mechanism nobody wanted to pay again.
+//
+// So each one that stays has to say why, in the package doc, by name. This test
+// exists because writing that list by hand got it wrong on the first attempt —
+// it said five and named five, and there were six.
+func TestThePackageDocExplainsEverySettingItWithholds(t *testing.T) {
+	doc := read(t, "config.go")
+	// Only the package comment: the struct's own field comments mention every
+	// variable, so scanning the whole file would pass regardless.
+	doc = doc[:strings.Index(doc, "package config")]
+
+	editable := map[string]bool{}
+	for _, f := range config.Editable() {
+		editable[f.Env] = true
+	}
+
+	var withheld []string
+	for _, env := range envTags(t) {
+		if !editable[env] {
+			withheld = append(withheld, env)
+		}
+	}
+	if len(withheld) == 0 {
+		t.Fatal("no settings are environment-only, so this test proves nothing")
+	}
+	for _, env := range withheld {
+		if !strings.Contains(doc, env) {
+			t.Errorf("%s is not editable and the package doc does not say why", env)
+		}
+	}
+
+	// And the count in the prose, because "six settings have no such tag" is
+	// the sentence someone reads instead of counting.
+	counts := map[int]string{
+		2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven",
+		8: "Eight", 9: "Nine", 10: "Ten",
+	}
+	if word, ok := counts[len(withheld)]; ok && !strings.Contains(doc, word+" settings have no such tag") {
+		t.Errorf("%d settings are environment-only; the package doc does not say %q", len(withheld), word+" settings have no such tag")
 	}
 }

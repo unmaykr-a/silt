@@ -1742,7 +1742,12 @@ components:
          vacuum_interval_ms, keep_keys, base_url, log_level, notify_targets,
          notify_on, notify_min_severity, ingest_configured,
          ingest_rate_per_minute, host_name, docker_host, metrics_public,
-         max_compose_file_bytes]
+         max_compose_file_bytes, local_account, trust_proxy_auth, auth_header,
+         auth_groups_header, admin_groups, trusted_proxies, oidc_issuer,
+         oidc_client_id, oidc_redirect_url, oidc_scopes, oidc_username_claim,
+         oidc_groups_claim, oidc_admin_groups, oidc_allowed_groups,
+         oidc_allowed_users, session_ttl_ms, session_idle_ttl_ms,
+         oidc_admin_ttl_ms, cookie_secure]
       properties:
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }
@@ -1791,6 +1796,45 @@ components:
           type: boolean
           description: Whether /metrics is reachable without authentication.
         max_compose_file_bytes: { type: integer, format: int64 }
+        local_account: { type: boolean }
+        trust_proxy_auth: { type: boolean }
+        auth_header: { type: string }
+        auth_groups_header: { type: string }
+        admin_groups:
+          type: array
+          items: { type: string }
+        trusted_proxies:
+          type: array
+          items: { type: string }
+        oidc_issuer: { type: string }
+        oidc_client_id: { type: string }
+        oidc_redirect_url: { type: string }
+        oidc_scopes:
+          type: array
+          items: { type: string }
+        oidc_username_claim: { type: string }
+        oidc_groups_claim: { type: string }
+        oidc_admin_groups:
+          type: array
+          items: { type: string }
+        oidc_allowed_groups:
+          type: array
+          items: { type: string }
+        oidc_allowed_users:
+          type: array
+          items: { type: string }
+        session_ttl_ms: { type: integer, format: int64 }
+        session_idle_ttl_ms: { type: integer, format: int64 }
+        oidc_admin_ttl_ms:
+          type: integer
+          format: int64
+          description: |
+            How long a provider-granted administrator role survives without a
+            fresh sign-in. The session keeps working, read-only, after it.
+            0 disables the lapse.
+        cookie_secure:
+          type: string
+          enum: [auto, always, never]
 
     SettingsFixed:
       type: object
@@ -1899,74 +1943,33 @@ components:
     SettingsIdentity:
       type: object
       description: |
-        How this install decides who you are. Read-only: these are the boundary
-        protecting the settings screen, so a UI that could edit them would be a
-        way in rather than a setting. Secrets are reported as configured-or-not
-        and never echoed.
-      required:
-        [mode, local_account, password_hash_set, trust_proxy_auth, auth_header,
-         trusted_proxies, oidc_issuer, oidc_client_id, oidc_secret_set,
-         oidc_redirect_url, oidc_scopes, oidc_username_claim, oidc_groups_claim,
-         oidc_allowed_groups, oidc_allowed_users, oidc_admin_groups,
-         admin_groups, auth_groups_header, roles_enabled, session_ttl_ms,
-         session_idle_ttl_ms, oidc_admin_ttl_ms, cookie_secure]
+        What can be said about authentication that is not itself a setting.
+
+        The settings moved into SettingsValues in 1.2.0 when they became
+        editable. What is left is derived: the mode this configuration adds up
+        to, whether the two credentials are set, and whether the
+        administrator/viewer split is in play.
+      required: [mode, password_hash_set, oidc_secret_set, roles_enabled]
       properties:
         mode:
           type: string
           enum: [none, password, proxy, proxy+password]
-        local_account: { type: boolean }
-        password_hash_set: { type: boolean }
-        trust_proxy_auth: { type: boolean }
-        auth_header: { type: string }
-        trusted_proxies:
-          type: array
-          items: { type: string }
-        oidc_issuer: { type: string }
-        oidc_client_id: { type: string }
-        oidc_secret_set: { type: boolean }
-        oidc_redirect_url: { type: string }
-        oidc_scopes:
-          type: array
-          items: { type: string }
-        oidc_username_claim: { type: string }
-        oidc_groups_claim: { type: string }
-        oidc_allowed_groups:
-          type: array
-          items: { type: string }
-        oidc_allowed_users:
-          type: array
-          items: { type: string }
-        oidc_admin_groups:
-          type: array
-          items: { type: string }
+        password_hash_set:
+          type: boolean
           description: |
-            Membership of one of these makes an OIDC identity an administrator.
-            Empty means everyone admitted is one, which is what Silt did before
-            roles existed.
-        admin_groups:
-          type: array
-          items: { type: string }
-          description: The forward-auth equivalent.
-        auth_groups_header: { type: string }
+            Whether SILT_PASSWORD_HASH is set. It is not editable, and that is
+            deliberate rather than an omission: the variable exists to take the
+            password out of the UI's hands for an install managed
+            declaratively, so a UI that could set it would defeat its only
+            purpose.
+        oidc_secret_set:
+          type: boolean
+          description: |
+            Whether a client secret is configured. The secret itself is
+            write-only and never returned.
         roles_enabled:
           type: boolean
           description: Whether anyone is a viewer rather than an administrator.
-        session_ttl_ms: { type: integer, format: int64 }
-        session_idle_ttl_ms: { type: integer, format: int64 }
-        oidc_admin_ttl_ms:
-          type: integer
-          format: int64
-          description: |
-            How long a provider-granted administrator role survives without a
-            fresh sign-in. The session keeps working, read-only, after it. OIDC
-            only; 0 means it does not lapse.
-        cookie_secure:
-          type: string
-          enum: [auto, always, never]
-          description: |
-            How the Secure flag on the session cookie is decided. `auto` infers
-            it from the request, which a proxy that terminates TLS without
-            setting X-Forwarded-Proto gets wrong.
 
     SetupCheck:
       type: object
@@ -2044,6 +2047,50 @@ components:
         max_compose_file_bytes:
           type: integer
           format: int64
+        local_account: { type: boolean }
+        trust_proxy_auth: { type: boolean }
+        auth_header: { type: string }
+        auth_groups_header: { type: string }
+        admin_groups:
+          type: array
+          items: { type: string }
+        trusted_proxies:
+          type: array
+          items: { type: string }
+        oidc_issuer:
+          type: string
+          description: |
+            Must be https unless it is a loopback address, and setting it
+            requires oidc_client_id. Saving re-runs provider discovery; a
+            provider that cannot be reached leaves that login disabled and the
+            reason readable under identity.oidc_error.
+        oidc_client_id: { type: string }
+        oidc_client_secret:
+          type: string
+          description: |
+            Write-only. Reported only as identity.oidc_secret_set. Encrypted at
+            rest when SILT_SECRET_KEY is set.
+        oidc_redirect_url: { type: string }
+        oidc_scopes:
+          type: array
+          items: { type: string }
+        oidc_username_claim: { type: string }
+        oidc_groups_claim: { type: string }
+        oidc_admin_groups:
+          type: array
+          items: { type: string }
+        oidc_allowed_groups:
+          type: array
+          items: { type: string }
+        oidc_allowed_users:
+          type: array
+          items: { type: string }
+        session_ttl_ms: { type: integer, format: int64 }
+        session_idle_ttl_ms: { type: integer, format: int64 }
+        oidc_admin_ttl_ms: { type: integer, format: int64 }
+        cookie_secure:
+          type: string
+          enum: [auto, always, never]
         reset:
           type: array
           items: { type: string }

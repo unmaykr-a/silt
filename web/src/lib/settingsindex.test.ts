@@ -125,7 +125,7 @@ describe("the words people actually type", () => {
     ["does it work", "probes"],
     ["mounted", "probes"],
     ["rate limit", "ingest_rate_per_minute"],
-    ["stale", "oidc_admin_ttl"],
+    ["stale", "oidc_admin_ttl_ms"],
     ["https", "cookie_secure"],
   ];
 

@@ -85,7 +85,25 @@ func (g *Gate) setupRequired() bool {
 }
 
 // SetAuth installs the gate.
-func (s *Server) SetAuth(g *Gate) { s.gate = g }
+// SetAuth installs the gate, and may be called again while Silt is running.
+//
+// Authentication is editable from the settings screen since 1.2.0, and every
+// part of the gate depends on it: the session lifetimes, the built-in account,
+// the forward-auth reader and the provider client. So a change replaces the
+// whole gate rather than reaching into one, and the swap is atomic because
+// requests are reading it while it happens. A request that begins before the
+// swap finishes on the gate it started with, which is the only answer that does
+// not depend on how many times a handler happens to look.
+//
+// Sessions survive a swap: they are rows in the database, not state in the
+// object, so a new Sessions reads the same ones. Changing SILT_SESSION_TTL
+// therefore re-dates the sessions that already exist rather than ending them.
+func (s *Server) SetAuth(g *Gate) { s.gate.Store(g) }
+
+// auth is the gate in force. Bind it once per request rather than calling this
+// repeatedly: a save landing between two calls would answer two questions about
+// one request from two different configurations.
+func (s *Server) auth() *Gate { return s.gate.Load() }
 
 // identify returns who is asking, if anyone.
 //
@@ -93,17 +111,20 @@ func (s *Server) SetAuth(g *Gate) { s.gate = g }
 // request needs no session; then the session cookie, which is what both the
 // password and OIDC logins produce.
 func (s *Server) identify(r *http.Request) (auth.Identity, bool) {
-	if !s.gate.Enabled() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if !g.Enabled() {
 		return auth.Identity{}, true
 	}
-	if id, ok := s.gate.Proxy.Identify(r); ok {
+	if id, ok := g.Proxy.Identify(r); ok {
 		return id, true
 	}
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return auth.Identity{}, false
 	}
-	id, err := s.gate.Sessions.Lookup(r.Context(), cookie.Value)
+	id, err := g.Sessions.Lookup(r.Context(), cookie.Value)
 	if err != nil {
 		return auth.Identity{}, false
 	}
@@ -158,15 +179,19 @@ func (s *Server) mayWrite(id auth.Identity, r *http.Request) bool {
 // requireAuth wraps the route tree.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Bound once for the whole decision. Authentication is editable, so a
+		// save landing between the origin check and the enabled check would
+		// decide one request against two configurations.
+		g := s.auth()
 		// The CSRF check runs whether or not authentication is on, and before
 		// it: an open install still has state-changing endpoints, and a page
 		// on another origin should not be able to drive them through someone's
 		// browser.
-		if auth.CrossSite(r, s.gate.origins()) {
+		if auth.CrossSite(r, g.origins()) {
 			writeError(w, http.StatusForbidden, "cross-origin request refused")
 			return
 		}
-		if !s.gate.Enabled() || s.isPublic(r.URL.Path) {
+		if !g.Enabled() || s.isPublic(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -275,32 +300,35 @@ type authStateResponse struct {
 }
 
 func (s *Server) getAuthState(w http.ResponseWriter, r *http.Request) {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
 	out := authStateResponse{
-		Required:        s.gate.Enabled(),
-		PasswordEnabled: s.gate != nil && s.gate.passwordEnabled(),
-		OIDCEnabled:     s.gate != nil && s.gate.OIDC.Enabled(),
-		ProxyEnabled:    s.gate != nil && s.gate.Proxy.Enabled(),
-		SetupRequired:   s.gate.setupRequired(),
-		SetupOnly:       s.gate.setupRequired() && !s.gate.otherWayIn(),
+		Required:        g.Enabled(),
+		PasswordEnabled: g != nil && g.passwordEnabled(),
+		OIDCEnabled:     g != nil && g.OIDC.Enabled(),
+		ProxyEnabled:    g != nil && g.Proxy.Enabled(),
+		SetupRequired:   g.setupRequired(),
+		SetupOnly:       g.setupRequired() && !g.otherWayIn(),
 		MinPasswordLen:  auth.MinPasswordLength,
 	}
-	if s.gate != nil && s.gate.Account.Available() {
+	if g != nil && g.Account.Available() {
 		out.LocalAvailable = true
-		out.LocalEnabled = s.gate.Account.Active()
-		out.LocalManaged = s.gate.Account.ManagedByEnvironment()
-		out.LocalLinked = s.gate.Account.LinkedSubject() != ""
+		out.LocalEnabled = g.Account.Active()
+		out.LocalManaged = g.Account.ManagedByEnvironment()
+		out.LocalLinked = g.Account.LinkedSubject() != ""
 	}
-	if s.gate != nil {
-		out.OIDCIssuer = s.gate.OIDC.Issuer()
-		out.OIDCError = s.gate.OIDCError
+	if g != nil {
+		out.OIDCIssuer = g.OIDC.Issuer()
+		out.OIDCError = g.OIDCError
 	}
 	out.Role = string(auth.RoleAdmin)
-	if id, ok := s.identify(r); ok && s.gate.Enabled() {
+	if id, ok := s.identify(r); ok && g.Enabled() {
 		out.Authenticated = true
 		out.Subject = id.Name
 		out.Method = string(id.Method)
 		out.Role = string(auth.ParseRole(string(id.Role)))
-	} else if !s.gate.Enabled() {
+	} else if !g.Enabled() {
 		// An install with no authentication has one visitor as far as Silt is
 		// concerned, and they configured it.
 		out.Authenticated = true
@@ -313,8 +341,11 @@ type loginRequest struct {
 }
 
 func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.passwordEnabled() {
-		if s.gate.setupRequired() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.passwordEnabled() {
+		if g.setupRequired() {
 			writeError(w, http.StatusConflict, "this Silt has not been set up yet; choose a password first")
 			return
 		}
@@ -323,7 +354,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := clientKey(r)
-	if blocked, wait := s.gate.throttled(client); blocked {
+	if blocked, wait := g.throttled(client); blocked {
 		// Told plainly rather than silently rejected: the owner who typed it
 		// wrong needs to know to wait, and an attacker learns nothing they
 		// could not measure anyway.
@@ -338,7 +369,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "body must be JSON")
 		return
 	}
-	if !s.gate.verifyPassword(client, req.Password) {
+	if !g.verifyPassword(client, req.Password) {
 		s.log.Warn("failed login attempt", "remote", client)
 		// Recorded before the refusal is written: a rejected sign-in is the
 		// audit row anyone actually goes looking for.
@@ -352,7 +383,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 	// unset is precisely how SILT_OIDC_ADMIN_GROUPS came to do nothing, and
 	// the built-in account being an administrator is a decision worth reading
 	// in the code that makes it.
-	token, err := s.gate.Sessions.Issue(r.Context(), auth.Identity{
+	token, err := g.Sessions.Issue(r.Context(), auth.Identity{
 		Subject: auth.LocalSubject,
 		Name:    "local",
 		Method:  auth.MethodPassword,
@@ -363,18 +394,21 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
-	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, g.Sessions.TTL)
 	s.log.Info("signed in", "method", "password", "remote", client)
 	s.audit(r, store.AuditSignIn, map[string]any{"method": "password"})
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
 
 func (s *Server) postLogout(w http.ResponseWriter, r *http.Request) {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
 	// Revoked server-side, not just forgotten by the browser. A cookie the
 	// client throws away is still a working credential to anyone who copied
 	// it; a deleted row is not.
-	if cookie, err := r.Cookie(sessionCookie); err == nil && s.gate != nil && s.gate.Sessions != nil {
-		if err := s.gate.Sessions.Revoke(r.Context(), cookie.Value); err != nil {
+	if cookie, err := r.Cookie(sessionCookie); err == nil && g != nil && g.Sessions != nil {
+		if err := g.Sessions.Revoke(r.Context(), cookie.Value); err != nil {
 			s.log.Error("revoke session", "error", err)
 		}
 	}
@@ -385,12 +419,15 @@ func (s *Server) postLogout(w http.ResponseWriter, r *http.Request) {
 
 // getOIDCLogin starts the OpenID Connect flow.
 func (s *Server) getOIDCLogin(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.OIDC.Enabled() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.OIDC.Enabled() {
 		writeError(w, http.StatusServiceUnavailable, "OpenID Connect is not configured")
 		return
 	}
 
-	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), false, requestBase(r))
+	url, flow, err := g.OIDC.Start(r.URL.Query().Get("next"), false, requestBase(r))
 	if err != nil {
 		s.log.Error("start OIDC login", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not start the login")
@@ -430,7 +467,10 @@ func (s *Server) writeFlowCookie(w http.ResponseWriter, r *http.Request, flow au
 
 // getOIDCCallback finishes the flow and starts a session.
 func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.OIDC.Enabled() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.OIDC.Enabled() {
 		writeError(w, http.StatusServiceUnavailable, "OpenID Connect is not configured")
 		return
 	}
@@ -461,7 +501,7 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := s.gate.OIDC.Exchange(r.Context(), flow,
+	claims, err := g.OIDC.Exchange(r.Context(), flow,
 		r.URL.Query().Get("state"), r.URL.Query().Get("code"))
 	if err != nil {
 		s.log.Warn("OIDC round trip failed", "error", err, "link", flow.Link)
@@ -479,7 +519,7 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 			s.failLogin(w, r, "sign in as the built-in account before linking it")
 			return
 		}
-		if err := s.gate.Account.Link(r.Context(), claims.Subject); err != nil {
+		if err := g.Account.Link(r.Context(), claims.Subject); err != nil {
 			s.log.Error("link account", "error", err)
 			s.failLogin(w, r, "the link could not be saved")
 			return
@@ -489,20 +529,20 @@ func (s *Server) getOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, ok := auth.IdentityFor(s.gate.OIDC, s.gate.Account, claims)
+	id, ok := auth.IdentityFor(g.OIDC, g.Account, claims)
 	if !ok {
 		s.log.Warn("login refused", "subject", claims.Display(), "reason", "not in an allowed group")
 		s.failLogin(w, r, "your account is not allowed to sign in to this Silt")
 		return
 	}
 
-	token, err := s.gate.Sessions.Issue(r.Context(), id)
+	token, err := g.Sessions.Issue(r.Context(), id)
 	if err != nil {
 		s.log.Error("issue session", "error", err)
 		s.failLogin(w, r, "could not start a session")
 		return
 	}
-	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, g.Sessions.TTL)
 	s.log.Info("signed in", "method", "oidc", "subject", id.Name)
 	s.audit(r, store.AuditSignIn, map[string]any{"method": "oidc", "subject": id.Name})
 	http.Redirect(w, r, auth.SafeNext(flow.Next), http.StatusFound)
@@ -534,11 +574,14 @@ type sessionsResponse struct {
 }
 
 func (s *Server) getSessions(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || s.gate.Sessions == nil {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || g.Sessions == nil {
 		writeJSON(w, http.StatusOK, sessionsResponse{})
 		return
 	}
-	count, err := s.gate.Sessions.Count(r.Context())
+	count, err := g.Sessions.Count(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "count sessions")
 		return
@@ -552,7 +595,10 @@ func (s *Server) getSessions(w http.ResponseWriter, r *http.Request) {
 // all-or-nothing rather than a list with individual revoke buttons: Silt has
 // nothing to tell one session from another that would help someone choose.
 func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || s.gate.Sessions == nil {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || g.Sessions == nil {
 		writeError(w, http.StatusServiceUnavailable, "sessions are not in use")
 		return
 	}
@@ -561,7 +607,7 @@ func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	removed, err := s.gate.Sessions.RevokeSubject(r.Context(), id.Subject)
+	removed, err := g.Sessions.RevokeSubject(r.Context(), id.Subject)
 	if err != nil {
 		s.log.Error("revoke sessions", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not revoke sessions")
@@ -607,11 +653,14 @@ func (g *Gate) otherWayIn() bool {
 // needs an administrator — signing in is not enough, because on such an
 // install signing in is something every reader can do.
 func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.setupRequired() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.setupRequired() {
 		writeError(w, http.StatusConflict, "this Silt has already been set up")
 		return
 	}
-	if s.gate.otherWayIn() {
+	if g.otherWayIn() {
 		// An administrator, not merely someone signed in.
 		//
 		// This endpoint is public because it has to be reachable before anyone
@@ -639,7 +688,7 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.gate.Account.Claim(r.Context(), req.Password); err != nil {
+	if err := g.Account.Claim(r.Context(), req.Password); err != nil {
 		var weak *auth.ErrWeakPassword
 		if errors.As(err, &weak) {
 			writeError(w, http.StatusBadRequest, weak.Reason)
@@ -656,7 +705,7 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 
 	// Signed in immediately: making someone type the password they just chose
 	// is ceremony, and they have already proved they know it.
-	token, err := s.gate.Sessions.Issue(r.Context(), auth.Identity{
+	token, err := g.Sessions.Issue(r.Context(), auth.Identity{
 		Subject: auth.LocalSubject, Name: "admin",
 		Method: auth.MethodPassword, Role: auth.RoleAdmin,
 	})
@@ -665,7 +714,7 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the password was set but the session could not start")
 		return
 	}
-	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, g.Sessions.TTL)
 	s.log.Info("built-in account claimed", "remote", clientKey(r))
 	s.audit(r, store.AuditAccountClaimed, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
@@ -673,6 +722,9 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 
 // putPassword changes the password of the signed-in built-in account.
 func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
 	id, ok := s.identify(r)
 	if !ok || id.Subject != auth.LocalSubject {
 		writeError(w, http.StatusForbidden, "only the built-in account can change its own password")
@@ -683,7 +735,7 @@ func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.gate.Account.ChangePassword(r.Context(), clientKey(r), req.Current, req.Password); err != nil {
+	if err := g.Account.ChangePassword(r.Context(), clientKey(r), req.Current, req.Password); err != nil {
 		var weak *auth.ErrWeakPassword
 		if errors.As(err, &weak) {
 			writeError(w, http.StatusBadRequest, weak.Reason)
@@ -695,18 +747,18 @@ func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Every other session belonged to the old password. Changing it because
 	// you think it leaked should not leave the copy that leaked still working.
-	if removed, err := s.gate.Sessions.RevokeSubject(r.Context(), auth.LocalSubject); err != nil {
+	if removed, err := g.Sessions.RevokeSubject(r.Context(), auth.LocalSubject); err != nil {
 		s.log.Error("revoke sessions after password change", "error", err)
 	} else {
 		s.log.Info("password changed; sessions revoked", "count", removed)
 	}
-	token, err := s.gate.Sessions.Issue(r.Context(), id)
+	token, err := g.Sessions.Issue(r.Context(), id)
 	if err != nil {
 		s.log.Error("issue session", "error", err)
 		writeError(w, http.StatusInternalServerError, "the password changed but the session could not restart")
 		return
 	}
-	s.setSessionCookie(w, r, token, s.gate.Sessions.TTL)
+	s.setSessionCookie(w, r, token, g.Sessions.TTL)
 	s.audit(r, store.AuditPasswordChanged, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"changed": true})
 }
@@ -717,7 +769,10 @@ type accountStateRequest struct {
 
 // putAccount turns the built-in account on or off.
 func (s *Server) putAccount(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.Account.Available() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.Account.Available() {
 		writeError(w, http.StatusServiceUnavailable, "the built-in account is disabled by configuration")
 		return
 	}
@@ -729,17 +784,17 @@ func (s *Server) putAccount(w http.ResponseWriter, r *http.Request) {
 	// Refusing to lock the owner out is the whole reason this is a handler
 	// rather than a direct call: only this layer knows whether anything else
 	// would still let someone in.
-	if !req.Enabled && !s.gate.OIDC.Enabled() && !s.gate.Proxy.Enabled() {
+	if !req.Enabled && !g.OIDC.Enabled() && !g.Proxy.Enabled() {
 		writeError(w, http.StatusConflict,
 			"turning off the built-in account would leave no way to sign in; configure a provider or a reverse proxy first")
 		return
 	}
-	if err := s.gate.Account.SetEnabled(r.Context(), req.Enabled); err != nil {
+	if err := g.Account.SetEnabled(r.Context(), req.Enabled); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !req.Enabled {
-		if _, err := s.gate.Sessions.RevokeSubject(r.Context(), auth.LocalSubject); err != nil {
+		if _, err := g.Sessions.RevokeSubject(r.Context(), auth.LocalSubject); err != nil {
 			s.log.Error("revoke sessions after disabling the account", "error", err)
 		}
 	}
@@ -751,7 +806,10 @@ func (s *Server) putAccount(w http.ResponseWriter, r *http.Request) {
 // getLink starts an OpenID Connect round trip whose purpose is to record which
 // provider identity belongs to the built-in account.
 func (s *Server) getLink(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.OIDC.Enabled() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.OIDC.Enabled() {
 		writeError(w, http.StatusServiceUnavailable, "OpenID Connect is not configured")
 		return
 	}
@@ -761,7 +819,7 @@ func (s *Server) getLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, flow, err := s.gate.OIDC.Start(r.URL.Query().Get("next"), true, requestBase(r))
+	url, flow, err := g.OIDC.Start(r.URL.Query().Get("next"), true, requestBase(r))
 	if err != nil {
 		s.log.Error("start OIDC link", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not start the link")
@@ -775,7 +833,10 @@ func (s *Server) getLink(w http.ResponseWriter, r *http.Request) {
 
 // deleteLink forgets the linked provider identity.
 func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
-	if s.gate == nil || !s.gate.Account.Available() {
+	// Bound once: a save landing mid-request must not answer two
+	// questions from two configurations.
+	g := s.auth()
+	if g == nil || !g.Account.Available() {
 		writeError(w, http.StatusServiceUnavailable, "the built-in account is disabled by configuration")
 		return
 	}
@@ -784,7 +845,7 @@ func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "sign in as the built-in account to unlink it")
 		return
 	}
-	if err := s.gate.Account.Link(r.Context(), ""); err != nil {
+	if err := g.Account.Link(r.Context(), ""); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not unlink")
 		return
 	}

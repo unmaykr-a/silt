@@ -24,3 +24,26 @@ export const VACUUM_INTERVALS = [
   ["weekly", 7 * DAY],
   ["monthly", 30 * DAY],
 ] as const;
+
+export const SESSION_TTLS = [
+  ["1 day", DAY],
+  ["7 days", 7 * DAY],
+  ["30 days", 30 * DAY],
+  ["90 days", 90 * DAY],
+] as const;
+
+export const IDLE_TTLS = [
+  ["disabled", 0],
+  ["12 hours", 12 * HOUR],
+  ["24 hours", DAY],
+  ["7 days", 7 * DAY],
+  ["30 days", 30 * DAY],
+] as const;
+
+export const ADMIN_TTLS = [
+  ["never expires", 0],
+  ["1 hour", HOUR],
+  ["12 hours", 12 * HOUR],
+  ["24 hours", DAY],
+  ["7 days", 7 * DAY],
+] as const;

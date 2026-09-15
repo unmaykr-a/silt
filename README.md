@@ -58,6 +58,10 @@ is an architectural rule, not a v1 shortcut.
 - **Notifications** through any shoutrrr target, filtered by change kind *and* severity.
 - **Backups that are actually consistent** — one endpoint, one file, safe to take while Silt
   is running.
+- **Settings you can actually change.** Thirty-nine of Silt's forty-five settings are editable
+  while it runs, authentication included, and every field says whether its value came from your
+  compose file or from that screen. The compose file stays the baseline, and one variable puts
+  you back on it.
 
 **[Everything else is in the wiki →](https://github.com/unmaykr-a/silt/wiki)**
 

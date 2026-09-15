@@ -1,9 +1,31 @@
 // Package config loads Silt's configuration from the environment.
 //
-// Silt is configured entirely by environment variables, as self-hosters
-// expect. Every knob is documented in PROJECT.md Section 13; this struct
-// carries the subset that the current milestone actually reads, and grows as
-// features land rather than declaring options that do nothing.
+// The environment is the baseline an install boots with, which is what a
+// compose file can express and what a self-hoster expects to find there. It is
+// not the only place a value can come from: a field tagged `editable` can be
+// overridden at runtime from the settings screen, and internal/settings is
+// where the two are merged.
+//
+// Six settings have no such tag, and each for a reason the settings screen
+// could not work around:
+//
+//   - SILT_LISTEN_ADDR and SILT_DB_PATH are consumed once, by a socket and a
+//     file handle that cannot be swapped underneath a running process.
+//   - SILT_COMPOSE_ROOTS is an allowlist whose entries only mean anything
+//     alongside a matching read-only volume mount, so a path typed into the UI
+//     would name a directory this container cannot see.
+//   - SILT_PASSWORD_HASH exists to take the password out of the UI's hands for
+//     an install managed declaratively, so a UI that could set it would defeat
+//     its only purpose.
+//   - SILT_SECRET_KEY is the key that encrypts what is stored, and a key kept
+//     in the database it protects protects nothing.
+//   - SILT_SETTINGS_RESET is the way back in when a save goes wrong, so it has
+//     to work without signing in.
+//
+// Every knob is documented in PROJECT.md Section 13, in docs/wiki and in
+// .env.example, and tests read the tags off this struct and fail if one of them
+// is missing from any of the three — or if the manual and the tag disagree about
+// whether a restart is needed.
 package config
 
 import (
@@ -70,6 +92,32 @@ type Config struct {
 	// cleartext. There is no redact-list: everything else is redacted.
 	KeepKeys []string `env:"SILT_KEEP_KEYS" envSeparator:"," editable:"keep_keys"`
 
+	// SettingsReset drops every stored override at startup, returning the
+	// install to exactly what its environment says.
+	//
+	// This is the way back in. Authentication is editable from the settings
+	// screen, so a save can leave an install nobody can sign in to — an issuer
+	// pointing at a provider that is gone, an allowed-groups list with a typo
+	// in it, the local account turned off beside a provider that has stopped
+	// answering. Before 1.2.0 the compose file was the recovery path for all of
+	// those because it was the only path; now it needs to be said out loud.
+	//
+	// Not editable, for the obvious reason, and read at startup rather than
+	// watched: recovery is a container recreate with one variable set, which is
+	// a thing you can do without being able to sign in.
+	SettingsReset bool `env:"SILT_SETTINGS_RESET" envDefault:"false"`
+
+	// SecretKey encrypts the credentials Silt keeps in its own settings row: the
+	// ingest token, the notification targets, and the OpenID Connect client
+	// secret.
+	//
+	// It stays in the environment and is deliberately not editable, for the
+	// obvious reason — a key stored in the database it protects protects
+	// nothing. Empty leaves those values as they were, in plaintext, which is
+	// what every install before 1.2.0 did; GET /api/backup hands out a copy of
+	// that file, so setting this is what makes a backup safe to keep off-box.
+	SecretKey string `env:"SILT_SECRET_KEY"`
+
 	// HostName labels this Docker host in the database.
 	HostName string `env:"SILT_HOST_NAME" envDefault:"local" editable:"host_name"`
 
@@ -84,12 +132,12 @@ type Config struct {
 	// NotifyMinSeverity is ANDed with NotifyOn.
 	NotifyMinSeverity string `env:"SILT_NOTIFY_MIN_SEVERITY" envDefault:"medium" editable:"notify_min_severity"`
 	// BaseURL is used to build links in notifications. Empty omits the link.
-	BaseURL string `env:"SILT_BASE_URL" editable:"base_url"`
+	BaseURL string `env:"SILT_BASE_URL" editable:"base_url,gate"`
 
 	// TrustProxyAuth accepts an identity asserted by a reverse proxy.
-	TrustProxyAuth bool `env:"SILT_TRUST_PROXY_AUTH" envDefault:"false"`
+	TrustProxyAuth bool `env:"SILT_TRUST_PROXY_AUTH" envDefault:"false" editable:"trust_proxy_auth,gate"`
 	// AuthHeader is the forward-auth header name.
-	AuthHeader string `env:"SILT_AUTH_HEADER" envDefault:"X-Remote-User"`
+	AuthHeader string `env:"SILT_AUTH_HEADER" envDefault:"X-Remote-User" editable:"auth_header,gate"`
 	// AuthGroupsHeader carries the groups a forward-auth proxy asserts, so
 	// the same admin split works there as under OIDC. Authelia and authentik
 	// both send one; the value is comma-separated.
@@ -97,9 +145,9 @@ type Config struct {
 	// Only consulted when AdminGroups is set — without it there is nothing to
 	// compare against, and reading an attacker-settable header for no reason
 	// is a habit worth not having.
-	AuthGroupsHeader string `env:"SILT_AUTH_GROUPS_HEADER" envDefault:"X-Remote-Groups"`
+	AuthGroupsHeader string `env:"SILT_AUTH_GROUPS_HEADER" envDefault:"X-Remote-Groups" editable:"auth_groups_header,gate"`
 	// AdminGroups is the forward-auth equivalent of OIDCAdminGroups.
-	AdminGroups []string `env:"SILT_ADMIN_GROUPS" envSeparator:","`
+	AdminGroups []string `env:"SILT_ADMIN_GROUPS" envSeparator:"," editable:"admin_groups,gate"`
 	// TrustedProxies are the addresses or CIDR ranges whose forward-auth
 	// header is believed.
 	//
@@ -107,7 +155,7 @@ type Config struct {
 	// who can open a socket can set a header, "authenticated" would mean
 	// "reached the port" — which on a shared Docker network is every other
 	// container on it.
-	TrustedProxies []string `env:"SILT_TRUSTED_PROXIES" envSeparator:","`
+	TrustedProxies []string `env:"SILT_TRUSTED_PROXIES" envSeparator:"," editable:"trusted_proxies,gate"`
 	// PasswordHash is a bcrypt hash for the built-in account. Setting it
 	// claims the account before Silt ever starts and takes the password out
 	// of the UI's hands, which is what someone managing Silt declaratively
@@ -118,21 +166,21 @@ type Config struct {
 	// the port, which made the safe configuration the one you had to know to
 	// ask for. Turn it off for an install that authenticates only through a
 	// provider or a proxy.
-	LocalAccount bool `env:"SILT_LOCAL_ACCOUNT" envDefault:"true"`
+	LocalAccount bool `env:"SILT_LOCAL_ACCOUNT" envDefault:"true" editable:"local_account,gate"`
 
 	// OIDCIssuer enables OpenID Connect login. Empty disables it.
-	OIDCIssuer string `env:"SILT_OIDC_ISSUER"`
+	OIDCIssuer string `env:"SILT_OIDC_ISSUER" editable:"oidc_issuer,gate"`
 	// OIDCClientID and OIDCClientSecret are the registered client.
-	OIDCClientID     string `env:"SILT_OIDC_CLIENT_ID"`
-	OIDCClientSecret string `env:"SILT_OIDC_CLIENT_SECRET"`
+	OIDCClientID     string `env:"SILT_OIDC_CLIENT_ID" editable:"oidc_client_id,gate"`
+	OIDCClientSecret string `env:"SILT_OIDC_CLIENT_SECRET" editable:"oidc_client_secret,secret,gate"`
 	// OIDCRedirectURL must match the provider's registration exactly. Empty
 	// derives it from BaseURL.
-	OIDCRedirectURL string `env:"SILT_OIDC_REDIRECT_URL"`
+	OIDCRedirectURL string `env:"SILT_OIDC_REDIRECT_URL" editable:"oidc_redirect_url,gate"`
 	// OIDCScopes always includes openid, whether or not it is listed.
-	OIDCScopes []string `env:"SILT_OIDC_SCOPES" envSeparator:"," envDefault:"openid,profile,email"`
+	OIDCScopes []string `env:"SILT_OIDC_SCOPES" envSeparator:"," envDefault:"openid,profile,email" editable:"oidc_scopes,gate"`
 	// OIDCUsernameClaim and OIDCGroupsClaim differ between providers.
-	OIDCUsernameClaim string `env:"SILT_OIDC_USERNAME_CLAIM" envDefault:"preferred_username"`
-	OIDCGroupsClaim   string `env:"SILT_OIDC_GROUPS_CLAIM" envDefault:"groups"`
+	OIDCUsernameClaim string `env:"SILT_OIDC_USERNAME_CLAIM" envDefault:"preferred_username" editable:"oidc_username_claim,gate"`
+	OIDCGroupsClaim   string `env:"SILT_OIDC_GROUPS_CLAIM" envDefault:"groups" editable:"oidc_groups_claim,gate"`
 	// OIDCAdminGroups splits reading from administering. Empty means everyone
 	// admitted is an administrator, which is what Silt did before roles
 	// existed and what a provider carrying only your own accounts wants.
@@ -140,16 +188,16 @@ type Config struct {
 	// A group rather than a roles table: the provider already manages groups,
 	// and duplicating them here would be two sources of truth that agree until
 	// they do not. See PROJECT.md Section 14.
-	OIDCAdminGroups []string `env:"SILT_OIDC_ADMIN_GROUPS" envSeparator:","`
+	OIDCAdminGroups []string `env:"SILT_OIDC_ADMIN_GROUPS" envSeparator:"," editable:"oidc_admin_groups,gate"`
 	// OIDCAllowedGroups and OIDCAllowedUsers restrict who may sign in. Both
 	// empty admits anyone the provider authenticates.
-	OIDCAllowedGroups []string `env:"SILT_OIDC_ALLOWED_GROUPS" envSeparator:","`
-	OIDCAllowedUsers  []string `env:"SILT_OIDC_ALLOWED_USERS" envSeparator:","`
+	OIDCAllowedGroups []string `env:"SILT_OIDC_ALLOWED_GROUPS" envSeparator:"," editable:"oidc_allowed_groups,gate"`
+	OIDCAllowedUsers  []string `env:"SILT_OIDC_ALLOWED_USERS" envSeparator:"," editable:"oidc_allowed_users,gate"`
 
 	// SessionTTL is how long a session lasts regardless of activity.
-	SessionTTL time.Duration `env:"SILT_SESSION_TTL" envDefault:"720h"`
+	SessionTTL time.Duration `env:"SILT_SESSION_TTL" envDefault:"720h" editable:"session_ttl_ms,gate"`
 	// SessionIdleTTL ends an unused session early. Zero disables it.
-	SessionIdleTTL time.Duration `env:"SILT_SESSION_IDLE_TTL" envDefault:"168h"`
+	SessionIdleTTL time.Duration `env:"SILT_SESSION_IDLE_TTL" envDefault:"168h" editable:"session_idle_ttl_ms,gate"`
 	// OIDCAdminTTL bounds how long a provider-granted administrator role stays
 	// good without signing in again. Zero disables the lapse.
 	//
@@ -163,7 +211,7 @@ type Config struct {
 	// reason: reading the journal is not the dangerous part, forward auth
 	// asserts its groups on every request already, and the built-in account
 	// has no external source to have changed its mind.
-	OIDCAdminTTL time.Duration `env:"SILT_OIDC_ADMIN_TTL" envDefault:"12h"`
+	OIDCAdminTTL time.Duration `env:"SILT_OIDC_ADMIN_TTL" envDefault:"12h" editable:"oidc_admin_ttl_ms,gate"`
 
 	// CookieSecure decides the Secure flag on the session cookie: auto,
 	// always, or never.
@@ -175,7 +223,7 @@ type Config struct {
 	// Secure, over a connection the browser would happily repeat in the clear.
 	// always is the setting for anyone who knows their install is HTTPS and
 	// would rather Silt not guess.
-	CookieSecure string `env:"SILT_COOKIE_SECURE" envDefault:"auto"`
+	CookieSecure string `env:"SILT_COOKIE_SECURE" envDefault:"auto" editable:"cookie_secure"`
 
 	// IngestRatePerMinute caps webhook events accepted from one source address.
 	//

@@ -5,6 +5,29 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 1.2.0 — 2026-09-15
+
+Authentication is editable from the settings screen, with a key that encrypts what is stored and a way back in when a save goes wrong.
+
+### Added
+
+- All twenty authentication settings are editable under Settings → Authentication: the built-in account, forward auth and its trusted proxies, the whole OpenID Connect block, the session lifetimes and the cookie policy. Saving rebuilds the gate — the account is re-read, the proxy rules are rebuilt and provider discovery runs again — and sessions survive it, because they are rows in the database rather than signed cookies.
+- SILT_SETTINGS_RESET drops every setting saved from the UI at startup, so the install runs exactly what its environment says. This is the way back in from a save that locked you out, which is why it is read before the stored settings are and works without signing in.
+- A byte-scan test for those credentials, on the pattern the redaction sentinel already uses: plant a secret-shaped value in every secret-tagged setting, then scan the database file, its write-ahead log and a backup taken through the API. Querying would only prove the value is not in the column it was meant to be in; scanning proves it is not in the file that leaves the host.
+
+### Changed
+
+- That was withheld before now on the argument that a UI able to edit the boundary in front of it would be a way in rather than a setting. What changed the answer is that only an administrator reaches that screen, and an administrator already holds the stronger controls: the whole-database backup, the password, every session. Withholding it bought nothing and cost a container recreate to fix a mistyped issuer.
+- Six of forty-five settings are environment-only now, and the package doc names each one and why — checked by a test, which is how the list came to be right after being written down wrong the first time.
+
+### Fixed
+
+- SILT_PASSWORD_HASH stays environment-only, and the reason is now stated where someone will read it: the variable exists to take the password out of the UI's hands for an install managed from a compose file, so a UI that could set it would defeat its only purpose.
+
+### Security
+
+- SILT_SECRET_KEY encrypts the credentials Silt keeps in its own settings row — the ingest token, the notification targets and the OIDC client secret — with AES-256-GCM. They were stored in plaintext, and GET /api/backup hands out a copy of that file. The key stays in the environment and is never written to the database or included in a backup. Without it nothing changes, because a key that is required breaks every install that upgrades without setting one; adding one later reads what is already there and seals it on the next save.
+
 ## 1.1.0 — 2026-09-15
 
 Nineteen of forty-three settings are editable while Silt runs, and adding the twentieth is one struct tag.

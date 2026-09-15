@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/auth"
@@ -36,7 +37,7 @@ type Server struct {
 	snapshotter Snapshotter
 	started     time.Time
 	version     string
-	gate        *Gate
+	gate        atomic.Pointer[Gate]
 	files       FileReader
 	live        *settings.Live
 	prober      Prober

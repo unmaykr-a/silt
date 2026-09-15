@@ -59,6 +59,18 @@ func TestAViewerCannotChangeSiltsConfiguration(t *testing.T) {
 	for _, tc := range []struct{ method, path, body string }{
 		{http.MethodPut, "/api/settings", `{"log_level":"debug"}`},
 		{http.MethodDelete, "/api/settings", ""},
+		// The escalation someone would actually try, now that authentication is
+		// editable: a viewer writing themselves into the administrator group, or
+		// turning the split off so that everyone admitted is an administrator.
+		// Same endpoint and so the same guard, but this is the case worth being
+		// able to point at.
+		{http.MethodPut, "/api/settings", `{"admin_groups":["users"]}`},
+		{http.MethodPut, "/api/settings", `{"admin_groups":[]}`},
+		{http.MethodPut, "/api/settings", `{"oidc_admin_groups":[]}`},
+		{http.MethodPut, "/api/settings", `{"trust_proxy_auth":false}`},
+		{http.MethodPut, "/api/settings", `{"auth_header":"X-Whatever"}`},
+		{http.MethodPut, "/api/settings", `{"oidc_client_secret":"mine"}`},
+		{http.MethodPut, "/api/settings", `{"reset":["admin_groups"]}`},
 		{http.MethodPost, "/api/settings/notifications/test", ""},
 		{http.MethodPost, "/api/maintenance/prune", ""},
 		{http.MethodPost, "/api/projects/1/snapshot", ""},

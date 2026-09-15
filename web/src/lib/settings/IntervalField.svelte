@@ -22,7 +22,13 @@
     options,
   }: {
     store: SettingsStore;
-    name: "snapshot_interval_ms" | "retention_interval_ms" | "vacuum_interval_ms";
+    name:
+      | "snapshot_interval_ms"
+      | "retention_interval_ms"
+      | "vacuum_interval_ms"
+      | "session_ttl_ms"
+      | "session_idle_ttl_ms"
+      | "oidc_admin_ttl_ms";
     label: string;
     envVar: string;
     hint?: string;

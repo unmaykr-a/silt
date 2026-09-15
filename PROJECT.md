@@ -957,7 +957,9 @@ read but undocumented works perfectly and so nothing else ever notices.
 | `SILT_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `SILT_DB_PATH` | `/data/silt.db` | SQLite file |
 | `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint. A read-only socket proxy, never the socket itself — see Section 3 |
-| `SILT_HOST_NAME` | `local` | Label for this Docker host in the database |
+| `SILT_HOST_NAME` | `local` | Label for this Docker host in the database. Changing it renames the existing row |
+| `SILT_SETTINGS_RESET` | `false` | Drops every stored override at startup. The way back in from a save that locked you out |
+| `SILT_SECRET_KEY` | *(empty)* | Encrypts the credentials in Silt's own settings row (ingest token, notification targets, OIDC client secret). Stays in the environment; a key in the database it protects protects nothing |
 | `SILT_BASE_URL` | *(empty)* | Public URL. Links notifications to the diff and derives the OIDC callback |
 
 **Collection**
@@ -2294,7 +2296,31 @@ Changed:
     host's snapshots win and there is no safe default for that. The general shape:
     a setting nobody can change is a setting nobody has had to make correct.
 
-115. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+115. **The boundary argument, and what was wrong with it (1.2.0)** — authentication
+    was the one part of the configuration held back on a stated principle rather
+    than on cost: a UI able to edit the boundary in front of it would be a way in
+    rather than a setting. Written down in three places and believed for five
+    releases. What is wrong with it is that only an administrator reaches that
+    screen, and an administrator already holds every stronger control — the
+    whole-database backup, the password, every session. The principle protected
+    nothing and charged a container recreate to fix a mistyped issuer. What it
+    *did* do was hide a real cost: because the settings could not be edited, the
+    consequences of editing them had never been worked out, and three of them
+    turned out to matter. The gate has to be replaced atomically, because requests
+    read it while it changes. Only a gate-relevant change may rebuild it, or
+    saving the log level would call your identity provider — which is why
+    `editable` grew a `gate` option and a fingerprint rather than a list in main.
+    And the credentials in the settings row were in plaintext, in a file
+    `GET /api/backup` hands out, which was already true of the ingest token and
+    the notification targets before this release and nothing said so. A rule that
+    stops a feature being built also stops its problems being found. The ceiling
+    idea — an environment value the UI may narrow but not widen — was designed and
+    then dropped: the semantics differ per setting (subset, may-not-change,
+    may-not-enable), which is three more tag dimensions to protect against an
+    administrator from themselves. `SILT_SETTINGS_RESET` is the honest version of
+    the same intent, and it is four lines.
+
+116. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

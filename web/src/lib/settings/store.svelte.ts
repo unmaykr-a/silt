@@ -28,6 +28,7 @@ export function createSettingsStore() {
   // travel only when someone types into them.
   let notifyUrls = $state("");
   let ingestToken = $state("");
+  let oidcClientSecret = $state("");
 
   // What this identity may do. A viewer reads every screen and changes
   // nothing, so the controls that would be refused are not offered at all: a
@@ -39,6 +40,7 @@ export function createSettingsStore() {
     draft = toDraft(s.effective);
     notifyUrls = "";
     ingestToken = "";
+    oidcClientSecret = "";
   }
 
   async function apply(fn: () => Promise<Settings>, message?: string) {
@@ -89,6 +91,12 @@ export function createSettingsStore() {
     set ingestToken(v: string) {
       ingestToken = v;
     },
+    get oidcClientSecret() {
+      return oidcClientSecret;
+    },
+    set oidcClientSecret(v: string) {
+      oidcClientSecret = v;
+    },
     get role() {
       return role;
     },
@@ -103,7 +111,7 @@ export function createSettingsStore() {
     /** Whether a save would send anything. */
     get dirty() {
       if (!settings) return false;
-      return Object.keys(buildPatch(draft, settings.effective, { notifyUrls, ingestToken })).length > 0;
+      return Object.keys(buildPatch(draft, settings.effective, { notifyUrls, ingestToken, oidcClientSecret })).length > 0;
     },
 
     adopt,
@@ -130,7 +138,7 @@ export function createSettingsStore() {
 
     save() {
       if (!settings) return;
-      const patch = buildPatch(draft, settings.effective, { notifyUrls, ingestToken });
+      const patch = buildPatch(draft, settings.effective, { notifyUrls, ingestToken, oidcClientSecret });
       if (Object.keys(patch).length === 0) return;
       return apply(() => api.updateSettings(patch), "Saved. In force now — no restart needed.");
     },

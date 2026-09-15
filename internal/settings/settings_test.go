@@ -71,7 +71,7 @@ func patch(t *testing.T, values map[string]any) settings.Overrides {
 
 func TestOverrideTakesEffectAndSurvivesAReload(t *testing.T) {
 	db := newMem()
-	live, err := settings.Load(t.Context(), baseline(), db)
+	live, err := settings.Load(t.Context(), baseline(), db, nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestOverrideTakesEffectAndSurvivesAReload(t *testing.T) {
 		t.Errorf("baseline moved to %d; the environment must stay the baseline", got)
 	}
 
-	reloaded, err := settings.Load(t.Context(), baseline(), db)
+	reloaded, err := settings.Load(t.Context(), baseline(), db, nil)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestOverrideTakesEffectAndSurvivesAReload(t *testing.T) {
 // would come up with a configuration the running process refused.
 func TestRejectedUpdateChangesNothing(t *testing.T) {
 	db := newMem()
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 
 	if _, err := live.Update(t.Context(), patch(t, map[string]any{"snapshot_interval_ms": 10}), nil); err == nil {
 		t.Fatal("a 10ms snapshot interval was accepted")
@@ -120,7 +120,7 @@ func TestRejectedUpdateChangesNothing(t *testing.T) {
 // wrong beside the changed-retention value it now exceeds.
 func TestCrossFieldValidationSeesTheMergedDocument(t *testing.T) {
 	db := newMem()
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 
 	if _, err := live.Update(t.Context(), patch(t, map[string]any{"unchanged_retention_days": 400}), nil); err == nil {
 		t.Fatal("unchanged retention was allowed to exceed changed retention")
@@ -129,7 +129,7 @@ func TestCrossFieldValidationSeesTheMergedDocument(t *testing.T) {
 
 func TestResetFieldFallsBackToTheEnvironment(t *testing.T) {
 	db := newMem()
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 
 	if _, err := live.Update(t.Context(), patch(t, map[string]any{
 		"retention_days": 30,
@@ -156,7 +156,7 @@ func TestResetFieldFallsBackToTheEnvironment(t *testing.T) {
 
 func TestResetDropsEverything(t *testing.T) {
 	db := newMem()
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestResetDropsEverything(t *testing.T) {
 
 func TestUnknownResetFieldIsRejected(t *testing.T) {
 	db := newMem()
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 	if _, err := live.Update(t.Context(), settings.Overrides{}, []string{"db_path"}); err == nil {
 		t.Fatal("db_path is not editable but was accepted as a reset target")
 	}
@@ -184,7 +184,7 @@ func TestUnknownResetFieldIsRejected(t *testing.T) {
 func TestFailedWriteDoesNotChangeTheRunningConfiguration(t *testing.T) {
 	db := newMem()
 	db.fails = true
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 
 	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); err == nil {
 		t.Fatal("update succeeded despite the write failing")
@@ -201,7 +201,7 @@ func TestUnreadableStoredSettingsFallBackToTheEnvironment(t *testing.T) {
 	db := newMem()
 	db.rows["config_overrides"] = "{not json"
 
-	live, err := settings.Load(t.Context(), baseline(), db)
+	live, err := settings.Load(t.Context(), baseline(), db, nil)
 	if err == nil {
 		t.Error("a corrupt document should be reported")
 	}
@@ -212,7 +212,7 @@ func TestUnreadableStoredSettingsFallBackToTheEnvironment(t *testing.T) {
 
 func TestObserversSeeTheCurrentValueImmediatelyAndOnChange(t *testing.T) {
 	db := newMem()
-	live, _ := settings.Load(t.Context(), baseline(), db)
+	live, _ := settings.Load(t.Context(), baseline(), db, nil)
 
 	var seen []int
 	live.Observe(func(c config.Config) { seen = append(seen, c.RetentionDays) })
@@ -228,7 +228,7 @@ func TestObserversSeeTheCurrentValueImmediatelyAndOnChange(t *testing.T) {
 }
 
 func TestGetReturnsACopy(t *testing.T) {
-	live, _ := settings.Load(t.Context(), baseline(), newMem())
+	live, _ := settings.Load(t.Context(), baseline(), newMem(), nil)
 	got := live.Get()
 	got.KeepKeys[0] = "MUTATED"
 	if live.Get().KeepKeys[0] != "FROM_ENV" {
@@ -237,7 +237,7 @@ func TestGetReturnsACopy(t *testing.T) {
 }
 
 func TestReadOnlyWithoutAStore(t *testing.T) {
-	live, err := settings.Load(t.Context(), baseline(), nil)
+	live, err := settings.Load(t.Context(), baseline(), nil, nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

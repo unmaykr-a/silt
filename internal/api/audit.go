@@ -46,7 +46,7 @@ func (s *Server) auditAs(r *http.Request, action string, failed bool, detail map
 // inventing one would be worse than an empty string: "admin" would read as a
 // real account on a Silt where anybody who can reach the port is admin.
 func (s *Server) actor(r *http.Request) (string, string) {
-	if s.gate == nil || !s.gate.Enabled() {
+	if s.auth() == nil || !s.auth().Enabled() {
 		return "", store.AuditBySystem
 	}
 	id, ok := s.identify(r)
