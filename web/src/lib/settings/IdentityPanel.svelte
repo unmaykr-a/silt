@@ -69,12 +69,6 @@
         ? "A proxy that terminates TLS without setting X-Forwarded-Proto makes this look like plain HTTP, and the session cookie ships without Secure. Set it to always if you know your install is HTTPS."
         : undefined}
     />
-    <FlagRow
-      label="Metrics without signing in"
-      on={id.metrics_public}
-      envVar="SILT_METRICS_PUBLIC"
-      hint="/metrics carries counts and names, not values — but a project name is still information about your host."
-    />
   </dl>
 
   <h4 class="mt-6 text-xs font-medium uppercase tracking-wide text-muted-foreground">Reverse proxy</h4>

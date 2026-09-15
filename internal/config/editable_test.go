@@ -80,6 +80,11 @@ func TestEverySettingSurvivesADecodeEncodeCycle(t *testing.T) {
 		"notify_on":                `["image_id","volumes"]`,
 		"notify_min_severity":      `"low"`,
 		"base_url":                 `"https://silt.example"`,
+		"docker_host":              `"tcp://other-proxy:2375"`,
+		"host_name":                `"pi"`,
+		"metrics_public":           `true`,
+		"ingest_rate_per_minute":   `120`,
+		"max_compose_file_bytes":   `2097152`,
 	}
 	for _, f := range config.Editable() {
 		raw, ok := values[f.Name]

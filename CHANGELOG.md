@@ -5,6 +5,30 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 1.1.0 — 2026-09-15
+
+Nineteen of forty-three settings are editable while Silt runs, and adding the twentieth is one struct tag.
+
+### Added
+
+- Five settings became editable, and none of them was protecting anything: the host name, the Docker endpoint, the compose-file size cap, the ingest rate limit and whether /metrics answers without a session. What kept them in the environment was the cost of adding a setting, written up afterwards as policy. Fourteen editable settings became nineteen.
+- Changing the Docker endpoint redials rather than waiting for a restart. Closing the old transport is what ends the event stream, so the watcher's own reconnect loop picks up the new engine; an endpoint that will not dial is refused and the old one stays.
+- Guards that hold for every setting rather than one at a time: each must round-trip through the HTTP API, be readable back, reset to the environment, appear in both halves of the OpenAPI schema and in nothing else, and carry a **restart** marker in the manual exactly when it is not editable — while every secret must be absent from the response. They are driven by the registry, so a setting added later is covered the moment it is tagged, and the build fails when a new setting has no test value. Each was verified by breaking what it guards.
+
+### Changed
+
+- Which settings are editable is decided by a tag on the config field rather than by six hand-maintained lists. Adding one used to mean a field on an Overrides struct, an entry in a Fields slice, and a case in each of apply, Set, merge and clearFields — five of the six pure switch-case, with nothing comparing them to each other. Forgetting the merge case gave a setting that saved and then reverted on the next save of anything else, silently. Net 200 lines out of internal/settings.
+- Settings values are trimmed and de-blanked on the way in, so a list typed as "TZ, " stores one key rather than two, one of them empty.
+
+### Fixed
+
+- Renaming the host moves its history. SILT_HOST_NAME is the key the host row is keyed on, so changing it and restarting used to insert a second host and re-create every project under it — leaving all the history under the old label and none under the new one. Renaming back to a label used before finds a row already holding it, and two histories are left as two rather than merged on a guess.
+- A misspelt setting name is refused instead of ignored. The patch decoded into a struct and encoding/json drops what it does not recognise, so a PUT naming retention_dayz answered 200 and changed nothing.
+
+### Security
+
+- The settings export strips secrets by asking which fields are secret, rather than naming the two it knew about. The next secret added would have ridden out in a file people keep.
+
 ## 1.0.1 — 2026-09-15
 
 A wiki that is the manual, a README that is an introduction, and tests that keep both from rotting.

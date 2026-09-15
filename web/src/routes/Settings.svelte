@@ -45,7 +45,6 @@
   const READ_ONLY_SECTIONS = new Set<SectionID>([
     "setup",
     "appearance",
-    "security",
     "identity",
     "environment",
     "storage",

@@ -42,8 +42,6 @@ type Gate struct {
 	// looks like it has no provider, when you configured one, is worse than
 	// Silt that says the provider is unreachable.
 	OIDCError string
-	// MetricsPublic leaves /metrics reachable without authentication.
-	MetricsPublic bool
 	// AllowedOrigins are extra origins accepted on unsafe requests, beyond the
 	// one the request was addressed to.
 	AllowedOrigins []string
@@ -126,7 +124,10 @@ func (s *Server) isPublic(path string) bool {
 		"/api/ingest":
 		return true
 	case "/metrics":
-		return s.gate != nil && s.gate.MetricsPublic
+		// The live setting rather than the gate's startup copy: this is
+		// editable, and a gate rebuilt only at startup would keep the old
+		// answer until a restart.
+		return s.conf().MetricsPublic
 	default:
 		return false
 	}

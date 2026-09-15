@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -30,12 +31,28 @@ const (
 )
 
 // Client is a read-only Docker Engine client.
+//
+// The endpoint behind it can change while Silt runs, so callers hold the
+// Client rather than the transport and read it through engine() under a read
+// lock. That is what lets SILT_DOCKER_HOST be a setting rather than a restart:
+// everything that observes this host — the collector, the snapshotter, the
+// settings screen's probe — holds this one pointer.
 type Client struct {
-	api *client.Client
+	mu   sync.RWMutex
+	host string
+	api  *client.Client
 }
 
 // New connects to the Docker API at host.
 func New(host string) (*Client, error) {
+	api, err := dial(host)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{host: host, api: api}, nil
+}
+
+func dial(host string) (*client.Client, error) {
 	api, err := client.NewClientWithOpts(
 		client.WithHost(host),
 		// The engine's API version may be older than the client's. Negotiation
@@ -46,15 +63,61 @@ func New(host string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("docker client for %q: %w", host, err)
 	}
-	return &Client{api: api}, nil
+	return api, nil
+}
+
+// engine returns the current transport.
+func (c *Client) engine() *client.Client {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.api
+}
+
+// Host is the endpoint currently dialled.
+func (c *Client) Host() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.host
+}
+
+// Redial points the client at a different endpoint, reporting whether anything
+// changed.
+//
+// The old transport is closed, which is deliberate rather than tidy: the event
+// watcher holds a long-lived stream against it, and closing it is what ends
+// that stream so the watcher's own reconnect loop picks up the new endpoint. A
+// watcher that kept streaming from the old engine would leave Silt recording
+// one host while claiming to watch another.
+//
+// A dial failure leaves the old endpoint in place, because a typo in the
+// settings screen should not take the collector down with it.
+func (c *Client) Redial(host string) (bool, error) {
+	c.mu.Lock()
+	if host == c.host {
+		c.mu.Unlock()
+		return false, nil
+	}
+	api, err := dial(host)
+	if err != nil {
+		c.mu.Unlock()
+		return false, err
+	}
+	previous := c.api
+	c.api, c.host = api, host
+	c.mu.Unlock()
+
+	if previous != nil {
+		_ = previous.Close()
+	}
+	return true, nil
 }
 
 // Close releases the underlying transport.
-func (c *Client) Close() error { return c.api.Close() }
+func (c *Client) Close() error { return c.engine().Close() }
 
 // Version pings the engine and returns its reported version.
 func (c *Client) Version(ctx context.Context) (string, error) {
-	v, err := c.api.ServerVersion(ctx)
+	v, err := c.engine().ServerVersion(ctx)
 	if err != nil {
 		return "", fmt.Errorf("docker version: %w", err)
 	}
@@ -84,7 +147,7 @@ type Project struct {
 // groups them into projects. Stopped containers are included: a service that
 // died is exactly the thing Silt exists to notice.
 func (c *Client) Discover(ctx context.Context) ([]Project, error) {
-	list, err := c.api.ContainerList(ctx, container.ListOptions{
+	list, err := c.engine().ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filters.NewArgs(filters.Arg("label", LabelProject)),
 	})

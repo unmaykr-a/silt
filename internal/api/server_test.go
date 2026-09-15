@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
@@ -51,6 +52,32 @@ type fixture struct {
 	ingestTok string
 	// Small on purpose: the rate-limit tests send the whole allowance.
 	ingestLimit int
+}
+
+// baselineConfig is a configuration a real install could boot with: every
+// editable setting is saved as a patch on top of the whole document and the
+// document is re-validated, so a fixture whose baseline does not itself validate
+// can only ever test the refusal.
+func baselineConfig(t *testing.T) config.Config {
+	t.Helper()
+	return config.Config{
+		ListenAddr:             ":8375",
+		LogLevel:               "info",
+		DockerHost:             "tcp://docker-socket-proxy:2375",
+		DBPath:                 filepath.Join(t.TempDir(), "silt.db"),
+		HostName:               "test-host",
+		SnapshotInterval:       5 * time.Minute,
+		RetentionInterval:      time.Hour,
+		RetentionDays:          365,
+		UnchangedRetentionDays: 7,
+		EventRetentionDays:     90,
+		AuditRetentionDays:     730,
+		NotifyMinSeverity:      "medium",
+		MaxComposeFileBytes:    1 << 20,
+		SessionTTL:             720 * time.Hour,
+		SessionIdleTTL:         168 * time.Hour,
+		CookieSecure:           config.CookieSecureAuto,
+	}
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -130,26 +157,14 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 
 	hub := api.NewHub(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	snaps := &fakeSnapshotter{}
-	cfg := config.Config{
-		IngestToken:         "test-token",
-		IngestRatePerMinute: testIngestLimit,
-		ListenAddr:          ":8375",
-		LogLevel:            "info",
-		DockerHost:          "tcp://docker-socket-proxy:2375",
-		DBPath:              filepath.Join(t.TempDir(), "silt.db"),
-		SnapshotInterval:    5 * time.Minute,
-		RetentionInterval:   time.Hour,
-		RetentionDays:       365,
-
-		UnchangedRetentionDays: 7,
-		EventRetentionDays:     90,
-		NotifyMinSeverity:      "medium",
-		MaxComposeFileBytes:    1 << 20,
-		SessionTTL:             720 * time.Hour,
-		SessionIdleTTL:         168 * time.Hour,
-		ComposeRoots:           roots,
-		HostName:               hostName,
-	}
+	cfg := baselineConfig(t)
+	cfg.IngestToken = "test-token"
+	cfg.IngestRatePerMinute = testIngestLimit
+	cfg.ComposeRoots = roots
+	cfg.HostName = cmp.Or(hostName, cfg.HostName)
+	// /metrics reads this from the live configuration now, not from the gate,
+	// so it is the config that decides whether the endpoint is open.
+	cfg.MetricsPublic = true
 	server := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, hub, cfg, snaps)
 	// The settings layer is part of the surface under test: without it every
 	// write returns 503 and the contract test could only ever check the
@@ -174,10 +189,9 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 		t.Fatalf("LoadAccount: %v", err)
 	}
 	server.SetAuth(&api.Gate{
-		Sessions:      auth.NewSessions(db, 720*time.Hour, 0),
-		Account:       account,
-		Proxy:         proxy,
-		MetricsPublic: true,
+		Sessions: auth.NewSessions(db, 720*time.Hour, 0),
+		Account:  account,
+		Proxy:    proxy,
 	})
 
 	ts := httptest.NewServer(server.Handler())

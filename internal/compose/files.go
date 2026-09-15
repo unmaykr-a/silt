@@ -107,7 +107,12 @@ type FileReader struct {
 	Roots []string
 	// MaxBytes caps a single file.
 	MaxBytes int64
-	Redactor *redact.Redactor
+	// MaxBytesFn, when set, supersedes MaxBytes and is re-read on every file.
+	// The cap is editable on the settings screen, and a compose file that grew
+	// past it should become readable again the moment the limit is raised —
+	// not at the next restart.
+	MaxBytesFn func() int64
+	Redactor   *redact.Redactor
 
 	// resolved is Roots plus each root's symlink-resolved form, computed once.
 	once     sync.Once
@@ -116,6 +121,14 @@ type FileReader struct {
 
 // Enabled reports whether any root is configured.
 func (f *FileReader) Enabled() bool { return f != nil && len(f.Roots) > 0 }
+
+// maxBytes is the current cap on one file.
+func (f *FileReader) maxBytes() int64 {
+	if f.MaxBytesFn != nil {
+		return f.MaxBytesFn()
+	}
+	return f.MaxBytes
+}
 
 // Capture reads and redacts the given paths.
 func (f *FileReader) Capture(paths []string, rules []Rule) []CapturedFile {
@@ -150,7 +163,7 @@ func (f *FileReader) captureOne(path string, rules []Rule) CapturedFile {
 		return captured
 	}
 	captured.Size = info.Size()
-	if info.Size() > f.MaxBytes {
+	if info.Size() > f.maxBytes() {
 		captured.Status = FileTooLarge
 		return captured
 	}

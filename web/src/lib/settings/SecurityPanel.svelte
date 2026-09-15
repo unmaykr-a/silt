@@ -1,14 +1,16 @@
 <script lang="ts">
   /**
-   * What is protecting this screen, and the two things you can do about it:
-   * manage the built-in account, and end every session.
+   * What is protecting this screen, and what you can do about it: manage the
+   * built-in account, end every session, and decide whether the metrics
+   * endpoint answers anyone.
    *
-   * The reported half is read-only on purpose — every setting on it is the
-   * boundary in front of this page, so a UI that could edit them would be a way
-   * in rather than a setting. Revoking sessions is the exception that proves
-   * it: it is the one action you want when you think a token has leaked, and it
-   * cannot widen anything.
+   * What is reported rather than editable here is the sign-in method itself,
+   * which is the boundary in front of this page. Everything else on it either
+   * cannot widen anything (revoking sessions) or is about what Silt exposes
+   * rather than who may reach it (the metrics endpoint).
    */
+  import Field from "./Field.svelte";
+  import Toggle from "$lib/components/Toggle.svelte";
   import Row from "./Row.svelte";
   import AccountPanel from "./AccountPanel.svelte";
   import AuditLog from "$lib/components/AuditLog.svelte";
@@ -17,6 +19,7 @@
   import type { SettingsStore } from "./store.svelte";
 
   let { store, fixed }: { store: SettingsStore; fixed: Settings["fixed"] } = $props();
+  const draft = $derived(store.draft);
 
   let authState = $state<AuthState | null>(null);
   let sessionCount = $state<number | null>(null);
@@ -65,9 +68,8 @@
 <section>
   <h3 class="text-sm font-semibold">Security</h3>
   <p class="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-    Nothing here is editable, and that is the point: every one of these is the boundary protecting
-    this screen. A UI that could turn off the login in front of it would be a way in rather than a
-    setting. Change them in your environment and recreate the container.
+    How this install decides who you are is reported rather than editable — see Authentication for
+    the whole of it. What you can change here is what Silt exposes, and you can end every session.
   </p>
 
   <dl class="mt-3 divide-y divide-border">
@@ -98,6 +100,18 @@
       hint="Sessions are rows in Silt's database, not signed cookies. Signing out revokes one; the button below revokes all of them."
     />
   </dl>
+
+  <div class="mt-3 divide-y divide-border border-t border-border">
+    <Field
+      {store}
+      name="metrics_public"
+      label="Public metrics"
+      envVar="SILT_METRICS_PUBLIC"
+      hint="/metrics names every project on this host and counts its changes, so it is closed by default and needs a session like anything else. Open it only if your Prometheus cannot carry a token — and only on a network you trust."
+    >
+      <Toggle id="metrics_public" bind:checked={draft.metrics_public} label="Public metrics" />
+    </Field>
+  </div>
 
   {#if authState?.local_available}
     <AccountPanel

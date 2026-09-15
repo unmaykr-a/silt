@@ -79,7 +79,7 @@ type RuntimeState struct {
 
 // Inspect reads one container and returns the normalised subset.
 func (c *Client) Inspect(ctx context.Context, id string) (Inspected, error) {
-	raw, err := c.api.ContainerInspect(ctx, id)
+	raw, err := c.engine().ContainerInspect(ctx, id)
 	if err != nil {
 		return Inspected{}, fmt.Errorf("inspect container %s: %w", short(id), err)
 	}
@@ -93,7 +93,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (Inspected, error) {
 // RepoDigests is empty for locally-built images and can hold several entries
 // across registries, so match on repository rather than taking the first.
 func (c *Client) ImageIdentity(ctx context.Context, ref string) (id, digest string, created int64, err error) {
-	img, err := c.api.ImageInspect(ctx, ref)
+	img, err := c.engine().ImageInspect(ctx, ref)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("inspect image %s: %w", ref, err)
 	}

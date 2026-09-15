@@ -2277,7 +2277,24 @@ Changed:
     code that did not exist; here, a mechanism expensive enough to avoid using
     got written up as a principle.
 
-114. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+114. **The five that were not protecting anything (1.1.0)** — with the per-setting
+    cost gone, the twenty-nine environment-only settings had to be sorted honestly,
+    and only three survived on their own merits: the listen address and the database
+    path are read once by a socket and a file handle, and the compose roots are an
+    allowlist whose entries mean nothing without a matching volume mount. Of the
+    rest, five had no argument at all. The ingest rate limit was documented in the
+    UI as a boundary a screen must not reach past — in the same panel that turns
+    the endpoint off entirely, which is the stronger control. `SILT_HOST_NAME` was
+    worse than unprotected: it is the key the host row is keyed on, so changing it
+    and restarting already inserted a second host and re-created every project
+    under it, orphaning the history. That was true before this release and nothing
+    said so. Making it a text box is what made it worth fixing rather than
+    documenting, and the fix is a conditional rename that declines when something
+    already holds the new name, because merging two histories means deciding which
+    host's snapshots win and there is no safe default for that. The general shape:
+    a setting nobody can change is a setting nobody has had to make correct.
+
+115. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

@@ -41,7 +41,7 @@ type Config struct {
 	// read-only socket proxy, never the socket itself: mounting
 	// /var/run/docker.sock:ro is not a security boundary, because read-only
 	// applies to the file and not to the API. See PROJECT.md Section 3.
-	DockerHost string `env:"SILT_DOCKER_HOST" envDefault:"tcp://docker-socket-proxy:2375"`
+	DockerHost string `env:"SILT_DOCKER_HOST" envDefault:"tcp://docker-socket-proxy:2375" editable:"docker_host"`
 
 	// DBPath is the SQLite file.
 	DBPath string `env:"SILT_DB_PATH" envDefault:"/data/silt.db"`
@@ -71,7 +71,7 @@ type Config struct {
 	KeepKeys []string `env:"SILT_KEEP_KEYS" envSeparator:"," editable:"keep_keys"`
 
 	// HostName labels this Docker host in the database.
-	HostName string `env:"SILT_HOST_NAME" envDefault:"local"`
+	HostName string `env:"SILT_HOST_NAME" envDefault:"local" editable:"host_name"`
 
 	// IngestToken guards POST /api/ingest. Empty means the endpoint is not
 	// configured and returns 503 — unset must never mean open.
@@ -182,14 +182,14 @@ type Config struct {
 	// The token is the authentication and this is the blast radius when it
 	// leaks: without it, one copied token is unbounded writes into the
 	// timeline. Zero disables the limit.
-	IngestRatePerMinute int `env:"SILT_INGEST_RATE_PER_MINUTE" envDefault:"60"`
+	IngestRatePerMinute int `env:"SILT_INGEST_RATE_PER_MINUTE" envDefault:"60" editable:"ingest_rate_per_minute"`
 
 	// MetricsPublic leaves /metrics reachable without authentication.
 	//
 	// It is off by default now: the endpoint names every project on the host
 	// and counts its changes, which is not something to hand to anyone who can
 	// reach the port just because Prometheus finds a token inconvenient.
-	MetricsPublic bool `env:"SILT_METRICS_PUBLIC" envDefault:"false"`
+	MetricsPublic bool `env:"SILT_METRICS_PUBLIC" envDefault:"false" editable:"metrics_public"`
 
 	// ComposeRoots are host paths, mounted read-only into Silt, under which
 	// compose files may be read.
@@ -200,7 +200,7 @@ type Config struct {
 	// file it can reach.
 	ComposeRoots []string `env:"SILT_COMPOSE_ROOTS" envSeparator:","`
 	// MaxComposeFileBytes caps a single captured file.
-	MaxComposeFileBytes int64 `env:"SILT_MAX_COMPOSE_FILE_BYTES" envDefault:"1048576"`
+	MaxComposeFileBytes int64 `env:"SILT_MAX_COMPOSE_FILE_BYTES" envDefault:"1048576" editable:"max_compose_file_bytes"`
 }
 
 // Load reads the environment, applies defaults, and validates the result.
@@ -232,6 +232,12 @@ func (c *Config) Validate() error {
 	}
 	if c.DBPath == "" {
 		return fmt.Errorf("SILT_DB_PATH must not be empty")
+	}
+	// The host row is keyed on this name, so an empty one is not a cosmetic
+	// problem: it is the identity every project and snapshot hangs off.
+	c.HostName = strings.TrimSpace(c.HostName)
+	if c.HostName == "" {
+		return fmt.Errorf("SILT_HOST_NAME must not be empty")
 	}
 	if c.SnapshotInterval < time.Second {
 		return fmt.Errorf("SILT_SNAPSHOT_INTERVAL %v is too short; use at least 1s", c.SnapshotInterval)

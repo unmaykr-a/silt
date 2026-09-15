@@ -40,24 +40,36 @@ type settingsValues struct {
 	// IngestRatePerMinute is the per-source cap on webhook events. It is a
 	// value rather than a secret, so unlike the token it is readable.
 	IngestRatePerMinute int `json:"ingest_rate_per_minute"`
+	// HostName labels this Docker host. Editing it renames the existing host
+	// row rather than starting a second one, which is what the environment
+	// variable alone could never do: the row is keyed on the name, so changing
+	// it and restarting used to orphan every project under the old label.
+	HostName string `json:"host_name"`
+	// DockerHost is the endpoint being observed. Changing it redials without a
+	// restart; the event stream ends and reconnects to the new engine.
+	DockerHost string `json:"docker_host"`
+	// MetricsPublic leaves /metrics reachable without authentication.
+	MetricsPublic bool `json:"metrics_public"`
+	// MaxComposeFileBytes caps a single captured file.
+	MaxComposeFileBytes int64 `json:"max_compose_file_bytes"`
 }
 
-// settingsFixed is the half that cannot be edited here.
+// settingsFixed is the half that stays in the environment for good.
 //
-// Two different reasons, deliberately not separated in the payload because the
-// screen says the same thing about both: some of it cannot change without a
-// restart (where the process listens, which database it opens), and some of it
-// is the boundary protecting this very screen. Letting the UI edit the compose
-// root allowlist or the password hash would mean anyone who reached the UI
-// could widen what Silt reads or lock out the person who set it up.
+// Three settings, and each for a reason the settings screen could not work
+// around. The listen address and the database path are consumed once, by a
+// socket and a file handle that cannot be rebuilt underneath a running
+// process. The compose roots are an allowlist whose entries only mean anything
+// alongside a matching read-only volume mount, so a path typed in here would
+// name a directory this container cannot see.
+//
+// Everything else that used to be in here is editable now. What kept most of
+// it out was the cost of adding a setting, not a property of the setting.
 type settingsFixed struct {
-	HostName            string   `json:"host_name"`
-	DockerHost          string   `json:"docker_host"`
-	DBPath              string   `json:"db_path"`
-	ListenAddr          string   `json:"listen_addr"`
-	ComposeRoots        []string `json:"compose_roots"`
-	MaxComposeFileBytes int64    `json:"max_compose_file_bytes"`
-	AuthMode            string   `json:"auth_mode"`
+	DBPath       string   `json:"db_path"`
+	ListenAddr   string   `json:"listen_addr"`
+	ComposeRoots []string `json:"compose_roots"`
+	AuthMode     string   `json:"auth_mode"`
 }
 
 // settingsIdentity is how this install decides who you are.
@@ -102,7 +114,6 @@ type settingsIdentity struct {
 	// survives without a fresh sign-in. 0 means it does not lapse.
 	OIDCAdminTTLMS int64  `json:"oidc_admin_ttl_ms"`
 	CookieSecure   string `json:"cookie_secure"`
-	MetricsPublic  bool   `json:"metrics_public"`
 }
 
 type settingsUsage struct {
@@ -152,6 +163,10 @@ func toValues(c config.Config) settingsValues {
 		NotifyMinSeverity:      c.NotifyMinSeverity,
 		IngestConfigured:       c.IngestToken != "",
 		IngestRatePerMinute:    c.IngestRatePerMinute,
+		HostName:               c.HostName,
+		DockerHost:             c.DockerHost,
+		MetricsPublic:          c.MetricsPublic,
+		MaxComposeFileBytes:    c.MaxComposeFileBytes,
 	}
 	if v.KeepKeys == nil {
 		v.KeepKeys = []string{}
@@ -203,13 +218,10 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 		Overridden:  overridden,
 		Editable:    editable,
 		Fixed: settingsFixed{
-			HostName:            effective.HostName,
-			DockerHost:          effective.DockerHost,
-			DBPath:              effective.DBPath,
-			ListenAddr:          effective.ListenAddr,
-			ComposeRoots:        effective.ComposeRoots,
-			MaxComposeFileBytes: effective.MaxComposeFileBytes,
-			AuthMode:            s.authMode(effective),
+			DBPath:       effective.DBPath,
+			ListenAddr:   effective.ListenAddr,
+			ComposeRoots: effective.ComposeRoots,
+			AuthMode:     s.authMode(effective),
 		},
 	}
 	if out.Fixed.ComposeRoots == nil {
@@ -240,7 +252,6 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 		SessionIdleTTLMS:  effective.SessionIdleTTL.Milliseconds(),
 		OIDCAdminTTLMS:    effective.OIDCAdminTTL.Milliseconds(),
 		CookieSecure:      effective.CookieSecure,
-		MetricsPublic:     effective.MetricsPublic,
 	}
 	out.Checks = effective.Checks()
 	if out.Checks == nil {

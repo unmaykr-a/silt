@@ -50,6 +50,9 @@ func baseline() config.Config {
 		SessionTTL:             720 * time.Hour,
 		SessionIdleTTL:         168 * time.Hour,
 		KeepKeys:               []string{"FROM_ENV"},
+		// The whole merged document is re-validated on every save, so a
+		// baseline that would not itself boot can only ever test the refusal.
+		HostName: "test-host",
 	}
 }
 

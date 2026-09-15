@@ -198,7 +198,7 @@ func (w *Watcher) stream(ctx context.Context, last *time.Time) (connected, sawEv
 		w.OnConnect(resumedFrom)
 	}
 
-	msgs, errs := w.Client.api.Events(ctx, opts)
+	msgs, errs := w.Client.engine().Events(ctx, opts)
 
 	for {
 		select {

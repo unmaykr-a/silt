@@ -336,6 +336,28 @@ func TestTheSpecDocumentsEveryEditableSetting(t *testing.T) {
 			t.Errorf("editable setting %q is missing from the SettingsValues schema", f.Name)
 		}
 	}
+	// And nowhere in the read-only halves. A setting that became editable but
+	// is still declared under fixed or identity generates a client with two
+	// fields for one value, and the stale one keeps reporting the boot-time
+	// answer — which is exactly what happened to metrics_public when it moved.
+	for _, block := range []string{"SettingsFixed", "SettingsIdentity"} {
+		schema, ok := spec.Components.Schemas[block]
+		if !ok {
+			t.Errorf("spec has no %s schema", block)
+			continue
+		}
+		for name := range schema.Properties {
+			if _, editable := config.EditableField(name); editable {
+				t.Errorf("%s declares %q, which is editable: it belongs in SettingsValues only", block, name)
+			}
+		}
+		for _, name := range schema.Required {
+			if _, editable := config.EditableField(name); editable {
+				t.Errorf("%s requires %q, which is editable", block, name)
+			}
+		}
+	}
+
 	for name := range patch.Properties {
 		// reset travels in the same object as the values but is an instruction
 		// rather than a setting.

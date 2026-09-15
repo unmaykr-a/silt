@@ -39,6 +39,11 @@ var wireValues = map[string]string{
 	"notify_on":                `["image_id"]`,
 	"notify_min_severity":      `"high"`,
 	"base_url":                 `"https://silt.example"`,
+	"docker_host":              `"tcp://other-proxy:2375"`,
+	"host_name":                `"pi"`,
+	"metrics_public":           `true`,
+	"ingest_rate_per_minute":   `120`,
+	"max_compose_file_bytes":   `2097152`,
 }
 
 // TestEverySettingHasARoundTripValue keeps the table above complete in both

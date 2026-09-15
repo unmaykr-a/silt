@@ -381,3 +381,74 @@ func TestGarbageCollectsOrphanedBlobs(t *testing.T) {
 		t.Errorf("blobs went from %d to %d; GC collected nothing", before.Blobs, after.Blobs)
 	}
 }
+
+// The host row is keyed on its name, so renaming it is how a changed
+// SILT_HOST_NAME keeps its history instead of starting a second host beside it.
+func TestRenameHostMovesTheHistory(t *testing.T) {
+	ctx := context.Background()
+	db, _ := openTestStore(t)
+
+	hostID, _, err := db.UpsertHostAndProject(ctx, "local", "tcp://proxy:2375", "26.1", testProject{name: "web"})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	renamed, err := db.RenameHost(ctx, "local", "pi")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if !renamed {
+		t.Fatal("rename reported nothing moved")
+	}
+
+	// The same row, not a new one: the project's host_id still points at it, so
+	// every snapshot taken under the old name is still this host's history.
+	after, _, err := db.UpsertHostAndProject(ctx, "pi", "tcp://proxy:2375", "26.1", testProject{name: "web"})
+	if err != nil {
+		t.Fatalf("upsert after rename: %v", err)
+	}
+	if after != hostID {
+		t.Errorf("host id after rename = %d, want the original %d: the history was orphaned", after, hostID)
+	}
+
+	hosts, err := db.Q.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("list hosts: %v", err)
+	}
+	if len(hosts) != 1 {
+		t.Fatalf("hosts = %d, want 1; a rename must not leave the old row behind", len(hosts))
+	}
+	if hosts[0].Name != "pi" {
+		t.Errorf("host name = %q, want pi", hosts[0].Name)
+	}
+}
+
+// Renaming onto a name something already holds must decline rather than fail
+// the unique constraint or merge two histories.
+func TestRenameHostDeclinesWhenTheNameIsTaken(t *testing.T) {
+	ctx := context.Background()
+	db, _ := openTestStore(t)
+
+	if _, _, err := db.UpsertHostAndProject(ctx, "local", "tcp://a:2375", "26.1", testProject{name: "web"}); err != nil {
+		t.Fatalf("upsert local: %v", err)
+	}
+	if _, _, err := db.UpsertHostAndProject(ctx, "pi", "tcp://b:2375", "26.1", testProject{name: "api"}); err != nil {
+		t.Fatalf("upsert pi: %v", err)
+	}
+
+	renamed, err := db.RenameHost(ctx, "local", "pi")
+	if err != nil {
+		t.Fatalf("rename onto a taken name returned an error rather than declining: %v", err)
+	}
+	if renamed {
+		t.Error("rename onto a taken name reported success")
+	}
+
+	hosts, err := db.Q.ListHosts(ctx)
+	if err != nil {
+		t.Fatalf("list hosts: %v", err)
+	}
+	if len(hosts) != 2 {
+		t.Errorf("hosts = %d, want both left alone", len(hosts))
+	}
+}

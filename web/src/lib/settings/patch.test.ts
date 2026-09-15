@@ -8,6 +8,10 @@ import { buildPatch, emptyDraft, toDraft, list, multiline, type Effective } from
 // when the environment change everyone expected does not take.
 
 const effective: Effective = {
+  host_name: "local",
+  docker_host: "tcp://docker-socket-proxy:2375",
+  metrics_public: false,
+  max_compose_file_bytes: 1_048_576,
   snapshot_interval_ms: 300_000,
   retention_days: 365,
   unchanged_retention_days: 7,

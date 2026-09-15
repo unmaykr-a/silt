@@ -1,13 +1,18 @@
 # Configuration
 
-Environment variables are the baseline. Most can also be changed on the Settings screen,
-which stores the change as an override on top of the environment and applies it immediately —
-no restart. Every field on that screen says whether its value is coming from the environment
-or from there, and offers a way back.
+Environment variables are the baseline an install boots with. Almost all of them can also be
+changed on the Settings screen, which stores the change as an override on top of the
+environment and applies it immediately — no restart. Every field on that screen says whether
+its value is coming from the environment or from there, and offers a way back.
 
-Settings marked **restart** are the exception: either the process reads them once, or they are
-the boundary protecting the settings screen, and a UI able to widen them would be a way in
-rather than a setting.
+Three settings are marked **restart**, and each for a reason the settings screen could not
+work around. The listen address and the database path are read once, by a socket and a file
+handle that cannot be swapped underneath a running process. The compose roots are an allowlist
+whose entries only mean anything alongside a matching read-only volume mount, so a path typed
+into the UI would name a directory the container cannot see.
+
+The rest of what is **restart** here is authentication, which is the boundary protecting this
+screen. That is a deliberate line rather than a permanent one — see [Authentication](Authentication).
 
 Copy [`.env.example`](https://github.com/unmaykr-a/silt/blob/main/.env.example) and uncomment
 what you need. Every setting has a working default, so an empty `.env` is a valid `.env`.
@@ -20,8 +25,8 @@ what you need. Every setting has a working default, so an empty `.env` is a vali
 | `SILT_LISTEN_ADDR` | `:8375` | Address inside the container. **restart** |
 | `SILT_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. |
 | `SILT_DB_PATH` | `/data/silt.db` | The SQLite file. **restart** |
-| `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint. A read-only socket proxy, never the socket itself — see [Install](Installation). **restart** |
-| `SILT_HOST_NAME` | `local` | What to call this Docker host in the database. **restart** |
+| `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint. A read-only socket proxy, never the socket itself — see [Install](Installation). Changing it redials: the event stream to the old engine ends and reconnects to the new one. |
+| `SILT_HOST_NAME` | `local` | What to call this Docker host in the database. Changing it renames the existing host row, so the history moves with the label — unless a host already holds the new name, in which case both are left alone and this one attaches to the existing row. |
 | `SILT_BASE_URL` | *(empty)* | Where Silt is reachable from a browser. Links notifications to the change, derives the OIDC callback, and implies a `Secure` cookie when it is `https://`. |
 
 ## Collection
@@ -30,7 +35,7 @@ what you need. Every setting has a working default, so an empty `.env` is a vali
 |---|---|---|
 | `SILT_SNAPSHOT_INTERVAL` | `5m` | The reconcile sweep that catches whatever the event stream missed. |
 | `SILT_COMPOSE_ROOTS` | *(empty)* | Comma-separated absolute paths, mounted read-only, under which compose files may be read and watched. An allowlist, not a hint. **restart** |
-| `SILT_MAX_COMPOSE_FILE_BYTES` | `1048576` | Cap on a single captured file. |
+| `SILT_MAX_COMPOSE_FILE_BYTES` | `1048576` | Cap on a single captured file. A file over it is recorded as `too_large`; raising the cap makes it readable on its next capture. |
 | `SILT_KEEP_KEYS` | *(empty)* | Extra environment keys kept in cleartext. Adds to the built-in safe list; there is no redact-list. See [Secrets and redaction](Secrets-and-Redaction). |
 
 ## Retention
@@ -58,36 +63,37 @@ See [Notifications](Notifications).
 
 ## Authentication
 
-See [Authentication](Authentication). All of these are **restart**-only, deliberately.
+See [Authentication](Authentication). These are the boundary protecting the settings
+screen, so they are **restart**-only, deliberately.
 
 | Variable | Default | |
 |---|---|---|
-| `SILT_LOCAL_ACCOUNT` | `true` | The built-in account. Off for an install that authenticates only through a provider or a proxy. |
-| `SILT_PASSWORD_HASH` | *(empty)* | bcrypt. Claims the built-in account before startup, so the first-run window never exists. |
-| `SILT_TRUST_PROXY_AUTH` | `false` | Believe an identity your reverse proxy asserts in a header. |
-| `SILT_AUTH_HEADER` | `X-Remote-User` | The identity header. |
-| `SILT_AUTH_GROUPS_HEADER` | `X-Remote-Groups` | The group header. Only read when `SILT_ADMIN_GROUPS` is set. |
-| `SILT_ADMIN_GROUPS` | *(empty)* | Groups in that header that mean administrator. Unset ⇒ every forward-auth identity is one. |
-| `SILT_TRUSTED_PROXIES` | *(empty)* | Addresses or CIDRs whose auth header is believed. **Set this if you use forward auth** — see the warning in [Authentication](Authentication). |
-| `SILT_SESSION_TTL` | `720h` | Session lifetime regardless of activity. |
-| `SILT_SESSION_IDLE_TTL` | `168h` | Ends an unused session early. `0` disables. |
-| `SILT_COOKIE_SECURE` | `auto` | `Secure` on the session cookie. `auto` infers it from the request; `always` never guesses; `never` is for plain HTTP on a trusted network. |
+| `SILT_LOCAL_ACCOUNT` | `true` | The built-in account. Off for an install that authenticates only through a provider or a proxy. **restart** |
+| `SILT_PASSWORD_HASH` | *(empty)* | bcrypt. Claims the built-in account before startup, so the first-run window never exists. **restart** |
+| `SILT_TRUST_PROXY_AUTH` | `false` | Believe an identity your reverse proxy asserts in a header. **restart** |
+| `SILT_AUTH_HEADER` | `X-Remote-User` | The identity header. **restart** |
+| `SILT_AUTH_GROUPS_HEADER` | `X-Remote-Groups` | The group header. Only read when `SILT_ADMIN_GROUPS` is set. **restart** |
+| `SILT_ADMIN_GROUPS` | *(empty)* | Groups in that header that mean administrator. Unset ⇒ every forward-auth identity is one. **restart** |
+| `SILT_TRUSTED_PROXIES` | *(empty)* | Addresses or CIDRs whose auth header is believed. **Set this if you use forward auth** — see the warning in [Authentication](Authentication). **restart** |
+| `SILT_SESSION_TTL` | `720h` | Session lifetime regardless of activity. **restart** |
+| `SILT_SESSION_IDLE_TTL` | `168h` | Ends an unused session early. `0` disables. **restart** |
+| `SILT_COOKIE_SECURE` | `auto` | `Secure` on the session cookie. `auto` infers it from the request; `always` never guesses; `never` is for plain HTTP on a trusted network. **restart** |
 
 ## OpenID Connect
 
 | Variable | Default | |
 |---|---|---|
-| `SILT_OIDC_ISSUER` | *(empty)* | Enables OIDC. Paste it exactly as your provider prints it, trailing slash included. |
-| `SILT_OIDC_CLIENT_ID` | *(empty)* | The registered client. |
-| `SILT_OIDC_CLIENT_SECRET` | *(empty)* | Its secret. Reported as set-or-not, never echoed. |
-| `SILT_OIDC_REDIRECT_URL` | *(empty)* | Only if it is not `$SILT_BASE_URL/api/auth/callback`. |
-| `SILT_OIDC_SCOPES` | `openid,profile,email` | `openid` is always included whether listed or not. |
-| `SILT_OIDC_USERNAME_CLAIM` | `preferred_username` | Providers disagree. |
-| `SILT_OIDC_GROUPS_CLAIM` | `groups` | Some use `roles`. |
-| `SILT_OIDC_ALLOWED_GROUPS` | *(empty)* | Restricts who may sign in. Both allowlists empty admits anyone the provider authenticates. |
-| `SILT_OIDC_ALLOWED_USERS` | *(empty)* | The same, by username, email or subject. |
-| `SILT_OIDC_ADMIN_GROUPS` | *(empty)* | Groups that mean administrator. Unset ⇒ everyone admitted is one. |
-| `SILT_OIDC_ADMIN_TTL` | `12h` | How long a provider-granted administrator role survives without a fresh sign-in. The session keeps working, read-only, after it. `0` disables the lapse. |
+| `SILT_OIDC_ISSUER` | *(empty)* | Enables OIDC. Paste it exactly as your provider prints it, trailing slash included. **restart** |
+| `SILT_OIDC_CLIENT_ID` | *(empty)* | The registered client. **restart** |
+| `SILT_OIDC_CLIENT_SECRET` | *(empty)* | Its secret. Reported as set-or-not, never echoed. **restart** |
+| `SILT_OIDC_REDIRECT_URL` | *(empty)* | Only if it is not `$SILT_BASE_URL/api/auth/callback`. **restart** |
+| `SILT_OIDC_SCOPES` | `openid,profile,email` | `openid` is always included whether listed or not. **restart** |
+| `SILT_OIDC_USERNAME_CLAIM` | `preferred_username` | Providers disagree. **restart** |
+| `SILT_OIDC_GROUPS_CLAIM` | `groups` | Some use `roles`. **restart** |
+| `SILT_OIDC_ALLOWED_GROUPS` | *(empty)* | Restricts who may sign in. Both allowlists empty admits anyone the provider authenticates. **restart** |
+| `SILT_OIDC_ALLOWED_USERS` | *(empty)* | The same, by username, email or subject. **restart** |
+| `SILT_OIDC_ADMIN_GROUPS` | *(empty)* | Groups that mean administrator. Unset ⇒ everyone admitted is one. **restart** |
+| `SILT_OIDC_ADMIN_TTL` | `12h` | How long a provider-granted administrator role survives without a fresh sign-in. The session keeps working, read-only, after it. `0` disables the lapse. **restart** |
 
 ## Everything else
 
