@@ -147,6 +147,8 @@ events land on the same axis as your config changes.
   restored through the ordinary settings write. Secrets are left out and named.
 - **Backups that are actually consistent** — one endpoint, one file, safe to take while
   Silt is running. Copying `silt.db` off the volume is not, and does not say so.
+- **Your compose files, watched** — an edit lands on the timeline within a second of the
+  save, so "edited and never applied" is answered without waiting for the next reconcile.
 - **Sessions are rows, not signed cookies** — they survive a restart, signing out revokes
   them server-side, and one button ends all of them.
 - **An audit log** of who changed a setting, who pruned history, who signed in and who was
@@ -216,7 +218,10 @@ volumes:
 
 `SILT_COMPOSE_ROOTS` is an allowlist, not a hint. The paths Silt would otherwise follow
 come from container labels, and anyone who can start a container sets those, so nothing
-outside these roots is ever read — symlinks included.
+outside these roots is ever read — or watched — symlinks included.
+
+With the roots set, Silt also watches those files, so an edit is on the timeline within a
+second of you saving it, whether or not you ever ran `docker compose up`.
 
 <br />
 
@@ -428,9 +433,19 @@ demo does not visibly age between deployments.
 
 ## Status
 
-Pre-alpha, under active development. The recording, diffing and UI all work; expect rough
-edges and schema changes. [`PROJECT.md`](PROJECT.md) is the full design brief and milestone
-plan, including a changelog of every decision that changed during implementation and why.
+**1.0** — everything in the v1 scope is built, and the HTTP API and database schema are
+stable: `api/openapi.yaml` is the contract, a test asserts the handlers still match it, and
+migrations only ever move forward.
+
+What 1.0 does not claim is a long operational history. Silt is built for one operator and
+one Docker host, it is tested hard — the suite includes a sentinel test that plants a
+secret-shaped string in every field and then byte-scans the database file, its write-ahead
+log, every decompressed blob and the debug logs — and it has been running on a Raspberry Pi
+behind a reverse proxy for as long as it has existed. Somewhere between those two facts is
+the honest answer. Issues welcome.
+
+[`PROJECT.md`](PROJECT.md) is the full design brief, including a changelog of every decision
+that changed during implementation and why — the mistakes as well as the choices.
 
 ## License
 
