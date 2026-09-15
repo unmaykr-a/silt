@@ -67,7 +67,10 @@ export const SETTINGS: SettingEntry[] = [
   { name: "timestamps", section: "appearance", label: "Timestamps", keywords: "relative absolute ago seconds" },
 
   // Collection.
+  { name: "host_name", section: "collection", label: "Host name", env: "SILT_HOST_NAME", keywords: "label rename this machine pi" },
+  { name: "docker_host", section: "collection", label: "Docker endpoint", env: "SILT_DOCKER_HOST", keywords: "socket proxy reconnect redial engine" },
   { name: "snapshot_interval_ms", section: "collection", label: "Reconcile interval", env: "SILT_SNAPSHOT_INTERVAL", keywords: "poll cadence how often" },
+  { name: "max_compose_file_bytes", section: "collection", label: "Max compose file", env: "SILT_MAX_COMPOSE_FILE_BYTES", keywords: "size limit too large truncated capture" },
   { name: "keep_keys", section: "collection", label: "Keys kept readable", env: "SILT_KEEP_KEYS", keywords: "redaction safe list secrets cleartext" },
   { name: "log_level", section: "collection", label: "Log level", env: "SILT_LOG_LEVEL", keywords: "debug verbose" },
 
@@ -87,7 +90,7 @@ export const SETTINGS: SettingEntry[] = [
 
   // Ingest.
   { name: "ingest_token", section: "ingest", label: "Token", env: "SILT_INGEST_TOKEN", keywords: "webhook uptime kuma external events api" },
-  { name: "ingest_rate", section: "ingest", label: "Events per minute", env: "SILT_INGEST_RATE_PER_MINUTE", keywords: "rate limit flood throttle abuse leaked token 429" },
+  { name: "ingest_rate_per_minute", section: "ingest", label: "Events per minute", env: "SILT_INGEST_RATE_PER_MINUTE", keywords: "rate limit flood throttle abuse leaked token 429" },
 
   // Security and identity — read-only, and the reason the index exists: an
   // operator hunting for why forward auth is not working has no idea these
@@ -95,6 +98,7 @@ export const SETTINGS: SettingEntry[] = [
   { name: "sessions", section: "security", label: "Sessions", env: "SILT_SESSION_TTL", keywords: "sign out revoke devices" },
   { name: "password", section: "security", label: "Password", env: "SILT_PASSWORD_HASH", keywords: "change bcrypt login account" },
   { name: "activity", section: "security", label: "Activity", keywords: "audit log who changed signed in refused" },
+  { name: "metrics_public", section: "security", label: "Public metrics", env: "SILT_METRICS_PUBLIC", keywords: "prometheus scrape unauthenticated exporter" },
   { name: "auth_mode", section: "identity", label: "Authentication method", keywords: "oidc proxy password none how do i log in" },
   { name: "trust_proxy_auth", section: "identity", label: "Forward auth", env: "SILT_TRUST_PROXY_AUTH", keywords: "authelia authentik tinyauth reverse proxy header" },
   { name: "auth_header", section: "identity", label: "Identity header", env: "SILT_AUTH_HEADER", keywords: "x-remote-user forward auth" },
@@ -110,15 +114,11 @@ export const SETTINGS: SettingEntry[] = [
   { name: "admin_groups", section: "identity", label: "Administrator groups (forward auth)", env: "SILT_ADMIN_GROUPS", keywords: "admin role viewer read only proxy" },
   { name: "auth_groups_header", section: "identity", label: "Groups header", env: "SILT_AUTH_GROUPS_HEADER", keywords: "x-remote-groups forward auth admin" },
   { name: "local_account", section: "identity", label: "Built-in account", env: "SILT_LOCAL_ACCOUNT" },
-  { name: "metrics_public", section: "identity", label: "Public metrics", env: "SILT_METRICS_PUBLIC", keywords: "prometheus scrape unauthenticated" },
 
   // Environment only.
-  { name: "host_name", section: "environment", label: "Host name", env: "SILT_HOST_NAME" },
-  { name: "docker_host", section: "environment", label: "Docker endpoint", env: "SILT_DOCKER_HOST", keywords: "socket proxy" },
   { name: "db_path", section: "environment", label: "Database", env: "SILT_DB_PATH", keywords: "sqlite file path" },
   { name: "listen_addr", section: "environment", label: "Listen address", env: "SILT_LISTEN_ADDR", keywords: "port bind" },
   { name: "compose_roots", section: "environment", label: "Compose roots", env: "SILT_COMPOSE_ROOTS", keywords: "files capture allowlist mount" },
-  { name: "max_compose_file_bytes", section: "environment", label: "Max compose file", env: "SILT_MAX_COMPOSE_FILE_BYTES" },
 
   // Storage.
   { name: "usage", section: "storage", label: "Storage used", keywords: "size disk blobs deduplicated" },

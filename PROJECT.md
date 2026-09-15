@@ -2258,7 +2258,43 @@ Changed:
     sidebar, reachable from Home, longer than a stub, and that every internal
     link resolves. Each was verified by breaking it.
 
-113. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+113. **Six lists, one setting (1.1.0)** — adding one editable setting meant a field
+    on an `Overrides` struct, an entry in a `Fields` slice, and a case in each of
+    `apply`, `Set`, `merge` and `clearFields`. Six places, five of them pure
+    switch-case, and nothing compared the six lists to each other. Forgetting the
+    `merge` case gave a setting that saved and then reverted on the next save of
+    anything else — silently. That cost is why the editable list stopped at
+    fourteen of forty-three settings while the other twenty-nine were described
+    as deliberate policy: two of them genuinely were, and the rest were the
+    price of the mechanism. So `editable:"retention_days"` on the struct field
+    is the list now, and the six places are one loop each. Two things fell out
+    of it that were not the point: a misspelt setting name used to be accepted
+    and ignored — the patch decoded into a struct and `encoding/json` drops what
+    it does not recognise, so `retention_dayz` answered 200 and changed nothing —
+    and the export's secret-stripping named the two secrets it knew about rather
+    than asking which fields are secret, so the third would have leaked. The
+    lesson is the same one as 111 from the other end: there, prose stood in for
+    code that did not exist; here, a mechanism expensive enough to avoid using
+    got written up as a principle.
+
+114. **The five that were not protecting anything (1.1.0)** — with the per-setting
+    cost gone, the twenty-nine environment-only settings had to be sorted honestly,
+    and only three survived on their own merits: the listen address and the database
+    path are read once by a socket and a file handle, and the compose roots are an
+    allowlist whose entries mean nothing without a matching volume mount. Of the
+    rest, five had no argument at all. The ingest rate limit was documented in the
+    UI as a boundary a screen must not reach past — in the same panel that turns
+    the endpoint off entirely, which is the stronger control. `SILT_HOST_NAME` was
+    worse than unprotected: it is the key the host row is keyed on, so changing it
+    and restarting already inserted a second host and re-created every project
+    under it, orphaning the history. That was true before this release and nothing
+    said so. Making it a text box is what made it worth fixing rather than
+    documenting, and the fix is a conditional rename that declines when something
+    already holds the new name, because merging two histories means deciding which
+    host's snapshots win and there is no safe default for that. The general shape:
+    a setting nobody can change is a setting nobody has had to make correct.
+
+115. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

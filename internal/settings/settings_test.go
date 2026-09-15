@@ -50,10 +50,24 @@ func baseline() config.Config {
 		SessionTTL:             720 * time.Hour,
 		SessionIdleTTL:         168 * time.Hour,
 		KeepKeys:               []string{"FROM_ENV"},
+		// The whole merged document is re-validated on every save, so a
+		// baseline that would not itself boot can only ever test the refusal.
+		HostName: "test-host",
 	}
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// patch builds an override document, failing the test rather than the call site
+// on a name that is not an editable setting.
+func patch(t *testing.T, values map[string]any) settings.Overrides {
+	t.Helper()
+	o, err := settings.Patch(values)
+	if err != nil {
+		t.Fatalf("build patch %v: %v", values, err)
+	}
+	return o
+}
 
 func TestOverrideTakesEffectAndSurvivesAReload(t *testing.T) {
 	db := newMem()
@@ -65,7 +79,7 @@ func TestOverrideTakesEffectAndSurvivesAReload(t *testing.T) {
 		t.Fatalf("baseline retention = %d, want 365", got)
 	}
 
-	if _, err := live.Update(t.Context(), settings.Overrides{RetentionDays: ptr(30)}, nil); err != nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if got := live.Get().RetentionDays; got != 30 {
@@ -90,7 +104,7 @@ func TestRejectedUpdateChangesNothing(t *testing.T) {
 	db := newMem()
 	live, _ := settings.Load(t.Context(), baseline(), db)
 
-	if _, err := live.Update(t.Context(), settings.Overrides{SnapshotIntervalMS: ptr(int64(10))}, nil); err == nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"snapshot_interval_ms": 10}), nil); err == nil {
 		t.Fatal("a 10ms snapshot interval was accepted")
 	}
 	if got := live.Get().SnapshotInterval; got != 5*time.Minute {
@@ -108,7 +122,7 @@ func TestCrossFieldValidationSeesTheMergedDocument(t *testing.T) {
 	db := newMem()
 	live, _ := settings.Load(t.Context(), baseline(), db)
 
-	if _, err := live.Update(t.Context(), settings.Overrides{UnchangedRetentionDays: ptr(400)}, nil); err == nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"unchanged_retention_days": 400}), nil); err == nil {
 		t.Fatal("unchanged retention was allowed to exceed changed retention")
 	}
 }
@@ -117,10 +131,10 @@ func TestResetFieldFallsBackToTheEnvironment(t *testing.T) {
 	db := newMem()
 	live, _ := settings.Load(t.Context(), baseline(), db)
 
-	if _, err := live.Update(t.Context(), settings.Overrides{
-		RetentionDays: ptr(30),
-		BaseURL:       ptr("https://silt.example"),
-	}, nil); err != nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{
+		"retention_days": 30,
+		"base_url":       "https://silt.example",
+	}), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if _, err := live.Update(t.Context(), settings.Overrides{}, []string{"retention_days"}); err != nil {
@@ -143,7 +157,7 @@ func TestResetFieldFallsBackToTheEnvironment(t *testing.T) {
 func TestResetDropsEverything(t *testing.T) {
 	db := newMem()
 	live, _ := settings.Load(t.Context(), baseline(), db)
-	if _, err := live.Update(t.Context(), settings.Overrides{RetentionDays: ptr(30)}, nil); err != nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if _, err := live.Reset(t.Context()); err != nil {
@@ -172,7 +186,7 @@ func TestFailedWriteDoesNotChangeTheRunningConfiguration(t *testing.T) {
 	db.fails = true
 	live, _ := settings.Load(t.Context(), baseline(), db)
 
-	if _, err := live.Update(t.Context(), settings.Overrides{RetentionDays: ptr(30)}, nil); err == nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); err == nil {
 		t.Fatal("update succeeded despite the write failing")
 	}
 	if got := live.Get().RetentionDays; got != 365 {
@@ -205,7 +219,7 @@ func TestObserversSeeTheCurrentValueImmediatelyAndOnChange(t *testing.T) {
 	if len(seen) != 1 || seen[0] != 365 {
 		t.Fatalf("observer saw %v on registration, want [365]", seen)
 	}
-	if _, err := live.Update(t.Context(), settings.Overrides{RetentionDays: ptr(30)}, nil); err != nil {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if len(seen) != 2 || seen[1] != 30 {
@@ -227,7 +241,7 @@ func TestReadOnlyWithoutAStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if _, err := live.Update(t.Context(), settings.Overrides{RetentionDays: ptr(30)}, nil); !errors.Is(err, settings.ErrReadOnly) {
+	if _, err := live.Update(t.Context(), patch(t, map[string]any{"retention_days": 30}), nil); !errors.Is(err, settings.ErrReadOnly) {
 		t.Errorf("Update error = %v, want ErrReadOnly", err)
 	}
 }

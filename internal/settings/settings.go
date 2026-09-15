@@ -1,19 +1,21 @@
 // Package settings layers database overrides on top of the environment
 // configuration.
 //
-// Silt is configured by environment variables, which is what a self-hoster
-// expects and what a compose file can express. But an environment variable
-// costs a container recreate to change, and some knobs — how long to keep
-// things, where to send notifications, which environment keys stay readable —
-// are ones you want to turn while looking at the screen that shows their
-// effect.
+// The environment is the baseline an install boots with, which is what a
+// compose file can express and what a self-hoster expects to find there. But
+// an environment variable costs a container recreate to change, and almost
+// nothing here is worth a restart to turn. So the database holds a sparse set
+// of overrides on top of the baseline, and the effective configuration is the
+// two merged and re-validated — every value can say where it came from, and
+// "use the environment value again" is a button rather than a matter of
+// remembering what the old number was.
 //
-// So: the environment is the baseline, the database holds a sparse set of
-// overrides on top of it, and the effective configuration is the two merged
-// and re-validated. Anything not in Editable is baseline-only, because it
-// either cannot change without a restart (the listen address, the database
-// path) or is a security boundary that must not be reachable through the very
-// UI it protects (authentication, the compose-root allowlist).
+// What is editable is decided by the `editable` tag on config.Config rather
+// than by a list kept here. Anything untagged is baseline-only, because it is
+// consumed once by something that cannot be rebuilt in place: where the
+// process listens, which database file it opens, and the compose-root
+// allowlist, whose paths have to match a read-only volume mount to mean
+// anything.
 package settings
 
 import (
@@ -21,10 +23,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/unmaykr-a/silt/internal/config"
 )
@@ -41,126 +42,162 @@ type Storer interface {
 	PutSetting(ctx context.Context, key, value string) error
 }
 
-// Overrides is the sparse patch stored in the database. A nil field means
-// "defer to the environment", which is what makes clearing an override
-// distinguishable from setting it to a zero value.
+// Overrides is the sparse patch stored in the database: the settings that have
+// been given a value here, and nothing else.
+//
+// Absence is the point. A document that named every setting would pin them all
+// to whatever they happened to be at the time, so the next edit to the compose
+// file would change nothing and nobody would be able to see why.
+//
+// The values stay as raw JSON between the wire and the config struct. Decoding
+// them earlier would mean a type per setting, which is the parallel list this
+// replaced.
 type Overrides struct {
-	SnapshotIntervalMS     *int64    `json:"snapshot_interval_ms,omitempty"`
-	RetentionDays          *int      `json:"retention_days,omitempty"`
-	UnchangedRetentionDays *int      `json:"unchanged_retention_days,omitempty"`
-	EventRetentionDays     *int      `json:"event_retention_days,omitempty"`
-	AuditRetentionDays     *int      `json:"audit_retention_days,omitempty"`
-	RetentionIntervalMS    *int64    `json:"retention_interval_ms,omitempty"`
-	VacuumIntervalMS       *int64    `json:"vacuum_interval_ms,omitempty"`
-	KeepKeys               *[]string `json:"keep_keys,omitempty"`
-	BaseURL                *string   `json:"base_url,omitempty"`
-	LogLevel               *string   `json:"log_level,omitempty"`
-	NotifyURLs             *[]string `json:"notify_urls,omitempty"`
-	NotifyOn               *[]string `json:"notify_on,omitempty"`
-	NotifyMinSeverity      *string   `json:"notify_min_severity,omitempty"`
-	IngestToken            *string   `json:"ingest_token,omitempty"`
+	values map[string]json.RawMessage
 }
 
-// Fields names every override, in the order the settings screen shows them.
-// Handlers use it to decide whether a patch key is known before touching the
-// database, so a typo is a 400 rather than a silently ignored field.
-var Fields = []string{
-	"snapshot_interval_ms",
-	"retention_days",
-	"unchanged_retention_days",
-	"event_retention_days",
-	"audit_retention_days",
-	"retention_interval_ms",
-	"vacuum_interval_ms",
-	"keep_keys",
-	"base_url",
-	"log_level",
-	"notify_urls",
-	"notify_on",
-	"notify_min_severity",
-	"ingest_token",
+// NewOverrides builds a patch from wire values, rejecting any name that is not
+// an editable setting.
+//
+// A typo used to be accepted and ignored: the patch decoded into a struct, and
+// encoding/json drops what it does not recognise, so PUT with retention_dayz
+// answered 200 and changed nothing.
+func NewOverrides(values map[string]json.RawMessage) (Overrides, error) {
+	out := Overrides{values: make(map[string]json.RawMessage, len(values))}
+	for name, raw := range values {
+		if _, ok := config.EditableField(name); !ok {
+			return Overrides{}, fmt.Errorf("unknown setting %q", name)
+		}
+		out.values[name] = raw
+	}
+	return out, nil
 }
 
-// apply merges o onto base and returns the effective configuration.
-func (o Overrides) apply(base config.Config) config.Config {
-	c := base.Clone()
-	if o.SnapshotIntervalMS != nil {
-		c.SnapshotInterval = time.Duration(*o.SnapshotIntervalMS) * time.Millisecond
+// Patch builds an override document from Go values rather than JSON, for
+// callers that have the values in hand.
+//
+// Wire names and wire types: a duration is its whole milliseconds, because that
+// is what the name says and what the API carries.
+func Patch(values map[string]any) (Overrides, error) {
+	raw := make(map[string]json.RawMessage, len(values))
+	for name, v := range values {
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return Overrides{}, fmt.Errorf("setting %q: %w", name, err)
+		}
+		raw[name] = encoded
 	}
-	if o.RetentionDays != nil {
-		c.RetentionDays = *o.RetentionDays
+	return NewOverrides(raw)
+}
+
+// MarshalJSON writes the patch as a flat object of setting names to values,
+// which is both the stored form and the exported one.
+func (o Overrides) MarshalJSON() ([]byte, error) {
+	if o.values == nil {
+		return []byte("{}"), nil
 	}
-	if o.UnchangedRetentionDays != nil {
-		c.UnchangedRetentionDays = *o.UnchangedRetentionDays
+	return json.Marshal(o.values)
+}
+
+// UnmarshalJSON reads that form back, rejecting unknown names.
+func (o *Overrides) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
 	}
-	if o.AuditRetentionDays != nil {
-		c.AuditRetentionDays = *o.AuditRetentionDays
+	parsed, err := NewOverrides(raw)
+	if err != nil {
+		return err
 	}
-	if o.EventRetentionDays != nil {
-		c.EventRetentionDays = *o.EventRetentionDays
+	*o = parsed
+	return nil
+}
+
+// Has reports whether a setting carries an override.
+func (o Overrides) Has(name string) bool {
+	_, ok := o.values[name]
+	return ok
+}
+
+// Len is how many settings are set here rather than by the environment.
+func (o Overrides) Len() int { return len(o.values) }
+
+// Names lists the overridden settings in the order the settings screen shows
+// them, so a log line and the screen agree about the order.
+func (o Overrides) Names() []string {
+	out := make([]string, 0, len(o.values))
+	for _, name := range config.EditableNames() {
+		if o.Has(name) {
+			out = append(out, name)
+		}
 	}
-	if o.RetentionIntervalMS != nil {
-		c.RetentionInterval = time.Duration(*o.RetentionIntervalMS) * time.Millisecond
-	}
-	if o.VacuumIntervalMS != nil {
-		c.VacuumInterval = time.Duration(*o.VacuumIntervalMS) * time.Millisecond
-	}
-	if o.KeepKeys != nil {
-		c.KeepKeys = clean(*o.KeepKeys)
-	}
-	if o.BaseURL != nil {
-		c.BaseURL = strings.TrimSpace(*o.BaseURL)
-	}
-	if o.LogLevel != nil {
-		c.LogLevel = *o.LogLevel
-	}
-	if o.NotifyURLs != nil {
-		c.NotifyURLs = clean(*o.NotifyURLs)
-	}
-	if o.NotifyOn != nil {
-		c.NotifyOn = clean(*o.NotifyOn)
-	}
-	if o.NotifyMinSeverity != nil {
-		c.NotifyMinSeverity = *o.NotifyMinSeverity
-	}
-	if o.IngestToken != nil {
-		c.IngestToken = *o.IngestToken
-	}
-	return c
+	return out
 }
 
 // Set reports which fields carry an override, so the screen can show "set
 // here" beside a value that no longer comes from the environment.
 func (o Overrides) Set() map[string]bool {
-	set := map[string]bool{}
-	mark := func(name string, overridden bool) {
-		if overridden {
-			set[name] = true
-		}
+	set := make(map[string]bool, len(o.values))
+	for name := range o.values {
+		set[name] = true
 	}
-	mark("snapshot_interval_ms", o.SnapshotIntervalMS != nil)
-	mark("retention_days", o.RetentionDays != nil)
-	mark("unchanged_retention_days", o.UnchangedRetentionDays != nil)
-	mark("event_retention_days", o.EventRetentionDays != nil)
-	mark("audit_retention_days", o.AuditRetentionDays != nil)
-	mark("retention_interval_ms", o.RetentionIntervalMS != nil)
-	mark("vacuum_interval_ms", o.VacuumIntervalMS != nil)
-	mark("keep_keys", o.KeepKeys != nil)
-	mark("base_url", o.BaseURL != nil)
-	mark("log_level", o.LogLevel != nil)
-	mark("notify_urls", o.NotifyURLs != nil)
-	mark("notify_on", o.NotifyOn != nil)
-	mark("notify_min_severity", o.NotifyMinSeverity != nil)
-	mark("ingest_token", o.IngestToken != nil)
 	return set
 }
 
-func clean(in []string) []string {
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
+// WithoutSecrets drops the write-only values and names what it dropped.
+//
+// Used by the export, which is a file someone keeps: a shoutrrr URL carries
+// the credential for the service it points at, and neither it nor the ingest
+// token becomes readable by being called a backup. Driven by the tag rather
+// than a hand-written pair, so a secret added later is excluded by default
+// instead of leaking until someone remembers this function exists.
+func (o Overrides) WithoutSecrets() (Overrides, []string) {
+	out := Overrides{values: maps.Clone(o.values)}
+	var dropped []string
+	for _, f := range config.Editable() {
+		if f.Secret && o.Has(f.Name) {
+			delete(out.values, f.Name)
+			dropped = append(dropped, f.Name)
 		}
+	}
+	return out, dropped
+}
+
+// Apply merges the patch onto base and returns the effective configuration,
+// unvalidated. A value that will not decode into its field is an error here
+// rather than a zero value there.
+func (o Overrides) Apply(base config.Config) (config.Config, error) {
+	c := base.Clone()
+	// In field order rather than map order: two settings can both be wrong,
+	// and the message should name the same one every time.
+	for _, f := range config.Editable() {
+		raw, ok := o.values[f.Name]
+		if !ok {
+			continue
+		}
+		if err := f.Decode(&c, raw); err != nil {
+			return config.Config{}, err
+		}
+	}
+	return c, nil
+}
+
+// merge lays patch over o. Only settings present in patch move.
+func (o Overrides) merge(patch Overrides) Overrides {
+	out := Overrides{values: maps.Clone(o.values)}
+	if out.values == nil {
+		out.values = map[string]json.RawMessage{}
+	}
+	maps.Copy(out.values, patch.values)
+	return out
+}
+
+// without drops the named overrides, returning those settings to the
+// environment.
+func (o Overrides) without(names []string) Overrides {
+	out := Overrides{values: maps.Clone(o.values)}
+	for _, name := range names {
+		delete(out.values, name)
 	}
 	return out
 }
@@ -201,7 +238,10 @@ func Load(ctx context.Context, base config.Config, db Storer) (*Live, error) {
 	if err := json.Unmarshal([]byte(raw), &o); err != nil {
 		return l, fmt.Errorf("stored settings are not readable, using the environment: %w", err)
 	}
-	merged := o.apply(base)
+	merged, err := o.Apply(base)
+	if err != nil {
+		return l, fmt.Errorf("stored settings are not readable, using the environment: %w", err)
+	}
 	if err := merged.Validate(); err != nil {
 		return l, fmt.Errorf("stored settings are no longer valid, using the environment: %w", err)
 	}
@@ -235,6 +275,15 @@ func (l *Live) Overrides() Overrides {
 	return l.overrides
 }
 
+// Preview reports what a patch would produce without storing it, so a handler
+// can reject a value on a rule this package has no business knowing — what
+// counts as a change kind, say — before anything is written.
+func (l *Live) Preview(patch Overrides, clear []string) (config.Config, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.overrides.merge(patch).without(clear).Apply(l.base)
+}
+
 // Observe registers a callback run after every successful change, and once
 // immediately so a consumer does not need separate wiring for the initial
 // value. Callbacks run outside the lock.
@@ -264,14 +313,18 @@ func (l *Live) Update(ctx context.Context, patch Overrides, clear []string) (con
 		return l.Get(), ErrReadOnly
 	}
 	for _, name := range clear {
-		if !slices.Contains(Fields, name) {
+		if _, ok := config.EditableField(name); !ok {
 			return config.Config{}, fmt.Errorf("unknown setting %q", name)
 		}
 	}
 
 	l.mu.Lock()
-	merged := clearFields(merge(l.overrides, patch), clear)
-	next := merged.apply(l.base)
+	merged := l.overrides.merge(patch).without(clear)
+	next, err := merged.Apply(l.base)
+	if err != nil {
+		l.mu.Unlock()
+		return config.Config{}, err
+	}
 	if err := next.Validate(); err != nil {
 		l.mu.Unlock()
 		return config.Config{}, err
@@ -322,89 +375,4 @@ func (l *Live) Reset(ctx context.Context) (config.Config, error) {
 		fn(current.Clone())
 	}
 	return current, nil
-}
-
-// merge lays patch over current. Only fields present in patch move.
-func merge(current, patch Overrides) Overrides {
-	out := current
-	if patch.SnapshotIntervalMS != nil {
-		out.SnapshotIntervalMS = patch.SnapshotIntervalMS
-	}
-	if patch.RetentionDays != nil {
-		out.RetentionDays = patch.RetentionDays
-	}
-	if patch.UnchangedRetentionDays != nil {
-		out.UnchangedRetentionDays = patch.UnchangedRetentionDays
-	}
-	if patch.AuditRetentionDays != nil {
-		out.AuditRetentionDays = patch.AuditRetentionDays
-	}
-	if patch.EventRetentionDays != nil {
-		out.EventRetentionDays = patch.EventRetentionDays
-	}
-	if patch.RetentionIntervalMS != nil {
-		out.RetentionIntervalMS = patch.RetentionIntervalMS
-	}
-	if patch.VacuumIntervalMS != nil {
-		out.VacuumIntervalMS = patch.VacuumIntervalMS
-	}
-	if patch.KeepKeys != nil {
-		out.KeepKeys = patch.KeepKeys
-	}
-	if patch.BaseURL != nil {
-		out.BaseURL = patch.BaseURL
-	}
-	if patch.LogLevel != nil {
-		out.LogLevel = patch.LogLevel
-	}
-	if patch.NotifyURLs != nil {
-		out.NotifyURLs = patch.NotifyURLs
-	}
-	if patch.NotifyOn != nil {
-		out.NotifyOn = patch.NotifyOn
-	}
-	if patch.NotifyMinSeverity != nil {
-		out.NotifyMinSeverity = patch.NotifyMinSeverity
-	}
-	if patch.IngestToken != nil {
-		out.IngestToken = patch.IngestToken
-	}
-	return out
-}
-
-// clearFields drops the named overrides.
-func clearFields(o Overrides, names []string) Overrides {
-	for _, name := range names {
-		switch name {
-		case "snapshot_interval_ms":
-			o.SnapshotIntervalMS = nil
-		case "retention_days":
-			o.RetentionDays = nil
-		case "unchanged_retention_days":
-			o.UnchangedRetentionDays = nil
-		case "event_retention_days":
-			o.EventRetentionDays = nil
-		case "audit_retention_days":
-			o.AuditRetentionDays = nil
-		case "retention_interval_ms":
-			o.RetentionIntervalMS = nil
-		case "vacuum_interval_ms":
-			o.VacuumIntervalMS = nil
-		case "keep_keys":
-			o.KeepKeys = nil
-		case "base_url":
-			o.BaseURL = nil
-		case "log_level":
-			o.LogLevel = nil
-		case "notify_urls":
-			o.NotifyURLs = nil
-		case "notify_on":
-			o.NotifyOn = nil
-		case "notify_min_severity":
-			o.NotifyMinSeverity = nil
-		case "ingest_token":
-			o.IngestToken = nil
-		}
-	}
-	return o
 }

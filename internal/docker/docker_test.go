@@ -164,3 +164,66 @@ func TestBackoffDelayGrows(t *testing.T) {
 		t.Errorf("ceiling did not grow between attempt 0 (%v) and 3 (%v)", maxOf(0), maxOf(3))
 	}
 }
+
+// The endpoint is a setting now, so it has to be changeable on a live client:
+// the collector, the snapshotter and the settings screen's probe all hold this
+// one pointer, and handing them a new client would mean restarting all three.
+func TestRedialChangesTheEndpoint(t *testing.T) {
+	c, err := New("tcp://first:2375")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	if got := c.Host(); got != "tcp://first:2375" {
+		t.Fatalf("host = %q", got)
+	}
+	changed, err := c.Redial("tcp://second:2375")
+	if err != nil {
+		t.Fatalf("redial: %v", err)
+	}
+	if !changed {
+		t.Error("redial to a different endpoint reported no change")
+	}
+	if got := c.Host(); got != "tcp://second:2375" {
+		t.Errorf("host after redial = %q, want tcp://second:2375", got)
+	}
+}
+
+// Saving any setting hands the whole configuration to the observer, so a redial
+// is attempted on every save. An unchanged endpoint has to be free — closing and
+// rebuilding the transport would drop the event stream on every unrelated edit.
+func TestRedialToTheSameEndpointIsANoOp(t *testing.T) {
+	c, err := New("tcp://first:2375")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	changed, err := c.Redial("tcp://first:2375")
+	if err != nil {
+		t.Fatalf("redial: %v", err)
+	}
+	if changed {
+		t.Error("redial to the same endpoint reported a change")
+	}
+}
+
+// A typo in the settings screen must not take the collector down with it: the
+// old endpoint stays dialled and the save is refused.
+func TestRedialKeepsTheOldEndpointWhenTheNewOneIsBad(t *testing.T) {
+	c, err := New("tcp://first:2375")
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	// "tcp://" with no address: the config validator catches the wrong scheme,
+	// so what reaches here is a well-formed scheme with an unusable address.
+	if _, err := c.Redial("tcp://"); err == nil {
+		t.Fatal("redial to a malformed endpoint succeeded")
+	}
+	if got := c.Host(); got != "tcp://first:2375" {
+		t.Errorf("host after a failed redial = %q, want the original", got)
+	}
+}

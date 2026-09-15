@@ -50,6 +50,11 @@ type Snapshotter struct {
 	Log      *slog.Logger
 	HostName string
 	Endpoint string
+	// HostFn, when set, supersedes HostName and Endpoint. Both are editable on
+	// the settings screen, and both are written onto the host row on every
+	// snapshot, so reading them per snapshot is what makes a change land
+	// without a restart.
+	HostFn func() (name, endpoint string)
 	// Publisher is optional; nil means nothing is broadcast.
 	Publisher Publisher
 	// Notifier is optional; a nil one is a working no-op.
@@ -63,6 +68,14 @@ type Snapshotter struct {
 	// Files captures compose files from disk. Nil or disabled means Silt
 	// records only what is running, which needs no mounts.
 	Files *compose.FileReader
+}
+
+// host is the name and endpoint this snapshot is recorded against.
+func (s *Snapshotter) host() (string, string) {
+	if s.HostFn != nil {
+		return s.HostFn()
+	}
+	return s.HostName, s.Endpoint
 }
 
 // SnapshotProject snapshots one project by its database id, for
@@ -98,7 +111,8 @@ func (s *Snapshotter) Snapshot(ctx context.Context, p docker.Project, trigger st
 		dockerVersion = ""
 	}
 
-	_, projectID, err := s.Store.UpsertHostAndProject(ctx, s.HostName, s.Endpoint, dockerVersion, projectIdentity{p})
+	hostName, endpoint := s.host()
+	_, projectID, err := s.Store.UpsertHostAndProject(ctx, hostName, endpoint, dockerVersion, projectIdentity{p})
 	if err != nil {
 		return store.SnapshotResult{}, err
 	}

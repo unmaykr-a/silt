@@ -186,24 +186,51 @@ func TestClearingTheIngestTokenClosesTheEndpoint(t *testing.T) {
 
 // The compose root allowlist, the database path and authentication are the
 // boundary around this very endpoint. Naming one in a patch must not move it.
+// TestFixedSettingsAreNotEditable covers the settings that stay in the
+// environment for good: where the process listens, which database it opens, and
+// the compose-root allowlist, whose paths only mean anything alongside a
+// matching read-only volume mount.
+//
+// Naming one is refused outright now. It used to be accepted and ignored — the
+// patch decoded into a struct, and encoding/json drops what it does not
+// recognise — so the request that tried to move the database answered 200 and
+// looked like it had worked.
 func TestFixedSettingsAreNotEditable(t *testing.T) {
-	f := newFixture(t)
-	before := f.settings(t)
+	for _, patch := range []string{
+		`{"db_path":"/tmp/elsewhere.db"}`,
+		`{"compose_roots":["/"]}`,
+		`{"listen_addr":":9999"}`,
+	} {
+		t.Run(patch, func(t *testing.T) {
+			f := newFixture(t)
+			before := f.settings(t)
 
-	resp, body := f.do(t, http.MethodPut, "/api/settings",
-		`{"db_path":"/tmp/elsewhere.db","compose_roots":["/"],"password_hash":"","trust_proxy_auth":true}`, nil)
-	if resp.StatusCode != 200 {
-		t.Fatalf("PUT settings = %d %s", resp.StatusCode, body)
+			resp, body := f.do(t, http.MethodPut, "/api/settings", patch, nil)
+			if resp.StatusCode != 400 {
+				t.Fatalf("PUT %s = %d %s, want 400", patch, resp.StatusCode, body)
+			}
+			after := f.settings(t)
+			if after.Fixed.DBPath != before.Fixed.DBPath {
+				t.Errorf("db_path moved to %q", after.Fixed.DBPath)
+			}
+			if len(after.Overridden) != 0 {
+				t.Errorf("overridden = %v, want nothing", after.Overridden)
+			}
+		})
 	}
-	after := decodeSettings(t, body)
-	if after.Fixed.DBPath != before.Fixed.DBPath {
-		t.Errorf("db_path moved to %q", after.Fixed.DBPath)
+}
+
+// TestAMisspeltSettingIsRefused is the same guard for the likelier mistake: a
+// name that is nearly right. Silently ignoring it meant a script could write
+// the wrong key forever and never find out.
+func TestAMisspeltSettingIsRefused(t *testing.T) {
+	f := newFixture(t)
+	resp, body := f.do(t, http.MethodPut, "/api/settings", `{"retention_dayz":30}`, nil)
+	if resp.StatusCode != 400 {
+		t.Fatalf("PUT misspelt setting = %d %s, want 400", resp.StatusCode, body)
 	}
-	if after.Fixed.AuthMode != before.Fixed.AuthMode {
-		t.Errorf("auth_mode moved to %q", after.Fixed.AuthMode)
-	}
-	if len(after.Overridden) != 0 {
-		t.Errorf("overridden = %v, want nothing: no editable field was named", after.Overridden)
+	if !strings.Contains(string(body), "retention_dayz") {
+		t.Errorf("the refusal does not name the setting it refused: %s", body)
 	}
 }
 

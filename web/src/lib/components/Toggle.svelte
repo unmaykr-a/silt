@@ -15,11 +15,14 @@
   let {
     checked = $bindable(),
     label,
+    id,
     onchange,
     disabled = false,
     readonly = false,
   }: {
     checked: boolean;
+    /** Set when a <label for> points at this control. */
+    id?: string;
     /** Names what is being toggled, for anyone not reading the layout. */
     label: string;
     onchange?: (next: boolean) => void;
@@ -36,6 +39,7 @@
 </script>
 
 <button
+  {id}
   type="button"
   role="switch"
   aria-checked={checked}

@@ -338,3 +338,44 @@ test("editing a setting saves it and says where the value now comes from", async
 
   expect(errors).toEqual([]);
 });
+
+test("a toggle setting saves like a text one", async ({ page }) => {
+  // The number field above covers the write path for an <input>. A Toggle
+  // inside a Field is a different control — a button with role=switch bound
+  // through the same draft — and metrics_public is the first setting shaped
+  // that way, so nothing exercised a bindable toggle on this screen before.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+  await page.getByLabel("Settings sections").getByRole("button", { name: /^Security/ }).click();
+  await page.waitForTimeout(400);
+
+  const toggle = page.locator("#metrics_public");
+  await expect(toggle).toBeVisible();
+  const before = await toggle.getAttribute("aria-checked");
+
+  const save = page.getByRole("button", { name: "Save changes" });
+  await expect(save).toBeDisabled();
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", before === "true" ? "false" : "true");
+  await expect(save).toBeEnabled();
+
+  await save.click();
+  await expect(page.locator("body")).toContainText("In force now", { timeout: 10_000 });
+  await expect(page.locator("#metrics_public")).toHaveAttribute(
+    "aria-checked",
+    before === "true" ? "false" : "true",
+  );
+  await expect(page.locator("main")).toContainText("set here");
+
+  // And back, so the suite can run twice.
+  await page.getByText("use the environment value").first().click();
+  await expect(page.locator("#metrics_public")).toHaveAttribute("aria-checked", before ?? "false", {
+    timeout: 10_000,
+  });
+
+  expect(errors).toEqual([]);
+});

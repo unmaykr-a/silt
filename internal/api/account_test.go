@@ -17,6 +17,7 @@ import (
 	"github.com/unmaykr-a/silt/internal/api"
 	"github.com/unmaykr-a/silt/internal/auth"
 	"github.com/unmaykr-a/silt/internal/config"
+	"github.com/unmaykr-a/silt/internal/settings"
 	"github.com/unmaykr-a/silt/internal/store"
 )
 
@@ -70,7 +71,7 @@ func newAccountFixture(t *testing.T, envHash string, opts ...fixtureOpt) *accoun
 		Account:  account,
 		Proxy:    proxy,
 	}
-	cfg := config.Config{}
+	cfg := baselineConfig(t)
 	for _, opt := range opts {
 		if opt.gate != nil {
 			opt.gate(gate)
@@ -82,6 +83,14 @@ func newAccountFixture(t *testing.T, envHash string, opts ...fixtureOpt) *accoun
 
 	srv := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, nil, cfg, nil)
 	srv.SetAuth(gate)
+	// Settings as well as a gate: the questions this fixture exists for — who
+	// may change what, and what the answer is after they change it — need both,
+	// and a fixture with only one of them can only test half of each.
+	live, err := settings.Load(ctx, cfg, db)
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	srv.SetSettings(live)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

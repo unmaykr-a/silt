@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/unmaykr-a/silt/internal/config"
 )
 
 // The wiki's shape.
@@ -185,6 +187,50 @@ func TestNoTrailingWhitespaceOrTabs(t *testing.T) {
 			if strings.HasSuffix(line, " ") || strings.Contains(line, "\t") {
 				t.Errorf("%s:%d has trailing whitespace or a tab", e.Name(), i+1)
 			}
+		}
+	}
+}
+
+// TestTheWikiAgreesAboutWhatNeedsARestart.
+//
+// Configuration.md marks a setting **restart** to say it cannot be changed from
+// the settings screen. That marker is prose, so nothing stopped it from
+// outliving the reason for it — which is how the manual came to describe
+// twenty-nine settings as environment-only when two of them were, one was an
+// allowlist tied to a volume mount, and the rest were just expensive to add.
+//
+// Both directions, because each is wrong in its own way: a **restart** marker on
+// an editable setting sends someone to recreate a container for a text box they
+// could have typed into, and a missing one on a setting that really is
+// environment-only has them typing into a screen that will refuse them.
+func TestTheWikiAgreesAboutWhatNeedsARestart(t *testing.T) {
+	page := read(t, "../../docs/wiki/Configuration.md")
+
+	// A row looks like: | `SILT_THING` | default | prose |
+	row := regexp.MustCompile(`(?m)^\|\s*` + "`" + `(SILT_[A-Z0-9_]+)` + "`" + `\s*\|([^|]*)\|(.*)$`)
+	editable := map[string]bool{}
+	for _, f := range config.Editable() {
+		editable[f.Env] = true
+	}
+
+	documented := map[string]bool{}
+	for _, m := range row.FindAllStringSubmatch(page, -1) {
+		name, prose := m[1], m[3]
+		documented[name] = true
+		marked := strings.Contains(prose, "**restart**")
+		switch {
+		case marked && editable[name]:
+			t.Errorf("%s is marked **restart** in the manual but is editable on the settings screen", name)
+		case !marked && !editable[name] && name != "SILT_PORT":
+			// SILT_PORT is read by docker-compose.yml rather than by Silt, so
+			// it is neither editable nor a restart of the process.
+			t.Errorf("%s is not editable but the manual does not mark it **restart**", name)
+		}
+	}
+
+	for _, f := range config.Editable() {
+		if !documented[f.Env] {
+			t.Errorf("editable setting %s has no row in Configuration.md", f.Env)
 		}
 	}
 }

@@ -114,9 +114,9 @@ func run() error {
 
 	hub := api.NewHub(log)
 	fileReader := &compose.FileReader{
-		Roots:    cfg.ComposeRoots,
-		MaxBytes: cfg.MaxComposeFileBytes,
-		Redactor: redactor,
+		Roots:      cfg.ComposeRoots,
+		MaxBytesFn: func() int64 { return live.Get().MaxComposeFileBytes },
+		Redactor:   redactor,
 	}
 	if fileReader.Enabled() {
 		log.Info("compose file capture enabled", "roots", cfg.ComposeRoots)
@@ -127,12 +127,14 @@ func run() error {
 		Store:     db,
 		Redactor:  redactor,
 		Log:       log,
-		HostName:  cfg.HostName,
-		Endpoint:  cfg.DockerHost,
 		Publisher: api.HubPublisher{Hub: hub},
 		Notifier:  notifier,
 		BaseURLFn: func() string { return live.Get().BaseURL },
-		Files:     fileReader,
+		HostFn: func() (string, string) {
+			c := live.Get()
+			return c.HostName, c.DockerHost
+		},
+		Files: fileReader,
 	}
 
 	retainer := &store.Retainer{
@@ -178,9 +180,31 @@ func run() error {
 	// Everything that caches a configuration value rather than re-reading it
 	// gets pushed the new one. Observe fires once immediately, so this is also
 	// where the startup values land.
+	//
+	// Two of them are not a matter of re-reading a value: the host name is the
+	// key its row is keyed on, so a change has to move the history rather than
+	// let the next snapshot start a second host, and the Docker endpoint is a
+	// live connection, so a change has to redial.
+	renamer := collect.NewHostRenamer(db, cfg.HostName, log)
 	live.Observe(func(c config.Config) {
 		logLevel.Set(c.Level())
 		redactor.SetKeepKeys(c.KeepKeys)
+
+		// Without the request's cancellation: this runs from an HTTP handler
+		// whose request may be finished by the time the write lands, and
+		// abandoning the rename half-way would leave the history under the old
+		// label with the configuration pointing at the new one.
+		renamer.Apply(context.WithoutCancel(ctx), c.HostName)
+
+		if redialed, err := dc.Redial(c.DockerHost); err != nil {
+			log.Error("docker endpoint rejected; keeping the previous one",
+				"endpoint", c.DockerHost, "error", err)
+		} else if redialed {
+			// The watcher's stream runs against the transport that just closed,
+			// so it errors and reconnects against the new endpoint by itself.
+			log.Info("docker endpoint changed; the event stream will reconnect",
+				"endpoint", c.DockerHost)
+		}
 		filter, err := notify.ParseFilter(c.NotifyOn, c.NotifyMinSeverity)
 		if err != nil {
 			log.Error("notification filter rejected; keeping the previous one", "error", err)
@@ -303,7 +327,6 @@ func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slo
 		Proxy:          proxy,
 		OIDC:           provider,
 		OIDCError:      oidcError,
-		MetricsPublic:  cfg.MetricsPublic,
 		AllowedOrigins: originsOf(cfg.BaseURL),
 	}
 

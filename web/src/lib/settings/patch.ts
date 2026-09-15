@@ -22,7 +22,12 @@ export type Effective = Settings["effective"];
  * because that is what a text input holds; they are split on the way out.
  */
 export type Draft = {
+  host_name: string;
+  docker_host: string;
   snapshot_interval_ms: number;
+  max_compose_file_bytes: number;
+  ingest_rate_per_minute: number;
+  metrics_public: boolean;
   retention_days: number;
   unchanged_retention_days: number;
   event_retention_days: number;
@@ -45,7 +50,12 @@ export type Draft = {
  */
 export function emptyDraft(): Draft {
   return {
+    host_name: "local",
+    docker_host: "tcp://docker-socket-proxy:2375",
     snapshot_interval_ms: 300_000,
+    max_compose_file_bytes: 1_048_576,
+    ingest_rate_per_minute: 60,
+    metrics_public: false,
     retention_days: 365,
     unchanged_retention_days: 7,
     event_retention_days: 90,
@@ -62,7 +72,12 @@ export function emptyDraft(): Draft {
 
 export function toDraft(e: Effective): Draft {
   return {
+    host_name: e.host_name,
+    docker_host: e.docker_host,
     snapshot_interval_ms: e.snapshot_interval_ms,
+    max_compose_file_bytes: e.max_compose_file_bytes,
+    ingest_rate_per_minute: e.ingest_rate_per_minute,
+    metrics_public: e.metrics_public,
     retention_days: e.retention_days,
     unchanged_retention_days: e.unchanged_retention_days,
     event_retention_days: e.event_retention_days,
@@ -112,6 +127,8 @@ export function buildPatch(draft: Draft, e: Effective, secrets: Secrets): Settin
   const patch: SettingsPatch = {};
 
   const numbers = [
+    "max_compose_file_bytes",
+    "ingest_rate_per_minute",
     "snapshot_interval_ms",
     "retention_days",
     "unchanged_retention_days",
@@ -126,6 +143,9 @@ export function buildPatch(draft: Draft, e: Effective, secrets: Secrets): Settin
     if (Number(draft[key]) !== e[key]) patch[key] = Number(draft[key]);
   }
 
+  if (draft.host_name !== e.host_name) patch.host_name = draft.host_name;
+  if (draft.docker_host !== e.docker_host) patch.docker_host = draft.docker_host;
+  if (draft.metrics_public !== e.metrics_public) patch.metrics_public = draft.metrics_public;
   if (draft.base_url !== e.base_url) patch.base_url = draft.base_url;
   if (draft.log_level !== e.log_level) patch.log_level = draft.log_level as SettingsPatch["log_level"];
   if (draft.notify_min_severity !== e.notify_min_severity) {

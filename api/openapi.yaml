@@ -1741,7 +1741,8 @@ components:
          event_retention_days, audit_retention_days, retention_interval_ms,
          vacuum_interval_ms, keep_keys, base_url, log_level, notify_targets,
          notify_on, notify_min_severity, ingest_configured,
-         ingest_rate_per_minute]
+         ingest_rate_per_minute, host_name, docker_host, metrics_public,
+         max_compose_file_bytes]
       properties:
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }
@@ -1775,21 +1776,37 @@ components:
             Events accepted per minute from one source address. The token is the
             authentication; this is the blast radius when it leaks. 0 disables
             the limit.
+        host_name:
+          type: string
+          description: |
+            This host's label. Changing it renames the existing host row rather
+            than starting a second one under the new name.
+        docker_host:
+          type: string
+          description: |
+            The endpoint being observed. Changing it redials without a restart:
+            the event stream to the old engine ends and reconnects to the new
+            one.
+        metrics_public:
+          type: boolean
+          description: Whether /metrics is reachable without authentication.
+        max_compose_file_bytes: { type: integer, format: int64 }
 
     SettingsFixed:
       type: object
-      required:
-        [host_name, docker_host, db_path, listen_addr, compose_roots,
-         max_compose_file_bytes, auth_mode]
+      description: |
+        The settings that stay in the environment. The listen address and the
+        database path are consumed once, by a socket and a file handle that
+        cannot be rebuilt under a running process; the compose roots are an
+        allowlist whose entries only mean anything alongside a matching
+        read-only volume mount.
+      required: [db_path, listen_addr, compose_roots, auth_mode]
       properties:
-        host_name: { type: string }
-        docker_host: { type: string }
         db_path: { type: string }
         listen_addr: { type: string }
         compose_roots:
           type: array
           items: { type: string }
-        max_compose_file_bytes: { type: integer, format: int64 }
         auth_mode:
           type: string
           enum: [none, proxy, password, "proxy+password"]
@@ -1892,7 +1909,7 @@ components:
          oidc_redirect_url, oidc_scopes, oidc_username_claim, oidc_groups_claim,
          oidc_allowed_groups, oidc_allowed_users, oidc_admin_groups,
          admin_groups, auth_groups_header, roles_enabled, session_ttl_ms,
-         session_idle_ttl_ms, oidc_admin_ttl_ms, cookie_secure, metrics_public]
+         session_idle_ttl_ms, oidc_admin_ttl_ms, cookie_secure]
       properties:
         mode:
           type: string
@@ -1950,7 +1967,6 @@ components:
             How the Secure flag on the session cookie is decided. `auto` infers
             it from the request, which a proxy that terminates TLS without
             setting X-Forwarded-Proto gets wrong.
-        metrics_public: { type: boolean }
 
     SetupCheck:
       type: object
@@ -1971,10 +1987,14 @@ components:
 
     SettingsPatch:
       type: object
+      additionalProperties: false
       description: |
         Every field is optional. Present means "set this override", absent
         means "leave it alone", and naming it in `reset` means "drop the
         override and use the environment again".
+
+        A name that is not an editable setting is refused with 400 rather
+        than ignored, so a misspelt key cannot look like a save that worked.
       properties:
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }
@@ -2005,6 +2025,25 @@ components:
         ingest_token:
           type: string
           description: Write-only. An empty string turns the ingest endpoint off.
+        ingest_rate_per_minute:
+          type: integer
+          description: 0 disables the per-source cap.
+        host_name:
+          type: string
+          description: |
+            Renames this host. The existing row is renamed when nothing already
+            holds the new name; when something does — renaming back to a label
+            used before — the rows are left alone and this host attaches to the
+            existing one, because merging two histories is not something to do
+            without being asked.
+        docker_host:
+          type: string
+          description: Redials the Docker API. A dial failure leaves the old endpoint in place.
+        metrics_public:
+          type: boolean
+        max_compose_file_bytes:
+          type: integer
+          format: int64
         reset:
           type: array
           items: { type: string }

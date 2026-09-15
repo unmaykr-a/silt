@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/unmaykr-a/silt/internal/config"
 )
 
 // The spec at api/openapi.yaml is hand-maintained, which means nothing stops
@@ -289,4 +291,81 @@ func TestEveryRouteIsDocumented(t *testing.T) {
 
 func itoa(n int) string {
 	return string(rune('0'+n/100)) + string(rune('0'+(n/10)%10)) + string(rune('0'+n%10))
+}
+
+// TestTheSpecDocumentsEveryEditableSetting closes the loop between the config
+// struct, the API and the spec.
+//
+// The settings surface is the one place in Silt where three lists have to agree
+// — what the process reads, what the API accepts, and what the manual and the
+// generated client say it accepts. Two of the three are now derived from the
+// struct tag; the spec is hand-maintained, so this is what stops it drifting.
+//
+// The failure it prevents is quiet in an unhelpful direction: a setting missing
+// from the spec still works over HTTP, so nothing breaks until someone
+// regenerates the client types and the field they were using disappears.
+func TestTheSpecDocumentsEveryEditableSetting(t *testing.T) {
+	spec := loadSpec(t)
+	patch, ok := spec.Components.Schemas["SettingsPatch"]
+	if !ok {
+		t.Fatal("spec has no SettingsPatch schema")
+	}
+
+	// The read schema too, and for a sharper reason: a setting the spec does
+	// not declare readable produces a generated client with no field for it, so
+	// the settings form hydrates that control from undefined and resets it every
+	// time the screen opens, while the stored value stays whatever it was.
+	values, ok := spec.Components.Schemas["SettingsValues"]
+	if !ok {
+		t.Fatal("spec has no SettingsValues schema")
+	}
+
+	for _, f := range config.Editable() {
+		if _, ok := patch.Properties[f.Name]; !ok {
+			t.Errorf("editable setting %q is missing from the SettingsPatch schema", f.Name)
+		}
+		if f.Secret {
+			// A secret is write-only by design: it appears in the patch schema
+			// and deliberately not in the values schema.
+			if _, ok := values.Properties[f.Name]; ok {
+				t.Errorf("secret setting %q is declared readable in SettingsValues", f.Name)
+			}
+			continue
+		}
+		if _, ok := values.Properties[f.Name]; !ok {
+			t.Errorf("editable setting %q is missing from the SettingsValues schema", f.Name)
+		}
+	}
+	// And nowhere in the read-only halves. A setting that became editable but
+	// is still declared under fixed or identity generates a client with two
+	// fields for one value, and the stale one keeps reporting the boot-time
+	// answer — which is exactly what happened to metrics_public when it moved.
+	for _, block := range []string{"SettingsFixed", "SettingsIdentity"} {
+		schema, ok := spec.Components.Schemas[block]
+		if !ok {
+			t.Errorf("spec has no %s schema", block)
+			continue
+		}
+		for name := range schema.Properties {
+			if _, editable := config.EditableField(name); editable {
+				t.Errorf("%s declares %q, which is editable: it belongs in SettingsValues only", block, name)
+			}
+		}
+		for _, name := range schema.Required {
+			if _, editable := config.EditableField(name); editable {
+				t.Errorf("%s requires %q, which is editable", block, name)
+			}
+		}
+	}
+
+	for name := range patch.Properties {
+		// reset travels in the same object as the values but is an instruction
+		// rather than a setting.
+		if name == "reset" {
+			continue
+		}
+		if _, ok := config.EditableField(name); !ok {
+			t.Errorf("the SettingsPatch schema documents %q, which is not an editable setting", name)
+		}
+	}
 }

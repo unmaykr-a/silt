@@ -124,7 +124,7 @@ describe("the words people actually type", () => {
     ["sqlite", "backup"],
     ["does it work", "probes"],
     ["mounted", "probes"],
-    ["rate limit", "ingest_rate"],
+    ["rate limit", "ingest_rate_per_minute"],
     ["stale", "oidc_admin_ttl"],
     ["https", "cookie_secure"],
   ];

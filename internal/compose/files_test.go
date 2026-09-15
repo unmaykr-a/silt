@@ -114,6 +114,44 @@ func TestCaptureRefusesOversizedFiles(t *testing.T) {
 	}
 }
 
+// The cap is a setting, so raising it has to make an already-too-large file
+// readable without a restart. Read per file rather than captured at startup:
+// the reader is built once and shared by the snapshotter and the file watch.
+func TestTheSizeCapIsReReadPerFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "big.yaml")
+	write(t, path, strings.Repeat("x", 2048))
+
+	cap := int64(1024)
+	reader := newReader(t, root)
+	reader.MaxBytesFn = func() int64 { return cap }
+
+	if got := reader.Capture([]string{path}, nil)[0].Status; got != compose.FileTooLarge {
+		t.Fatalf("status under a 1KiB cap = %q, want too_large", got)
+	}
+
+	cap = 4096
+	if got := reader.Capture([]string{path}, nil)[0].Status; got != compose.FileOK {
+		t.Errorf("status after raising the cap = %q, want ok", got)
+	}
+}
+
+// MaxBytesFn supersedes MaxBytes rather than sitting beside it, so a reader
+// built with both cannot silently apply the stale one.
+func TestTheSizeCapFunctionWinsOverTheField(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "small.yaml")
+	write(t, path, strings.Repeat("x", 100))
+
+	reader := newReader(t, root)
+	reader.MaxBytes = 1 << 20
+	reader.MaxBytesFn = func() int64 { return 10 }
+
+	if got := reader.Capture([]string{path}, nil)[0].Status; got != compose.FileTooLarge {
+		t.Errorf("status = %q, want too_large: the field was used instead of the function", got)
+	}
+}
+
 func TestCaptureReportsMissingFiles(t *testing.T) {
 	root := t.TempDir()
 	files := newReader(t, root).Capture([]string{filepath.Join(root, "gone.yaml")}, nil)

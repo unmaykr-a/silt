@@ -64,3 +64,44 @@ func TestTheLimitIsCheckedAfterTheToken(t *testing.T) {
 		t.Errorf("a real event after the flood = %d %s", resp.StatusCode, body)
 	}
 }
+
+// The limit is a setting now, and a limit that only applies after a restart is
+// not a limit you can reach for when a webhook is flooding you.
+//
+// Both directions, because raising it is the case someone is in when a
+// legitimate sender is being refused: the counter is keyed per source and the
+// limit is read on each request, so a save has to lift the block immediately
+// rather than at the top of the next window.
+func TestTheIngestRateLimitChangesOnSave(t *testing.T) {
+	f := newFixture(t)
+	auth := map[string]string{"Authorization": "Bearer " + f.ingestTok}
+
+	if resp, body := f.do(t, http.MethodPut, "/api/settings", `{"ingest_rate_per_minute":1}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("lowering the limit = %d %s", resp.StatusCode, body)
+	}
+	if resp, body := f.post(t, "/api/ingest", `{"type":"probe.one"}`, auth); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("the first event = %d %s, want 202", resp.StatusCode, body)
+	}
+	if resp, body := f.post(t, "/api/ingest", `{"type":"probe.two"}`, auth); resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("the second event under a limit of 1 = %d %s, want 429", resp.StatusCode, body)
+	}
+
+	// Raising it has to take effect inside the same window, not at the next one.
+	if resp, body := f.do(t, http.MethodPut, "/api/settings", `{"ingest_rate_per_minute":50}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("raising the limit = %d %s", resp.StatusCode, body)
+	}
+	if resp, body := f.post(t, "/api/ingest", `{"type":"probe.three"}`, auth); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("an event after raising the limit = %d %s, want 202", resp.StatusCode, body)
+	}
+
+	// Zero is off, which is the setting someone reaches for when the limit is
+	// the problem rather than the flood.
+	if resp, body := f.do(t, http.MethodPut, "/api/settings", `{"ingest_rate_per_minute":0}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("disabling the limit = %d %s", resp.StatusCode, body)
+	}
+	for i := range 20 {
+		if resp, body := f.post(t, "/api/ingest", fmt.Sprintf(`{"type":"probe.un.%d"}`, i), auth); resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("event %d with the limit disabled = %d %s, want 202", i, resp.StatusCode, body)
+		}
+	}
+}

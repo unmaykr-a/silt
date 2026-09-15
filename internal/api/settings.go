@@ -40,24 +40,36 @@ type settingsValues struct {
 	// IngestRatePerMinute is the per-source cap on webhook events. It is a
 	// value rather than a secret, so unlike the token it is readable.
 	IngestRatePerMinute int `json:"ingest_rate_per_minute"`
+	// HostName labels this Docker host. Editing it renames the existing host
+	// row rather than starting a second one, which is what the environment
+	// variable alone could never do: the row is keyed on the name, so changing
+	// it and restarting used to orphan every project under the old label.
+	HostName string `json:"host_name"`
+	// DockerHost is the endpoint being observed. Changing it redials without a
+	// restart; the event stream ends and reconnects to the new engine.
+	DockerHost string `json:"docker_host"`
+	// MetricsPublic leaves /metrics reachable without authentication.
+	MetricsPublic bool `json:"metrics_public"`
+	// MaxComposeFileBytes caps a single captured file.
+	MaxComposeFileBytes int64 `json:"max_compose_file_bytes"`
 }
 
-// settingsFixed is the half that cannot be edited here.
+// settingsFixed is the half that stays in the environment for good.
 //
-// Two different reasons, deliberately not separated in the payload because the
-// screen says the same thing about both: some of it cannot change without a
-// restart (where the process listens, which database it opens), and some of it
-// is the boundary protecting this very screen. Letting the UI edit the compose
-// root allowlist or the password hash would mean anyone who reached the UI
-// could widen what Silt reads or lock out the person who set it up.
+// Three settings, and each for a reason the settings screen could not work
+// around. The listen address and the database path are consumed once, by a
+// socket and a file handle that cannot be rebuilt underneath a running
+// process. The compose roots are an allowlist whose entries only mean anything
+// alongside a matching read-only volume mount, so a path typed in here would
+// name a directory this container cannot see.
+//
+// Everything else that used to be in here is editable now. What kept most of
+// it out was the cost of adding a setting, not a property of the setting.
 type settingsFixed struct {
-	HostName            string   `json:"host_name"`
-	DockerHost          string   `json:"docker_host"`
-	DBPath              string   `json:"db_path"`
-	ListenAddr          string   `json:"listen_addr"`
-	ComposeRoots        []string `json:"compose_roots"`
-	MaxComposeFileBytes int64    `json:"max_compose_file_bytes"`
-	AuthMode            string   `json:"auth_mode"`
+	DBPath       string   `json:"db_path"`
+	ListenAddr   string   `json:"listen_addr"`
+	ComposeRoots []string `json:"compose_roots"`
+	AuthMode     string   `json:"auth_mode"`
 }
 
 // settingsIdentity is how this install decides who you are.
@@ -102,7 +114,6 @@ type settingsIdentity struct {
 	// survives without a fresh sign-in. 0 means it does not lapse.
 	OIDCAdminTTLMS int64  `json:"oidc_admin_ttl_ms"`
 	CookieSecure   string `json:"cookie_secure"`
-	MetricsPublic  bool   `json:"metrics_public"`
 }
 
 type settingsUsage struct {
@@ -152,6 +163,10 @@ func toValues(c config.Config) settingsValues {
 		NotifyMinSeverity:      c.NotifyMinSeverity,
 		IngestConfigured:       c.IngestToken != "",
 		IngestRatePerMinute:    c.IngestRatePerMinute,
+		HostName:               c.HostName,
+		DockerHost:             c.DockerHost,
+		MetricsPublic:          c.MetricsPublic,
+		MaxComposeFileBytes:    c.MaxComposeFileBytes,
 	}
 	if v.KeepKeys == nil {
 		v.KeepKeys = []string{}
@@ -191,12 +206,7 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 	editable := false
 	if s.live != nil {
 		base = s.live.Base()
-		set := s.live.Overrides().Set()
-		for _, name := range settings.Fields {
-			if set[name] {
-				overridden = append(overridden, name)
-			}
-		}
+		overridden = s.live.Overrides().Names()
 		editable = true
 	}
 
@@ -208,13 +218,10 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 		Overridden:  overridden,
 		Editable:    editable,
 		Fixed: settingsFixed{
-			HostName:            effective.HostName,
-			DockerHost:          effective.DockerHost,
-			DBPath:              effective.DBPath,
-			ListenAddr:          effective.ListenAddr,
-			ComposeRoots:        effective.ComposeRoots,
-			MaxComposeFileBytes: effective.MaxComposeFileBytes,
-			AuthMode:            s.authMode(effective),
+			DBPath:       effective.DBPath,
+			ListenAddr:   effective.ListenAddr,
+			ComposeRoots: effective.ComposeRoots,
+			AuthMode:     s.authMode(effective),
 		},
 	}
 	if out.Fixed.ComposeRoots == nil {
@@ -245,7 +252,6 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 		SessionIdleTTLMS:  effective.SessionIdleTTL.Milliseconds(),
 		OIDCAdminTTLMS:    effective.OIDCAdminTTL.Milliseconds(),
 		CookieSecure:      effective.CookieSecure,
-		MetricsPublic:     effective.MetricsPublic,
 	}
 	out.Checks = effective.Checks()
 	if out.Checks == nil {
@@ -334,14 +340,7 @@ func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 	// A shoutrrr URL carries the credential for the service it points at, and
 	// the ingest token is a credential outright. Neither is readable anywhere
 	// else in the API and neither becomes readable by being called an export.
-	if out.Settings.NotifyURLs != nil {
-		out.Omitted = append(out.Omitted, "notify_urls")
-		out.Settings.NotifyURLs = nil
-	}
-	if out.Settings.IngestToken != nil {
-		out.Omitted = append(out.Omitted, "ingest_token")
-		out.Settings.IngestToken = nil
-	}
+	out.Settings, out.Omitted = out.Settings.WithoutSecrets()
 
 	// Downloaded rather than rendered: this is a file someone keeps.
 	w.Header().Set("Content-Disposition",
@@ -349,12 +348,10 @@ func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// settingsUpdateRequest is a sparse patch. An absent field is left alone; a
-// field named in reset drops its override and falls back to the environment.
-type settingsUpdateRequest struct {
-	settings.Overrides
-	Reset []string `json:"reset,omitempty"`
-}
+// reset names the settings a patch is giving back to the environment. It
+// travels in the same object as the values, so it is lifted out before the rest
+// is read as a set of overrides.
+const resetKey = "reset"
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if s.live == nil {
@@ -362,33 +359,44 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req settingsUpdateRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	var reset []string
+	if raw, ok := body[resetKey]; ok {
+		if err := json.Unmarshal(raw, &reset); err != nil {
+			writeError(w, http.StatusBadRequest, "reset must be a list of setting names")
+			return
+		}
+		delete(body, resetKey)
+	}
+	// An unknown name is refused here. It used to decode into a struct, and
+	// encoding/json drops what it does not recognise, so a patch naming
+	// retention_dayz answered 200 and changed nothing.
+	next, err := settings.NewOverrides(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// The notification filter is validated here rather than in config, which
 	// has no business knowing what a change kind is. Rejecting it before the
-	// write means a typo'd severity never reaches the collector.
-	next := req.Overrides
-	if next.NotifyOn != nil || next.NotifyMinSeverity != nil {
-		current := s.conf()
-		kinds := current.NotifyOn
-		if next.NotifyOn != nil {
-			kinds = *next.NotifyOn
-		}
-		severity := current.NotifyMinSeverity
-		if next.NotifyMinSeverity != nil {
-			severity = *next.NotifyMinSeverity
-		}
-		if _, err := notify.ParseFilter(kinds, severity); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	// write means a typo'd severity never reaches the collector. Checked
+	// against what the patch would produce rather than against the patch, so
+	// changing one half of the pair is validated with the half already stored.
+	prospective, err := s.live.Preview(next, reset)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := notify.ParseFilter(prospective.NotifyOn, prospective.NotifyMinSeverity); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	if _, err := s.live.Update(r.Context(), next, req.Reset); err != nil {
+	if _, err := s.live.Update(r.Context(), next, reset); err != nil {
 		if errors.Is(err, settings.ErrReadOnly) {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
@@ -397,12 +405,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fields := changedFields(next)
-	s.log.Info("settings updated", "fields", fields, "reset", req.Reset)
+	fields := next.Names()
+	s.log.Info("settings updated", "fields", fields, "reset", reset)
 	// Field names, never values. This table holds an ingest token and
 	// notification URLs; recording what they became would put credentials in
 	// a table built to be read.
-	s.audit(r, store.AuditSettingsChanged, map[string]any{"fields": fields, "reset": req.Reset})
+	s.audit(r, store.AuditSettingsChanged, map[string]any{"fields": fields, "reset": reset})
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
 }
 
@@ -418,20 +426,6 @@ func (s *Server) deleteSettings(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("settings reset to the environment")
 	s.audit(r, store.AuditSettingsReset, nil)
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
-}
-
-// changedFields names what a patch touched, for the audit line. The values
-// themselves are deliberately absent: one of them can be a notification URL or
-// the ingest token.
-func changedFields(o settings.Overrides) []string {
-	set := o.Set()
-	out := make([]string, 0, len(set))
-	for _, name := range settings.Fields {
-		if set[name] {
-			out = append(out, name)
-		}
-	}
-	return out
 }
 
 type pruneResponse struct {
