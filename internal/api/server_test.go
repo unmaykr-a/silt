@@ -169,7 +169,7 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 	// The settings layer is part of the surface under test: without it every
 	// write returns 503 and the contract test could only ever check the
 	// refusal.
-	live, err := settings.Load(ctx, cfg, db)
+	live, err := settings.Load(ctx, cfg, db, nil)
 	if err != nil {
 		t.Fatalf("load settings: %v", err)
 	}

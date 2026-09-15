@@ -24,6 +24,7 @@ import (
 const (
 	editableTag = "editable"
 	secretOpt   = "secret"
+	gateOpt     = "gate"
 )
 
 // Field is one editable setting: where it lives on Config, what it is called
@@ -38,6 +39,15 @@ type Field struct {
 	// credential for the service it points at and the ingest token is a
 	// credential outright.
 	Secret bool
+	// Gate marks a setting the authentication gate is built from, so a change
+	// to it has to rebuild that gate.
+	//
+	// Needed because a save hands the whole configuration to every observer,
+	// and rebuilding means re-reading the account, re-reading the proxy rules
+	// and re-running OpenID Connect discovery — which reaches the network.
+	// Without this, changing the log level would make Silt call your identity
+	// provider.
+	Gate bool
 
 	index int
 	kind  kind
@@ -77,6 +87,7 @@ var Editable = sync.OnceValue(func() []Field {
 			Name:   name,
 			Env:    sf.Tag.Get("env"),
 			Secret: tagOpts(opts)[secretOpt],
+			Gate:   tagOpts(opts)[gateOpt],
 			index:  i,
 		}
 		// A bad tag is a programming error, and the only useful time to find
@@ -110,6 +121,34 @@ var EditableNames = sync.OnceValue(func() []string {
 	}
 	return out
 })
+
+// GateFingerprint summarises every setting the authentication gate is built
+// from, so a caller can tell whether a save actually changed any of them.
+//
+// A fingerprint rather than a comparison of two Configs: most of the gate's
+// settings are slices, so == will not compile, and a hand-written comparison of
+// twenty-one fields is the parallel list this package exists to avoid.
+func GateFingerprint(c Config) string {
+	var b strings.Builder
+	for _, f := range Editable() {
+		if !f.Gate {
+			continue
+		}
+		raw, err := f.Encode(c)
+		if err != nil {
+			// Unreachable for the types a setting can have, and a fingerprint
+			// that cannot be computed must compare unequal rather than equal:
+			// rebuilding the gate needlessly is recoverable, not rebuilding it
+			// when authentication changed is not.
+			return "unfingerprintable:" + f.Name + ":" + err.Error()
+		}
+		b.WriteString(f.Name)
+		b.WriteByte('=')
+		b.Write(raw)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
 
 // EditableField finds a setting by its wire name.
 func EditableField(name string) (Field, bool) {

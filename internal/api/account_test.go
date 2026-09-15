@@ -31,15 +31,27 @@ type accountFixture struct {
 	db      *store.Store
 }
 
-// fixtureOpt adjusts the fixture before it starts. Two things need adjusting —
-// the gate and the configuration — and a single function type could only reach
-// one of them.
+// fixtureOpt adjusts the fixture before it starts. Three things need adjusting
+// — the gate, the configuration, and how the gate is built — and a single
+// function type could only reach one of them.
 type fixtureOpt struct {
 	gate func(*api.Gate)
 	cfg  func(*config.Config)
+	// live builds the gate from the configuration and keeps it current, the way
+	// the real process does, instead of installing the hand-built one.
+	live bool
 }
 
 func withGate(f func(*api.Gate)) fixtureOpt { return fixtureOpt{gate: f} }
+
+// withLiveAuth builds the gate from the configuration and rebuilds it whenever
+// the settings behind it change — which is what cmd/silt does.
+//
+// Off by default because the account tests hold the fixture's own *auth.Account
+// and assert on it: Account caches its row in memory, so a rebuilt gate would
+// carry a second instance and those assertions would read a stale copy. Tests
+// about the rebuild itself want the real wiring and do not hold that handle.
+func withLiveAuth() fixtureOpt { return fixtureOpt{live: true} }
 
 func withCookieSecure(mode string) fixtureOpt {
 	return fixtureOpt{cfg: func(c *config.Config) { c.CookieSecure = mode }}
@@ -72,6 +84,9 @@ func newAccountFixture(t *testing.T, envHash string, opts ...fixtureOpt) *accoun
 		Proxy:    proxy,
 	}
 	cfg := baselineConfig(t)
+	cfg.PasswordHash = envHash
+	cfg.LocalAccount = true
+	watched := false
 	for _, opt := range opts {
 		if opt.gate != nil {
 			opt.gate(gate)
@@ -79,18 +94,25 @@ func newAccountFixture(t *testing.T, envHash string, opts ...fixtureOpt) *accoun
 		if opt.cfg != nil {
 			opt.cfg(&cfg)
 		}
+		watched = watched || opt.live
 	}
 
 	srv := api.New(slog.New(slog.NewTextHandler(io.Discard, nil)), db, nil, cfg, nil)
-	srv.SetAuth(gate)
 	// Settings as well as a gate: the questions this fixture exists for — who
 	// may change what, and what the answer is after they change it — need both,
 	// and a fixture with only one of them can only test half of each.
-	live, err := settings.Load(ctx, cfg, db)
+	live, err := settings.Load(ctx, cfg, db, nil)
 	if err != nil {
 		t.Fatalf("load settings: %v", err)
 	}
 	srv.SetSettings(live)
+	if watched {
+		if err := srv.WatchAuth(ctx, live); err != nil {
+			t.Fatalf("watch auth: %v", err)
+		}
+	} else {
+		srv.SetAuth(gate)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 

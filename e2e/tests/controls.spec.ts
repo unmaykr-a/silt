@@ -379,3 +379,47 @@ test("a toggle setting saves like a text one", async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+test("authentication is editable and warns before it locks you out", async ({ page }) => {
+  // The section was entirely read-only until 1.2.0, so nothing here had a save
+  // bar, a bound control or a draft. The warning is under test too: it is the
+  // part of the feature that makes the rest of it safe to have.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+  await page.getByLabel("Settings sections").getByRole("button", { name: /^Authentication/ }).click();
+  await page.waitForTimeout(400);
+
+  // The way back in is on the screen before anything is changed, not after.
+  await expect(page.locator("main")).toContainText("SILT_SETTINGS_RESET");
+
+  const claim = page.locator("#oidc_username_claim");
+  await expect(claim).toBeVisible();
+  const before = await claim.inputValue();
+
+  const save = page.getByRole("button", { name: "Save changes" });
+  await expect(save).toBeDisabled();
+
+  await claim.fill("email");
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(page.locator("body")).toContainText("In force now", { timeout: 10_000 });
+  await expect(page.locator("#oidc_username_claim")).toHaveValue("email");
+
+  // Drafting a configuration with no way in says so, before the save.
+  const local = page.locator("#local_account");
+  if ((await local.getAttribute("aria-checked")) === "true") {
+    await local.click();
+    await expect(page.locator("main")).toContainText("nothing here authenticates anyone");
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page.waitForTimeout(200);
+  }
+
+  // And back, so the suite can run twice.
+  await page.getByText("use the environment value").first().click();
+  await expect(page.locator("#oidc_username_claim")).toHaveValue(before, { timeout: 10_000 });
+
+  expect(errors).toEqual([]);
+});

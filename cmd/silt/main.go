@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"sync"
@@ -15,13 +14,13 @@ import (
 	"time"
 
 	"github.com/unmaykr-a/silt/internal/api"
-	"github.com/unmaykr-a/silt/internal/auth"
 	"github.com/unmaykr-a/silt/internal/collect"
 	"github.com/unmaykr-a/silt/internal/compose"
 	"github.com/unmaykr-a/silt/internal/config"
 	"github.com/unmaykr-a/silt/internal/docker"
 	"github.com/unmaykr-a/silt/internal/notify"
 	"github.com/unmaykr-a/silt/internal/redact"
+	"github.com/unmaykr-a/silt/internal/secret"
 	"github.com/unmaykr-a/silt/internal/settings"
 	"github.com/unmaykr-a/silt/internal/store"
 	"github.com/unmaykr-a/silt/internal/web"
@@ -81,7 +80,21 @@ func run() error {
 	// it. A stored document that no longer validates is reported and skipped
 	// rather than fatal — refusing to start would lock someone out of the very
 	// screen that fixes it.
-	live, err := settings.Load(ctx, cfg, db)
+	// The key lives in the environment and nowhere else: a key stored in the
+	// database it protects protects nothing.
+	cipher, err := secret.New(cfg.SecretKey)
+	if err != nil {
+		return err
+	}
+	if !cipher.Enabled() {
+		log.Warn("SILT_SECRET_KEY is not set, so the ingest token, notification targets and any OIDC client secret are stored in plaintext",
+			"note", "GET /api/backup hands out a copy of the database file")
+	}
+	live, err := settings.Load(ctx, cfg, db, cipher)
+	if cfg.SettingsReset {
+		log.Warn("SILT_SETTINGS_RESET is set: every stored setting has been dropped and this install is running exactly what its environment says",
+			"note", "unset it and recreate the container, or the next restart will drop your settings again")
+	}
 	if err != nil {
 		log.Warn("stored settings ignored", "error", err)
 	}
@@ -105,11 +118,6 @@ func run() error {
 	if sender.Enabled() {
 		log.Info("notifications enabled", "targets", len(cfg.NotifyURLs),
 			"kinds", cfg.NotifyOn, "min_severity", cfg.NotifyMinSeverity)
-	}
-
-	gate, err := buildGate(ctx, cfg, db, log)
-	if err != nil {
-		return err
 	}
 
 	hub := api.NewHub(log)
@@ -153,16 +161,6 @@ func run() error {
 			}
 		},
 		Log: log,
-		// Expired sessions are swept alongside everything else rather than on
-		// their own timer: it is the same "remove what is past its window"
-		// pass, and one schedule is easier to reason about than two.
-		Extra: func(ctx context.Context) {
-			if removed, err := gate.Sessions.Sweep(ctx); err != nil {
-				log.Error("sweep sessions failed", "error", err)
-			} else if removed > 0 {
-				log.Info("expired sessions removed", "count", removed)
-			}
-		},
 	}
 
 	// The collector retries forever, so an engine that is down at startup is
@@ -235,7 +233,27 @@ func run() error {
 	apiServer := api.New(log, db, hub, cfg, snapshotter)
 	apiServer.SetVersion(version)
 	apiServer.SetSettings(live)
-	apiServer.SetAuth(gate)
+	// Installs the gate and rebuilds it whenever the settings behind it change.
+	// The first build is synchronous, so a trusted-proxy list that will not
+	// parse still stops the boot rather than coming up with authentication
+	// quietly off.
+	if err := apiServer.WatchAuth(ctx, live); err != nil {
+		return err
+	}
+	// Expired sessions are swept alongside everything else rather than on their
+	// own timer: it is the same "remove what is past its window" pass, and one
+	// schedule is easier to reason about than two.
+	//
+	// Assigned after the gate exists, and through the server rather than a
+	// captured pointer, because the session lifetimes are editable — a closure
+	// holding the gate built at startup would keep sweeping to the old TTLs.
+	retainer.Extra = func(ctx context.Context) {
+		if removed, err := apiServer.SweepSessions(ctx); err != nil {
+			log.Error("sweep sessions failed", "error", err)
+		} else if removed > 0 {
+			log.Info("expired sessions removed", "count", removed)
+		}
+	}
 	apiServer.SetFiles(fileReader)
 	// The live probe answers "does the Docker endpoint respond right now?",
 	// which no other screen can tell you apart from a host that simply has
@@ -279,118 +297,10 @@ func run() error {
 	return runErr
 }
 
-// buildGate assembles authentication and says out loud what it did.
-//
-// Every one of these warnings is about a default that is convenient and not
-// safe. None of them stop Silt starting: someone bringing a stack up at 02:00
-// needs the tool that tells them what changed, not a refusal to boot.
-func buildGate(ctx context.Context, cfg config.Config, db *store.Store, log *slog.Logger) (*api.Gate, error) {
-	account, err := auth.LoadAccount(ctx, db, cfg.PasswordHash, cfg.LocalAccount)
-	if err != nil {
-		return nil, err
-	}
-	proxy, err := auth.NewProxy(cfg.TrustProxyAuth, cfg.AuthHeader, cfg.TrustedProxies)
-	if err != nil {
-		return nil, err
-	}
-	proxy = proxy.WithAdminGroups(cfg.AuthGroupsHeader, cfg.AdminGroups)
-
-	// Discovery reaches the network, so a provider that is down is a warning
-	// and a disabled login rather than a refusal to start. Silt's job is to
-	// tell you what changed; being unable to do that because an unrelated
-	// service is down would be the wrong trade.
-	provider, err := auth.NewOIDC(ctx, auth.OIDCConfig{
-		Issuer:        cfg.OIDCIssuer,
-		ClientID:      cfg.OIDCClientID,
-		ClientSecret:  cfg.OIDCClientSecret,
-		RedirectURL:   cfg.OIDCCallbackURL(),
-		Scopes:        cfg.OIDCScopes,
-		UsernameClaim: cfg.OIDCUsernameClaim,
-		GroupsClaim:   cfg.OIDCGroupsClaim,
-		AllowedGroups: cfg.OIDCAllowedGroups,
-		AllowedUsers:  cfg.OIDCAllowedUsers,
-		AdminGroups:   cfg.OIDCAdminGroups,
-	})
-	oidcError := ""
-	if err != nil {
-		// Reported to the UI as well as the log. A provider that quietly does
-		// not appear, when you configured one, sends you looking at your
-		// authentik config rather than at the reason.
-		oidcError = err.Error()
-		log.Error("OpenID Connect is configured but unusable; that login is disabled", "error", err)
-		provider = nil
-	}
-
-	gate := &api.Gate{
-		Sessions:       sessions(db, cfg),
-		Account:        account,
-		Proxy:          proxy,
-		OIDC:           provider,
-		OIDCError:      oidcError,
-		AllowedOrigins: originsOf(cfg.BaseURL),
-	}
-
-	switch {
-	case !gate.Enabled():
-		log.Warn("no authentication configured; anyone who can reach this port has full read access",
-			"hint", "set SILT_LOCAL_ACCOUNT=true, SILT_OIDC_ISSUER, or SILT_TRUST_PROXY_AUTH with your reverse proxy")
-	case account.SetupRequired() && !provider.Enabled() && !proxy.Enabled():
-		// Loud, because there is a real window here: until someone claims the
-		// account, whoever reaches the UI first gets to. Everything else is
-		// refused meanwhile, and SILT_PASSWORD_HASH removes the window
-		// entirely for anyone who would rather not have it.
-		log.Warn("waiting for setup: open Silt and choose a password",
-			"note", "until then every request is refused, and the first person to reach the UI claims the account")
-	case account.SetupRequired():
-		// No window here: something else already guards the door, so claiming
-		// the account needs a session rather than being first through it.
-		log.Info("sign in with your provider; the built-in account has no password yet",
-			"note", "set one afterwards under Settings → Security, or leave it unset")
-	default:
-		log.Info("authentication enabled",
-			"oidc", provider.Enabled(), "proxy", proxy.Enabled(), "account", account.Enabled())
-	}
-	if proxy.TrustsAnySource() {
-		log.Warn("forward auth trusts the identity header from any source; anything that can reach this port can claim to be anyone",
-			"hint", "set SILT_TRUSTED_PROXIES to your proxy's address or subnet", "header", proxy.Header())
-	}
-	if cfg.MetricsPublic {
-		log.Warn("/metrics is reachable without authentication and names every project on this host")
-	}
-	if provider.Enabled() && !provider.Configured() {
-		// Derived per request rather than pinned. It works, and it is worth
-		// knowing which URL to register with the provider.
-		log.Info("OpenID Connect callback URL is derived from each request",
-			"hint", "set SILT_BASE_URL to pin it, and register <base>/api/auth/callback with your provider")
-	}
-	return gate, nil
-}
-
-// originsOf returns the origin of a configured base URL, so a request the
-// browser addresses to that name is not treated as cross-site.
-func originsOf(baseURL string) []string {
-	if baseURL == "" {
-		return nil
-	}
-	u, err := url.Parse(baseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return nil
-	}
-	return []string{u.Scheme + "://" + u.Host}
-}
-
 // dockerProbe adapts the Docker client to the API's live-probe interface,
 // which keeps the API package free of a Docker dependency.
 type dockerProbe struct{ client *docker.Client }
 
 func (p dockerProbe) DockerVersion(ctx context.Context) (string, error) {
 	return p.client.Version(ctx)
-}
-
-// sessions builds the session issuer, including how long a provider-granted
-// administrator role is good for.
-func sessions(db *store.Store, cfg config.Config) *auth.Sessions {
-	s := auth.NewSessions(db, cfg.SessionTTL, cfg.SessionIdleTTL)
-	s.AdminTTL = cfg.OIDCAdminTTL
-	return s
 }

@@ -25,6 +25,36 @@ A key is a name, optionally with a single `*` at one end. Anything that would ke
 names — `*` on its own, `[A-Z]*` — is **refused at startup**, because it would store every
 environment variable on the host, passwords included, in cleartext.
 
+## Silt's own credentials
+
+Redaction is for values Silt *observed*. It keeps nothing recoverable, because it never needs
+to: a digest answers "did this change?" and nothing else is asked of it.
+
+Silt's own settings are different. The ingest token, the shoutrrr notification targets and the
+OpenID Connect client secret are credentials Silt has to be able to **use** — it must present
+the real client secret to your provider — so they cannot be digested. They live in Silt's
+settings row, and until 1.2.0 they lived there in plaintext.
+
+```yaml
+SILT_SECRET_KEY: any-length-string-kept-here-and-nowhere-else
+```
+
+With it set, those three are encrypted at rest with AES-256-GCM. The key stays in the
+environment and is never written to the database or included in a backup, so `GET /api/backup`
+— which is a copy of the database file, and a file people keep — yields ciphertext.
+
+Without it, behaviour is exactly what it was, because a key that is *required* breaks every
+install that upgrades without setting one. Adding one later works: values stored before it are
+read as they are, and re-written encrypted on the next save.
+
+Removing the key after using it is reported rather than survived. Silt would otherwise present
+`enc:v1:…` to your provider as a client secret and report an authentication failure, which sends
+you to read your provider's logs instead of your own compose file.
+
+This is a weaker guarantee than redaction and worth being clear about: it is only as good as
+keeping the key out of the database. Redaction cannot be reversed even with the key, because
+there is nothing to reverse.
+
 ## What a redacted value looks like
 
 A truncated HMAC-SHA256 under a random key generated on first boot, stored in the database and

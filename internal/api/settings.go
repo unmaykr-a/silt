@@ -52,6 +52,38 @@ type settingsValues struct {
 	MetricsPublic bool `json:"metrics_public"`
 	// MaxComposeFileBytes caps a single captured file.
 	MaxComposeFileBytes int64 `json:"max_compose_file_bytes"`
+
+	// Authentication. Editable since 1.2.0, which is a deliberate change of
+	// position rather than a gap being closed: these were withheld on the
+	// grounds that a UI able to edit the boundary in front of it is a way in.
+	//
+	// What changed the answer is that only an administrator can reach them, and
+	// an administrator already holds the stronger controls — the whole-database
+	// backup, the password, every session. Withholding these bought nothing and
+	// cost a container recreate to fix a typo'd issuer. SILT_SETTINGS_RESET=1
+	// is the way back in if a save goes wrong.
+	//
+	// The client secret is not here: it is write-only, like the ingest token,
+	// and reported through Identity as set-or-not.
+	LocalAccount      bool     `json:"local_account"`
+	TrustProxyAuth    bool     `json:"trust_proxy_auth"`
+	AuthHeader        string   `json:"auth_header"`
+	AuthGroupsHeader  string   `json:"auth_groups_header"`
+	AdminGroups       []string `json:"admin_groups"`
+	TrustedProxies    []string `json:"trusted_proxies"`
+	OIDCIssuer        string   `json:"oidc_issuer"`
+	OIDCClientID      string   `json:"oidc_client_id"`
+	OIDCRedirectURL   string   `json:"oidc_redirect_url"`
+	OIDCScopes        []string `json:"oidc_scopes"`
+	OIDCUsernameClaim string   `json:"oidc_username_claim"`
+	OIDCGroupsClaim   string   `json:"oidc_groups_claim"`
+	OIDCAdminGroups   []string `json:"oidc_admin_groups"`
+	OIDCAllowedGroups []string `json:"oidc_allowed_groups"`
+	OIDCAllowedUsers  []string `json:"oidc_allowed_users"`
+	SessionTTLMS      int64    `json:"session_ttl_ms"`
+	SessionIdleTTLMS  int64    `json:"session_idle_ttl_ms"`
+	OIDCAdminTTLMS    int64    `json:"oidc_admin_ttl_ms"`
+	CookieSecure      string   `json:"cookie_secure"`
 }
 
 // settingsFixed is the half that stays in the environment for good.
@@ -72,48 +104,29 @@ type settingsFixed struct {
 	AuthMode     string   `json:"auth_mode"`
 }
 
-// settingsIdentity is how this install decides who you are.
+// settingsIdentity is what can be said about authentication that is not itself
+// a setting.
 //
-// Read-only, like the rest of settingsFixed and for the sharper of its two
-// reasons: these are the boundary protecting this screen, so a UI that could
-// edit them would be a way in rather than a setting.
-//
-// Shown at all because twelve environment variables were readable nowhere.
-// When forward auth is not working, or the provider is rejecting everyone, the
-// first question is what Silt thinks it was told — and the only way to answer
-// it was to go and read the compose file on the host.
+// The settings moved to settingsValues in 1.2.0 when they became editable. What
+// is left is derived — the mode this adds up to, whether the two credentials are
+// set, and whether the admin/viewer split is in play — and none of it has a
+// variable behind it or a control to offer.
 //
 // Secrets are reported as configured-or-not, never echoed, exactly as the
-// notification targets and the ingest token already are.
+// notification targets and the ingest token are.
 type settingsIdentity struct {
-	Mode              string   `json:"mode"`
-	LocalAccount      bool     `json:"local_account"`
-	PasswordHashSet   bool     `json:"password_hash_set"`
-	TrustProxyAuth    bool     `json:"trust_proxy_auth"`
-	AuthHeader        string   `json:"auth_header"`
-	TrustedProxies    []string `json:"trusted_proxies"`
-	OIDCIssuer        string   `json:"oidc_issuer"`
-	OIDCClientID      string   `json:"oidc_client_id"`
-	OIDCSecretSet     bool     `json:"oidc_secret_set"`
-	OIDCRedirectURL   string   `json:"oidc_redirect_url"`
-	OIDCScopes        []string `json:"oidc_scopes"`
-	OIDCUsernameClaim string   `json:"oidc_username_claim"`
-	OIDCGroupsClaim   string   `json:"oidc_groups_claim"`
-	OIDCAllowedGroups []string `json:"oidc_allowed_groups"`
-	OIDCAllowedUsers  []string `json:"oidc_allowed_users"`
-	OIDCAdminGroups   []string `json:"oidc_admin_groups"`
-	AdminGroups       []string `json:"admin_groups"`
-	AuthGroupsHeader  string   `json:"auth_groups_header"`
+	// Mode is the sign-in method this configuration adds up to.
+	Mode string `json:"mode"`
+	// PasswordHashSet and OIDCSecretSet stand in for two credentials that are
+	// never returned. The password hash is not even editable — SILT_PASSWORD_HASH
+	// exists to take the password out of the UI's hands for an install managed
+	// declaratively, and a UI that could set it would defeat its only purpose.
+	PasswordHashSet bool `json:"password_hash_set"`
+	OIDCSecretSet   bool `json:"oidc_secret_set"`
 	// RolesEnabled is whether anyone is a viewer rather than an administrator.
 	// Without an admin group configured everyone admitted may change
 	// everything, which is what Silt did before roles existed.
-	RolesEnabled     bool  `json:"roles_enabled"`
-	SessionTTLMS     int64 `json:"session_ttl_ms"`
-	SessionIdleTTLMS int64 `json:"session_idle_ttl_ms"`
-	// OIDCAdminTTLMS bounds how long a provider-granted administrator role
-	// survives without a fresh sign-in. 0 means it does not lapse.
-	OIDCAdminTTLMS int64  `json:"oidc_admin_ttl_ms"`
-	CookieSecure   string `json:"cookie_secure"`
+	RolesEnabled bool `json:"roles_enabled"`
 }
 
 type settingsUsage struct {
@@ -167,6 +180,26 @@ func toValues(c config.Config) settingsValues {
 		DockerHost:             c.DockerHost,
 		MetricsPublic:          c.MetricsPublic,
 		MaxComposeFileBytes:    c.MaxComposeFileBytes,
+
+		LocalAccount:      c.LocalAccount,
+		TrustProxyAuth:    c.TrustProxyAuth,
+		AuthHeader:        c.AuthHeader,
+		AuthGroupsHeader:  c.AuthGroupsHeader,
+		AdminGroups:       orEmpty(c.AdminGroups),
+		TrustedProxies:    orEmpty(c.TrustedProxies),
+		OIDCIssuer:        c.OIDCIssuer,
+		OIDCClientID:      c.OIDCClientID,
+		OIDCRedirectURL:   c.OIDCRedirectURL,
+		OIDCScopes:        orEmpty(c.OIDCScopes),
+		OIDCUsernameClaim: c.OIDCUsernameClaim,
+		OIDCGroupsClaim:   c.OIDCGroupsClaim,
+		OIDCAdminGroups:   orEmpty(c.OIDCAdminGroups),
+		OIDCAllowedGroups: orEmpty(c.OIDCAllowedGroups),
+		OIDCAllowedUsers:  orEmpty(c.OIDCAllowedUsers),
+		SessionTTLMS:      c.SessionTTL.Milliseconds(),
+		SessionIdleTTLMS:  c.SessionIdleTTL.Milliseconds(),
+		OIDCAdminTTLMS:    c.OIDCAdminTTL.Milliseconds(),
+		CookieSecure:      c.CookieSecure,
 	}
 	if v.KeepKeys == nil {
 		v.KeepKeys = []string{}
@@ -229,29 +262,10 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 	}
 
 	out.Identity = settingsIdentity{
-		Mode:              s.authMode(effective),
-		LocalAccount:      effective.LocalAccount,
-		PasswordHashSet:   effective.PasswordHash != "",
-		TrustProxyAuth:    effective.TrustProxyAuth,
-		AuthHeader:        effective.AuthHeader,
-		TrustedProxies:    orEmpty(effective.TrustedProxies),
-		OIDCIssuer:        effective.OIDCIssuer,
-		OIDCClientID:      effective.OIDCClientID,
-		OIDCSecretSet:     effective.OIDCClientSecret != "",
-		OIDCRedirectURL:   effective.OIDCRedirectURL,
-		OIDCScopes:        orEmpty(effective.OIDCScopes),
-		OIDCUsernameClaim: effective.OIDCUsernameClaim,
-		OIDCGroupsClaim:   effective.OIDCGroupsClaim,
-		OIDCAllowedGroups: orEmpty(effective.OIDCAllowedGroups),
-		OIDCAllowedUsers:  orEmpty(effective.OIDCAllowedUsers),
-		OIDCAdminGroups:   orEmpty(effective.OIDCAdminGroups),
-		AdminGroups:       orEmpty(effective.AdminGroups),
-		AuthGroupsHeader:  effective.AuthGroupsHeader,
-		RolesEnabled:      len(effective.OIDCAdminGroups) > 0 || len(effective.AdminGroups) > 0,
-		SessionTTLMS:      effective.SessionTTL.Milliseconds(),
-		SessionIdleTTLMS:  effective.SessionIdleTTL.Milliseconds(),
-		OIDCAdminTTLMS:    effective.OIDCAdminTTL.Milliseconds(),
-		CookieSecure:      effective.CookieSecure,
+		Mode:            s.authMode(effective),
+		PasswordHashSet: effective.PasswordHash != "",
+		OIDCSecretSet:   effective.OIDCClientSecret != "",
+		RolesEnabled:    len(effective.OIDCAdminGroups) > 0 || len(effective.AdminGroups) > 0,
 	}
 	out.Checks = effective.Checks()
 	if out.Checks == nil {

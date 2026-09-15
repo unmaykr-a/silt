@@ -22,6 +22,10 @@ type settingsPayload struct {
 	Environment struct {
 		RetentionDays int `json:"retention_days"`
 	} `json:"environment"`
+	Identity struct {
+		Mode         string `json:"mode"`
+		RolesEnabled bool   `json:"roles_enabled"`
+	} `json:"identity"`
 	Overridden []string `json:"overridden"`
 	Fixed      struct {
 		DBPath   string `json:"db_path"`

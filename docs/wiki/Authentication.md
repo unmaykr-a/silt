@@ -13,6 +13,43 @@ More than one can be on at once. With a provider configured, the login screen of
 for it *and* a password box, and either gets you in — which is what you want on the day the
 provider is the thing that is down.
 
+## Changing it without a restart
+
+Since 1.2.0 all of this is editable under **Settings → Authentication**, not only in the
+compose file. Saving rebuilds the whole gate: the built-in account is re-read, the forward-auth
+rules are rebuilt, and provider discovery runs again. Sessions survive it, because they are rows
+in Silt's database rather than signed cookies — shortening a lifetime re-dates the sessions that
+exist rather than ending them.
+
+This was deliberately withheld before 1.2.0, on the argument that a UI able to edit the boundary
+in front of it would be a way in rather than a setting. What changed the answer is that only an
+administrator reaches that screen, and an administrator already holds the stronger controls: the
+whole-database backup, the password, and every session. Withholding it bought nothing and cost a
+container recreate to fix a mistyped issuer.
+
+Two things follow, and both matter more than the convenience:
+
+**`SILT_PASSWORD_HASH` is still not editable.** The variable exists to take the password out of
+the UI's hands for an install managed from a compose file, so a UI that could set it would
+defeat its only purpose. The settings screen reports whether it is set and nothing more.
+
+**You can lock yourself out.** A provider that has moved, a typo in an allowlist, the local
+account turned off beside a provider that has stopped answering — any of these leaves an install
+nobody can sign in to. The way back is:
+
+```yaml
+environment:
+  SILT_SETTINGS_RESET: "true"
+```
+
+Recreate the container. Every setting saved from the UI is dropped and Silt runs exactly what its
+environment says, so you are back to your compose file. **Unset it afterwards**, or the next
+restart drops your settings again.
+
+A provider Silt cannot reach is not a lockout: that login is disabled, the reason is shown on the
+settings screen, and every other way in keeps working. The save is accepted so you can correct
+the issuer from the same screen.
+
 ## The built-in account
 
 There is one, and it has a `CHECK (id = 1)` constraint behind it. A table of users would be a

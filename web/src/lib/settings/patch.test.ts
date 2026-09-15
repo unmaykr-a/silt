@@ -27,9 +27,29 @@ const effective: Effective = {
   notify_min_severity: "medium",
   ingest_configured: true,
   ingest_rate_per_minute: 60,
+
+  local_account: true,
+  trust_proxy_auth: false,
+  auth_header: "X-Remote-User",
+  auth_groups_header: "X-Remote-Groups",
+  admin_groups: [],
+  trusted_proxies: [],
+  oidc_issuer: "",
+  oidc_client_id: "",
+  oidc_redirect_url: "",
+  oidc_scopes: ["openid", "profile", "email"],
+  oidc_username_claim: "preferred_username",
+  oidc_groups_claim: "groups",
+  oidc_admin_groups: [],
+  oidc_allowed_groups: [],
+  oidc_allowed_users: [],
+  session_ttl_ms: 2_592_000_000,
+  session_idle_ttl_ms: 604_800_000,
+  oidc_admin_ttl_ms: 43_200_000,
+  cookie_secure: "auto",
 };
 
-const none = { notifyUrls: "", ingestToken: "" };
+const none = { notifyUrls: "", ingestToken: "", oidcClientSecret: "" };
 
 describe("buildPatch", () => {
   it("sends nothing when nothing changed", () => {
@@ -70,9 +90,9 @@ describe("buildPatch", () => {
   it("only sends a secret when it was typed into", () => {
     const draft = toDraft(effective);
     expect(buildPatch(draft, effective, none)).toEqual({});
-    expect(buildPatch(draft, effective, { notifyUrls: "  ", ingestToken: "\n" })).toEqual({});
+    expect(buildPatch(draft, effective, { notifyUrls: "  ", ingestToken: "\n", oidcClientSecret: " " })).toEqual({});
     expect(
-      buildPatch(draft, effective, { notifyUrls: "ntfy://a\ndiscord://b", ingestToken: " tok " }),
+      buildPatch(draft, effective, { notifyUrls: "ntfy://a\ndiscord://b", ingestToken: " tok ", oidcClientSecret: "" }),
     ).toEqual({ notify_urls: ["ntfy://a", "discord://b"], ingest_token: "tok" });
   });
 

@@ -45,7 +45,6 @@
   const READ_ONLY_SECTIONS = new Set<SectionID>([
     "setup",
     "appearance",
-    "identity",
     "environment",
     "storage",
   ]);
@@ -235,7 +234,7 @@
       {:else if section === "security"}
         <SecurityPanel {store} fixed={settings.fixed} />
       {:else if section === "identity"}
-        <IdentityPanel id={settings.identity} />
+        <IdentityPanel {store} id={settings.identity} />
       {:else if section === "environment"}
         <EnvironmentPanel fixed={settings.fixed} />
       {:else if section === "storage"}

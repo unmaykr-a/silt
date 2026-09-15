@@ -44,6 +44,37 @@ var wireValues = map[string]string{
 	"metrics_public":           `true`,
 	"ingest_rate_per_minute":   `120`,
 	"max_compose_file_bytes":   `2097152`,
+	"trust_proxy_auth":         `true`,
+	"auth_header":              `"X-Forwarded-User"`,
+	"auth_groups_header":       `"X-Forwarded-Groups"`,
+	"admin_groups":             `["silt-admins"]`,
+	"trusted_proxies":          `["10.0.0.0/8"]`,
+	"local_account":            `false`,
+	"oidc_issuer":              `"https://auth.example.invalid/application/o/silt/"`,
+	"oidc_client_id":           `"silt"`,
+	"oidc_client_secret":       `"a-client-secret"`,
+	"oidc_redirect_url":        `"https://silt.example/api/auth/callback"`,
+	"oidc_scopes":              `["openid","profile"]`,
+	"oidc_username_claim":      `"email"`,
+	"oidc_groups_claim":        `"roles"`,
+	"oidc_admin_groups":        `["silt-admins"]`,
+	"oidc_allowed_groups":      `["silt-users"]`,
+	"oidc_allowed_users":       `["someone@example.invalid"]`,
+	"session_ttl_ms":           `604800000`,
+	"session_idle_ttl_ms":      `86400000`,
+	"oidc_admin_ttl_ms":        `3600000`,
+	"cookie_secure":            `"always"`,
+}
+
+// companions are the settings that cannot be saved on their own, because the
+// configuration has to stay coherent after every save.
+//
+// An issuer with no client id is a provider Silt could never complete a login
+// against, so Validate refuses it — correctly, and the test sends the client id
+// alongside rather than working around the rule. The assertion is still about
+// the setting under test.
+var companions = map[string]string{
+	"oidc_issuer": `"oidc_client_id":"silt"`,
 }
 
 // TestEverySettingHasARoundTripValue keeps the table above complete in both
@@ -75,7 +106,13 @@ func TestEverySettingRoundTripsThroughTheAPI(t *testing.T) {
 			fx := newFixture(t)
 			value := wireValues[f.Name]
 
-			resp, body := fx.do(t, http.MethodPut, "/api/settings", `{"`+f.Name+`":`+value+`}`, nil)
+			patch := `{"` + f.Name + `":` + value
+			if with, ok := companions[f.Name]; ok {
+				patch += "," + with
+			}
+			patch += "}"
+
+			resp, body := fx.do(t, http.MethodPut, "/api/settings", patch, nil)
 			if resp.StatusCode != 200 {
 				t.Fatalf("PUT %s = %d %s", f.Name, resp.StatusCode, body)
 			}

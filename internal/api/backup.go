@@ -34,7 +34,7 @@ func (s *Server) getBackup(w http.ResponseWriter, r *http.Request) {
 	// Checked here rather than left to the write guard, which lets every read
 	// method through — correctly, for every other endpoint. This is the one
 	// read that is not a screen, and the guard would have waved it past.
-	if id, ok := s.identify(r); s.gate.Enabled() && (!ok || !id.IsAdmin()) {
+	if id, ok := s.identify(r); s.auth().Enabled() && (!ok || !id.IsAdmin()) {
 		writeError(w, http.StatusForbidden,
 			"downloading the database needs an administrator")
 		return
