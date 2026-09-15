@@ -1,0 +1,1 @@
+<sub>These pages live in [`docs/wiki/`](https://github.com/unmaykr-a/silt/tree/main/docs/wiki) and are published by CI. **Edits made in the wiki editor are overwritten by the next publish** — open a pull request against that directory instead. · [Silt](https://github.com/unmaykr-a/silt) is AGPL-3.0.</sub>

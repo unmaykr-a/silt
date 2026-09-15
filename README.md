@@ -34,141 +34,32 @@ stream of events — then lets you answer one question well: **what changed, and
 
 When something breaks at 03:10, you can see the image that got pulled at 03:00.
 
-Silt **never writes to the Docker API.** It observes, through a read-only socket proxy.
-That is an architectural rule, not a v1 shortcut.
+Silt **never writes to the Docker API.** It observes, through a read-only socket proxy. That
+is an architectural rule, not a v1 shortcut.
 
 <br />
 
-## Features
+## What it does
 
-<table>
-<tr>
-<td width="50%" valign="top">
+- **One timeline.** Config changes and health events share a single axis, because a change
+  and the outage it might explain are only useful side by side.
+- **Diffs between any two snapshots**, grouped by service and coloured by severity.
+  Structured or as YAML, with a real unified diff you can `git apply`.
+- **Secrets that were never stored.** Environment values are redacted by default and kept as
+  a truncated HMAC under a per-install key, so the history can tell you *when* a key changed
+  while being useless to anyone holding the database file.
+- **Your compose files, line by line** — captured on every change, redacted value by value,
+  with every comment and indent left exactly as written. Watched, so an edit is on the
+  timeline within a second of the save.
+- **Unapplied edits.** Editing a file without running `up` is a state Silt reports, not just
+  a moment it logs.
+- **External events.** An Uptime Kuma probe or a cron job can post to the timeline, so a
+  failure sits beside the change that caused it.
+- **Notifications** through any shoutrrr target, filtered by change kind *and* severity.
+- **Backups that are actually consistent** — one endpoint, one file, safe to take while Silt
+  is running.
 
-**One timeline:**
-Config changes and health events share a single axis, because a change and the outage it
-might explain are only useful side by side. Drag to zoom, filter by project or severity,
-and expand a burst in place rather than losing your position.
-
-</td>
-<td width="50%" valign="top">
-
-**Diffs between any two snapshots:**
-Grouped by service, then by kind, and coloured by severity — an image digest moving is
-high, a label is low. Structured or as YAML, with a real unified diff you can `git apply`.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Secrets that were never stored:**
-Environment values are redacted by default and recorded as a truncated HMAC under a
-per-install key. A changed digest proves the value changed while being useless to anyone
-holding the database file.
-
-</td>
-<td width="50%" valign="top">
-
-**Compose files, line by line:**
-The files themselves are captured on every change, redacted value by value, with every
-comment, indent and image tag left exactly as written. A rotated key is a visibly changed
-line and nothing more.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Unapplied edits:**
-Editing a compose file and forgetting to `up` breaks nothing today; it lands weeks later
-at the next unrelated restart. Silt compares what is on disk against what is running and
-keeps saying so until you apply it.
-
-</td>
-<td width="50%" valign="top">
-
-**A fleet view that ranks by trouble:**
-Unhealthy, crashed, OOM-killed and restarting are four different problems and get four
-colours. A container you stopped yourself is grey, because colouring a deliberate stop red
-is how a dashboard teaches you to ignore red.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Per-service history:**
-When the image actually changed and to what, restarts over time, and the points at which
-each environment key's value changed — without the value ever having been stored.
-
-</td>
-<td width="50%" valign="top">
-
-**Search that does not lie:**
-Press `/` for projects, services, environment variable *names*, file paths and event text.
-Wildcards are literal, and values are never searchable — a search that matched them would
-confirm a guess one query at a time.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Notifications:**
-Any [shoutrrr](https://containrrr.dev/shoutrrr/) target — ntfy, Gotify, Discord, Telegram,
-email — filtered by change kind *and* severity. **Send a test** reports each target
-separately, so a wrong URL is found now rather than during the outage.
-
-</td>
-<td width="50%" valign="top">
-
-**External events:**
-Point Uptime Kuma, a cron job or a Home Assistant automation at the ingest webhook and its
-events land on the same axis as your config changes.
-
-</td>
-</tr>
-</table>
-
-<details>
-<summary><b>More features</b></summary>
-
-<br />
-
-- **Authentication three ways**, tried in order: OpenID Connect, forward auth from a
-  reverse proxy, and a built-in account. A fresh install is closed until someone claims it.
-- **Read-only access** for everyone outside an administrator group. They read every screen
-  and change nothing but their own appearance preferences, which live in their browser.
-- **A setup review** that names the settings that are legal, working, and probably not what
-  you meant — plus live checks that ask whether the Docker endpoint answers and whether the
-  compose roots are really mounted.
-- **Settings you can move**: a file of everything set here rather than by the environment,
-  restored through the ordinary settings write. Secrets are left out and named.
-- **Backups that are actually consistent** — one endpoint, one file, safe to take while
-  Silt is running. Copying `silt.db` off the volume is not, and does not say so.
-- **Your compose files, watched** — an edit lands on the timeline within a second of the
-  save, so "edited and never applied" is answered without waiting for the next reconcile.
-- **Sessions are rows, not signed cookies** — they survive a restart, signing out revokes
-  them server-side, and one button ends all of them.
-- **An audit log** of who changed a setting, who pruned history, who signed in and who was
-  refused. It records *what* changed and never what it changed to.
-- **Settings editable from the UI**, applied without a container recreate, with each field
-  showing whether its value comes from the environment or from here.
-- **Choose what to hide**: click any line in a compose file to correct the safe-key list in
-  either direction. Hiding takes effect before anything is written.
-- **Export a diff**: Markdown for an issue, or a unified diff `patch -p1` will take.
-- **Per-viewer preferences** — 24-hour or 12-hour, date order, relative or absolute
-  timestamps, top bar or left rail — stored in the browser, not on the install.
-- **Restart counters that decay.** Docker's never resets, so one blip three months ago
-  would pin a stack to the attention list forever.
-- **Prometheus metrics** at `/metrics`, plus `/healthz` and `/readyz` that stay reachable
-  whatever the authentication.
-- **Content-addressed storage**: identical content is stored once, and an unchanged
-  observation updates the previous row rather than inserting one. An idle hour of
-  five-minute snapshots across 40 services costs zero bytes.
-
-</details>
+**[Everything else is in the wiki →](https://github.com/unmaykr-a/silt/wiki)**
 
 <br />
 
@@ -196,17 +87,16 @@ curl -O https://raw.githubusercontent.com/unmaykr-a/silt/main/docker-compose.yml
 docker compose up -d
 ```
 
-Open `http://<host>:8375` and set a password. Silt discovers your Compose projects from the
-labels Docker Compose already writes; there is nothing to configure to get started.
+Then open `http://your-host:8375` and choose a password. That is the whole install: one
+static binary with the UI embedded, one SQLite file, and a read-only Docker socket proxy.
 
-The socket proxy in that file is not optional decoration. Mounting
-`/var/run/docker.sock:ro` into Silt directly would **not** be a security boundary:
-read-only applies to the file, not to the API, so anything holding it can still create
-privileged containers. The proxy enforces read-only at the HTTP verb level with `POST=0`,
-and it lets Silt run as a non-root user with no docker group membership.
+The socket proxy in that compose file is not optional decoration — mounting
+`/var/run/docker.sock:ro` into Silt directly would **not** be a security boundary, because
+read-only applies to the file and not to the API. [The wiki explains
+why](https://github.com/unmaykr-a/silt/wiki/Installation#why-the-socket-proxy-is-not-decoration).
 
-To capture the compose files themselves, mount your compose directories read-only at the
-same paths they have on the host, and allowlist them:
+To also capture the compose files themselves, mount your compose directories read-only and
+allowlist them:
 
 ```yaml
 environment:
@@ -216,187 +106,37 @@ volumes:
   - /opt:/opt:ro
 ```
 
-`SILT_COMPOSE_ROOTS` is an allowlist, not a hint. The paths Silt would otherwise follow
-come from container labels, and anyone who can start a container sets those, so nothing
-outside these roots is ever read — or watched — symlinks included.
-
-With the roots set, Silt also watches those files, so an edit is on the timeline within a
-second of you saving it, whether or not you ever ran `docker compose up`.
-
 <br />
 
-## Configuration
+## Documentation
 
-Copy `.env.example` to `.env` and uncomment what you need — every setting has a working
-default, so an empty `.env` is a valid one.
+Everything lives in the **[wiki](https://github.com/unmaykr-a/silt/wiki)**:
 
-```sh
-cp .env.example .env
-```
-
-Environment variables are the baseline; most can also be changed on the Settings screen,
-which stores the change on top of the environment and applies it immediately. The full
-table is in [`PROJECT.md`](PROJECT.md#13-config-reference); the ones people actually change:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `SILT_DOCKER_HOST` | `tcp://docker-socket-proxy:2375` | Docker API endpoint |
-| `SILT_LISTEN_ADDR` | `:8375` | |
-| `SILT_DB_PATH` | `/data/silt.db` | |
-| `SILT_COMPOSE_ROOTS` | *(empty)* | Directories compose files may be read from |
-| `SILT_SNAPSHOT_INTERVAL` | `5m` | Reconcile cadence |
-| `SILT_RETENTION_DAYS` | `365` | Snapshots whose configuration changed |
-| `SILT_UNCHANGED_RETENTION_DAYS` | `7` | Runtime-only snapshots (restarts, health) |
-| `SILT_EVENT_RETENTION_DAYS` | `90` | Events |
-| `SILT_KEEP_KEYS` | *(empty)* | Extra env keys kept readable |
-| `SILT_NOTIFY_URLS` | *(empty)* | shoutrrr targets |
-| `SILT_INGEST_TOKEN` | *(empty)* | Enables the webhook |
-| `SILT_INGEST_RATE_PER_MINUTE` | `60` | Webhook events per source address; `0` disables |
-| `SILT_COOKIE_SECURE` | `auto` | `Secure` on the session cookie — set `always` if TLS terminates at your proxy |
-| `SILT_LOG_LEVEL` | `info` | |
-
-<details>
-<summary><b>Notifications, webhooks and reverse proxies</b></summary>
-
-<br />
-
-**Notifications.** Kinds and severity are ANDed: a change must be of a listed kind *and*
-meet the threshold. Either alone lets through far more than you want — a host running
-Watchtower produces image changes constantly.
-
-```yaml
-SILT_NOTIFY_URLS: ntfy://ntfy.sh/my-silt-topic
-SILT_NOTIFY_ON: image_id,image_digest,volumes,service_removed
-SILT_NOTIFY_MIN_SEVERITY: medium
-SILT_BASE_URL: https://silt.example.com   # makes notifications link to the diff
-```
-
-A shoutrrr URL has no feedback loop: it is wrong until something tries to send, and the
-only thing that tries to send is the change that mattered. Failures are masked in the UI —
-providers quote the request URL back at you, and a shoutrrr URL is a credential.
-
-**External events.** Set `SILT_INGEST_TOKEN` to enable the webhook; unset, it returns 503
-rather than accepting anything. The token works as `Authorization: Bearer` or `?token=`,
-because not every webhook source can set headers.
-
-```bash
-curl -X POST 'http://silt:8375/api/ingest?token=YOUR_TOKEN' \
-  -d '{"type":"monitor.down","service":"radarr","severity":"error","message":"Radarr is down"}'
-```
-
-**Behind a reverse proxy.** Silt pushes live updates over server-sent events. Behind nginx
-or Nginx Proxy Manager, set `proxy_buffering off;` on the location, or events arrive in
-batches minutes late instead of as they happen:
-
-```nginx
-location / {
-    proxy_pass http://silt:8375;
-    proxy_buffering off;
-    proxy_read_timeout 3600s;
-}
-```
-
-</details>
-
-<details>
-<summary><b>Authentication</b></summary>
-
-<br />
-
-**A fresh install is closed.** Silt has a built-in administrator from first boot, and the
-first thing it asks for is a password. Until you set one, every request is refused and the
-UI serves only the setup form. Set `SILT_PASSWORD_HASH` to claim the account before Silt
-ever starts, and the window between the container starting and someone claiming it never
-exists.
-
-| Variable | Purpose |
+| | |
 |---|---|
-| `SILT_OIDC_ISSUER` | Enables OpenID Connect. Point it at your provider's issuer URL. |
-| `SILT_OIDC_CLIENT_ID` / `SILT_OIDC_CLIENT_SECRET` | The client you registered. |
-| `SILT_OIDC_REDIRECT_URL` | Defaults to `$SILT_BASE_URL/api/auth/callback`. |
-| `SILT_OIDC_ALLOWED_GROUPS` / `SILT_OIDC_ALLOWED_USERS` | Optional. Both empty admits anyone the provider authenticates. |
-| `SILT_OIDC_ADMIN_GROUPS` | Read-only for everyone else. Empty means everyone admitted may change everything. |
-| `SILT_OIDC_ADMIN_TTL` | Default `12h`. Groups are read at sign-in, so this bounds how long a removed administrator stays one. The session keeps working, read-only. |
-| `SILT_ADMIN_GROUPS` + `SILT_AUTH_GROUPS_HEADER` | The same split behind a forward-auth proxy. |
-| `SILT_OIDC_GROUPS_CLAIM` / `SILT_OIDC_USERNAME_CLAIM` | Default `groups` and `preferred_username`; providers disagree. |
-| `SILT_TRUST_PROXY_AUTH` + `SILT_AUTH_HEADER` | Believe an identity your reverse proxy asserts. |
-| `SILT_TRUSTED_PROXIES` | **Set this** if you use forward auth. See below. |
-| `SILT_PASSWORD_HASH` | bcrypt: `htpasswd -bnBC 12 "" yourpassword \| tr -d ':\n'` |
-| `SILT_LOCAL_ACCOUNT` | `false` removes the built-in account entirely, for an install that authenticates only through a provider. |
-| `SILT_SESSION_TTL` / `SILT_SESSION_IDLE_TTL` | Default 30 days and 7 days. |
-| `SILT_METRICS_PUBLIC` | Leaves `/metrics` reachable without authentication. Off by default. |
+| [Install](https://github.com/unmaykr-a/silt/wiki/Installation) | The compose file, the socket proxy, reverse proxies |
+| [Configuration](https://github.com/unmaykr-a/silt/wiki/Configuration) | Every setting, with defaults |
+| [Authentication](https://github.com/unmaykr-a/silt/wiki/Authentication) | OIDC, forward auth, the built-in account, roles |
+| [Secrets and redaction](https://github.com/unmaykr-a/silt/wiki/Secrets-and-Redaction) | The threat model, and what is *not* protected |
+| [Backups](https://github.com/unmaykr-a/silt/wiki/Backups) | Why `cp silt.db` is wrong |
+| [Troubleshooting](https://github.com/unmaykr-a/silt/wiki/Troubleshooting) | The real failure modes |
+| [HTTP API](https://github.com/unmaykr-a/silt/wiki/API) | Endpoints, SSE, the OpenAPI contract |
 
-`SILT_TRUSTED_PROXIES` is the whole security of forward auth. The identity header is
-settable by anyone who can open a socket, so without a trust list "authenticated" means
-"reached the port" — and on a shared Docker network that is every other container on it.
+The wiki pages are in [`docs/wiki/`](docs/wiki) and published by CI, so they change with the
+code that changes their meaning.
 
-```yaml
-SILT_TRUST_PROXY_AUTH: "true"
-SILT_AUTH_HEADER: X-Remote-User        # or X-Authentik-Username, etc.
-SILT_TRUSTED_PROXIES: "172.18.0.0/16"
-```
-
-Some settings are environment-only on purpose. `SILT_LISTEN_ADDR` and `SILT_DB_PATH` cannot
-change without a restart; `SILT_DOCKER_HOST`, `SILT_COMPOSE_ROOTS`, `SILT_TRUST_PROXY_AUTH`
-and `SILT_PASSWORD_HASH` are the boundary protecting the UI itself, and a UI that could
-widen which files Silt reads or turn off the login in front of it would be a way in rather
-than a setting.
-
-</details>
-
-<br />
-
-## What Silt stores
-
-Silt reads your Compose environment, so it is built never to persist a recoverable secret.
-The threat model is explicit: **someone obtains `silt.db`** — a leaked backup, a
-misconfigured volume, a shared debug bundle.
-
-- **Environment values are redacted by default.** Cleartext is kept only for keys on an
-  explicit safe list (`PUID`, `PGID`, `TZ`, `LOG_LEVEL`, `*_PORT`, …), extendable with
-  `SILT_KEEP_KEYS`. There is no "redact these" pattern to get wrong, because the default is
-  to redact. A pattern that would keep more than it names — `*` on its own, say — is
-  refused rather than quietly turning redaction off.
-- **Redacted values are recorded as a truncated HMAC** under a random key generated on
-  first boot, stored in the database and never exported. A bare hash would be a guessing
-  oracle: a four-digit PIN is ten thousand hashes.
-- **Only a length bucket is stored**, never the exact length.
-- **Bind mount source paths are redacted**; type, target, mode and named-volume names are
-  kept.
-- **Compose `secrets:` and `configs:`** are recorded by name and mount target only, never
-  by content.
-
-A test plants a sentinel string in every secret-shaped field, runs a full snapshot write
-plus prune and GC, then byte-scans the database file, its WAL, every decompressed blob and
-captured debug logs. It runs in CI.
-
-<br />
-
-## Backing it up
-
-**Do not copy `silt.db`.** The database runs in WAL mode, so at any moment the committed
-state is spread across `silt.db`, `silt.db-wal` and `silt.db-shm`. A copy of the first one
-taken while Silt is running opens cleanly, reports no error, and is missing whatever had
-not been checkpointed — a failure that surfaces on the day you restore it.
-
-Use the backup endpoint, which writes one consistent snapshot with `VACUUM INTO`:
-
-```bash
-curl -fsSL --cookie "silt_session=$TOKEN" \
-  https://silt.example.lan/api/maintenance/backup -o silt-backup.db
-```
-
-Or press **Download backup** under Settings → Storage. The result is an ordinary SQLite
-database: restore it by stopping Silt and putting it where `SILT_DB_PATH` points. It needs
-an administrator — the file is every project, every captured Compose file and the audit
-trail in one download.
+[`PROJECT.md`](PROJECT.md) is the design brief: every decision, and more usefully every
+decision that changed during implementation and why — the mistakes as well as the choices.
 
 <br />
 
 ## Platforms
 
-`linux/amd64` and `linux/arm64`. There is **no `linux/arm/v7` build** and there are no plans
-for one — check `uname -m` reports `aarch64` before filing an issue about a failed pull.
+`linux/amd64` and `linux/arm64`. There is **no `linux/arm/v7` build**: the pure-Go SQLite
+driver that lets Silt ship as a static binary with no CGO does not support 32-bit ARM well
+enough to trust with your history. A Pi 4 or 5 on a 64-bit OS is where it was developed.
+
+<br />
 
 ## What Silt is not
 
@@ -406,30 +146,7 @@ for one — check `uname -m` reports `aarch64` before filing an issue about a fa
 - **Not a log aggregator.** Container logs are out of scope.
 - **Not Kubernetes.** Compose only.
 
-## Developing
-
-```bash
-make demo     # a populated database, no Docker host needed
-SILT_DB_PATH=.demo/silt.db go run ./cmd/silt
-
-make check    # gofmt, build, vet, Go tests, frontend tests and build
-make e2e      # 118 browser checks against a real binary and that database
-make race     # the race detector, which collection earns
-
-make demo-site         # the static demo, built into .demo-site
-make demo-site-verify  # drive it in a browser and fail on a screen with no data
-```
-
-`make check` is the fast gate and runs exactly what CI runs, in CI's order. `make e2e` is
-separate because it builds the frontend, seeds a database and drives a browser — a minute
-against a second — and runs as its own CI job.
-
-The published demo is built the same way: the UI compiled with `VITE_SILT_DEMO=1`, and its
-`/api` calls answered by a fetch shim reading responses captured from a real Silt running
-against the demo database. No screen is special-cased — the components, the API client and
-the router are the ones that ship, and only the transport differs. Writes are refused
-rather than faked, and every timestamp is shifted onto the reader's clock at load so the
-demo does not visibly age between deployments.
+<br />
 
 ## Status
 
@@ -444,8 +161,19 @@ log, every decompressed blob and the debug logs — and it has been running on a
 behind a reverse proxy for as long as it has existed. Somewhere between those two facts is
 the honest answer. Issues welcome.
 
-[`PROJECT.md`](PROJECT.md) is the full design brief, including a changelog of every decision
-that changed during implementation and why — the mistakes as well as the choices.
+<br />
+
+## Developing
+
+```bash
+make check    # the gate: build, vet, Go tests, frontend tests and build
+make e2e      # browser checks against a real binary and a seeded database
+```
+
+See [Development](https://github.com/unmaykr-a/silt/wiki/Development) for the layout, the
+make targets, and the conventions worth knowing before sending a patch.
+
+<br />
 
 ## License
 
@@ -453,6 +181,8 @@ AGPL-3.0-or-later. Copyright (c) 2026 unmaykr-a. See [`LICENSE`](LICENSE).
 
 The gap Silt fills is a paywalled feature elsewhere; the licence is chosen to keep it from
 becoming one again.
+
+<br />
 
 ## Supporting Silt
 

@@ -39,6 +39,18 @@ type Release struct {
 // Releases is the history, newest first.
 var Releases = []Release{
 	{
+		Version: "1.0.1",
+		Date:    "2026-09-15",
+		Summary: "A wiki that is the manual, a README that is an introduction, and tests that keep both from rotting.",
+		Entries: []Entry{
+			{Added, "Eighteen wiki pages, published to the GitHub wiki by CI from docs/wiki on every push to main. Install, configuration, authentication, redaction, compose capture, retention, notifications, ingest, backups, metrics, the screens, the architecture, the API, troubleshooting, FAQ, upgrading and development. The repository is the source of truth and the wiki is a render of it, for the same reason CHANGELOG.md is generated: two copies of the same prose disagree by the second edit."},
+			{Changed, "The README is an introduction again — 461 lines to 191. What it is, what it does, a compose file, and where the rest lives. Everything it used to explain in collapsed sections now has a page with room to explain it properly."},
+			{Added, "Tests for the wiki's shape, because a wiki rots in two ways that are invisible to whoever wrote it: a page stops being linked and nobody finds it again, and a link points at a page that was renamed — which GitHub renders as a working-looking link that 404s. Every page must be in the sidebar, reachable from Home, longer than a stub, and every internal link must resolve. Verified by breaking each of those four and watching the right test fail."},
+			{Added, "The settings reference now exists in three places, so all three are checked against the struct the process actually reads. That guard is why the whole OpenID Connect block was found documented nowhere in 0.17.0."},
+			{Added, "Workflows are parsed by the test suite. GitHub was the only other thing that parses them, and it does so after a push — so an invalid one is a red X on a commit that is already public. This exists because the wiki workflow was written with a multi-line commit message inside a `run: |` block, and an unindented continuation line ends a YAML block scalar: a parse error that looked entirely reasonable."},
+		},
+	},
+	{
 		Version: "1.0.0",
 		Date:    "2026-09-15",
 		Summary: "Every item in the v1 scope now exists, including the one that had been written down four ways and built none of them.",
