@@ -77,6 +77,9 @@ Silt is the missing join between "what changed" and "what broke".
 
 ## 2. v1 scope
 
+*Every item below shipped in 1.0.0. The last to land was the compose file watch, which is
+the third trigger in Section 5; see design note 111 for why it took until then.*
+
 **In:**
 
 - Single Docker host, reached over TCP through a socket proxy
@@ -431,6 +434,10 @@ mount anything.
    readable. Debounce 1s (editors write in several syscalls). Watch the parent directory,
    not the file: atomic-save editors replace the inode and a file-level watch goes deaf
    after the first save.
+
+   *Delivered in 1.0.0, having been specified here, listed in the locked tech stack, named
+   in the repo layout, given a gotcha of its own — and not built, through nineteen
+   releases. See design note 111.*
 
 3. **Interval reconcile** — every `SILT_SNAPSHOT_INTERVAL` (default 5m), catch anything
    missed.
@@ -2194,7 +2201,39 @@ Changed:
     the answer. Prose in the answer column makes the column you are scanning
     ragged, which is the whole reason to have a column.
 
-110. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+111. **The fourth thing that was documented and not built (1.0.0)** — the compose
+    file watch is trigger 2 of the four in Section 5. It was specified there in
+    detail, down to the debounce and the reason for watching the directory
+    rather than the file. `fsnotify/fsnotify` is in the locked tech stack table.
+    Section 10 names it in the `collect/` package description. Section 12 has a
+    gotcha about it. `fsnotify` was in `go.mod` — as an indirect dependency of
+    something else. The `file` trigger is in the `snapshots.trigger` comment in
+    migration 00001 and in the OpenAPI enum.
+
+    Nothing produced it. For nineteen releases a compose file edit was noticed
+    on the next Docker event or the next interval reconcile, so up to five
+    minutes on the default cadence — and on a quiet host, where an un-applied
+    edit is easiest to forget, the event stream was never going to say anything
+    at all.
+
+    This is the fourth instance of the same failure in this project: the ingest
+    rate limit (specified at M4, built in 0.18.0), the OIDC administrator role
+    (shipped as a feature in 0.16.0, wired up in 0.18.0), the backup story
+    (never specified, never built, 0.18.0), and now this. The common shape is
+    worth naming: **a design document is not a test.** Every one of these had
+    prose describing it, and in three cases had the schema, the config surface
+    or the enum value already in place — which is precisely what made them look
+    finished from the inside.
+
+    What would have caught all four is the same thing: a test that asserts the
+    behaviour end to end, from the trigger to the row. `TestTheCollectorSnapshotsOnAComposeFileEdit`
+    is that test for this one, and it failed on the first run for a reason worth
+    keeping: the watcher fired, the snapshot ran, and nothing was recorded,
+    because the Snapshotter had no file reader and so captured no files — the
+    observation was identical to the last one and became a touch. A unit test of
+    the watcher alone would have passed.
+
+112. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

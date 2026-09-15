@@ -35,6 +35,11 @@ func collector(h *harness) *collect.Collector {
 }
 
 // runFor starts the collector, lets the engine deliver, then stops it.
+//
+// The cancel is deferred rather than called after during(): a t.Fatal inside
+// during() ends that goroutine without returning, so a plain call was skipped
+// and the collector ran on — which turned one failing assertion into a hung
+// package and a ten-minute test timeout instead of a reported failure.
 func runFor(t *testing.T, c *collect.Collector, during func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -43,13 +48,15 @@ func runFor(t *testing.T, c *collect.Collector, during func()) {
 		defer close(done)
 		_ = c.Run(ctx)
 	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("the collector did not stop when its context was cancelled")
+		}
+	}()
 	during()
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the collector did not stop when its context was cancelled")
-	}
 }
 
 // hasEvent reports whether an event of this type has landed. Waiting on "any

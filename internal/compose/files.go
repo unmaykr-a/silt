@@ -245,6 +245,18 @@ func (f *FileReader) rootPaths() []string {
 	return f.resolved
 }
 
+// UnderRoot reports whether path is inside the allowlist.
+//
+// Exported for the file watcher, which needs the same answer before it will
+// watch a directory: the paths come from container labels, so a crafted one
+// must not be able to make Silt watch — or read — somewhere it should not.
+func (f *FileReader) UnderRoot(path string) bool {
+	if f == nil {
+		return false
+	}
+	return f.underRoot(filepath.Clean(path))
+}
+
 func (f *FileReader) underRoot(path string) bool {
 	for _, root := range f.rootPaths() {
 		rel, err := filepath.Rel(root, path)

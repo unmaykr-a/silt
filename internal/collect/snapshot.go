@@ -17,6 +17,7 @@ import (
 // Trigger values recorded on a snapshot.
 const (
 	TriggerEvent    = "event"
+	TriggerFile     = "file"
 	TriggerInterval = "interval"
 	TriggerManual   = "manual"
 )

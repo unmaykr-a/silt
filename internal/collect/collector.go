@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unmaykr-a/silt/internal/compose"
 	"github.com/unmaykr-a/silt/internal/docker"
 	"github.com/unmaykr-a/silt/internal/store"
 )
@@ -29,6 +30,12 @@ type Collector struct {
 	// The reconcile cadence is editable from the settings screen, and a ticker
 	// built once at startup would keep the old one until a restart.
 	IntervalFn func() time.Duration
+	// Files, when set and enabled, is watched for compose file edits — the
+	// third trigger in PROJECT.md Section 5. Without it an edit is noticed on
+	// the next Docker event or interval reconcile.
+	Files *compose.FileReader
+	// FileDebounce is the quiet period after a write. Zero means the default.
+	FileDebounce time.Duration
 }
 
 // Run blocks until ctx is cancelled.
@@ -113,10 +120,32 @@ func (c *Collector) Run(ctx context.Context) error {
 		}
 	}()
 
+	// The file watch runs beside the event stream rather than inside it: a host
+	// whose daemon has gone quiet is exactly the host where an edit nobody
+	// applied is easiest to forget, and it is the one place the event stream
+	// will never tell you about.
+	fileDone := make(chan struct{})
+	go func() {
+		defer close(fileDone)
+		fw := &FileWatcher{
+			Client:   c.Client,
+			Files:    c.Files,
+			Log:      log,
+			Debounce: c.FileDebounce,
+			OnChange: func(project string) {
+				c.snapshotProject(ctx, project, TriggerFile)
+			},
+		}
+		if err := fw.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Error("compose file watch stopped", "error", err)
+		}
+	}()
+
 	err := watcher.Run(ctx)
 	coalescer.Close()
 	<-done
 	<-intervalDone
+	<-fileDone
 	return err
 }
 

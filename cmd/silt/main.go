@@ -170,6 +170,9 @@ func run() error {
 		Log:         log,
 		Snapshotter: snapshotter,
 		IntervalFn:  func() time.Duration { return live.Get().SnapshotInterval },
+		// The same reader the snapshotter captures through, so the watch and
+		// the read agree about which paths are allowed.
+		Files: fileReader,
 	}
 
 	// Everything that caches a configuration value rather than re-reading it

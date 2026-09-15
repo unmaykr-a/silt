@@ -5,6 +5,26 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 1.0.0 — 2026-09-15
+
+Every item in the v1 scope now exists, including the one that had been written down four ways and built none of them.
+
+### Added
+
+- Silt watches your compose files. An edit is noticed within a second instead of on the next Docker event or the next reconcile — up to five minutes on the default cadence, and never at all on a quiet host, which is exactly the host where an un-applied edit is easiest to forget. The watch is on the directory rather than the file, because an atomic-save editor replaces the inode and a file-level watch goes deaf after the first save while continuing to report success. Writes are debounced, because one save is a truncate, several writes and a rename.
+
+### Changed
+
+- 1.0.0 because the v1 scope in PROJECT.md Section 2 is complete, not because the version needed rounding up. The last item to land was the compose file watch — trigger 2 of the four in Section 5, which had been specified in the brief, listed in the locked tech stack, named in the repo layout, given a gotcha of its own, and left unbuilt for nineteen releases. It is the fourth thing in this project to be documented into existence without being written; the pattern is recorded as design note 111, along with the one kind of test that would have caught all four.
+
+### Fixed
+
+- A failing assertion inside the collector test harness hung the whole package for the ten-minute test timeout instead of reporting a failure, because t.Fatal ends its goroutine without returning and the cleanup that stopped the collector never ran.
+
+### Security
+
+- The watch applies the same allowlist the reader does. The paths come from container labels and anyone who can start a container can set those, so a directory outside SILT_COMPOSE_ROOTS is not watched for the same reason it is not read. Only the files a project actually declares count: a compose directory also holds data directories, lock files and editor swap files, and reacting to a container's own writes would make Silt a source of the churn it is recording.
+
 ## 0.19.0 — 2026-09-05
 
 The settings screen, taken apart. Same screen, ten files instead of one, and the part that decides what a save sends is finally tested.
