@@ -1971,10 +1971,14 @@ components:
 
     SettingsPatch:
       type: object
+      additionalProperties: false
       description: |
         Every field is optional. Present means "set this override", absent
         means "leave it alone", and naming it in `reset` means "drop the
         override and use the environment again".
+
+        A name that is not an editable setting is refused with 400 rather
+        than ignored, so a misspelt key cannot look like a save that worked.
       properties:
         snapshot_interval_ms: { type: integer, format: int64 }
         retention_days: { type: integer }

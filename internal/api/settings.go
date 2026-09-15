@@ -191,12 +191,7 @@ func (s *Server) settingsPayload(r *http.Request) settingsResponse {
 	editable := false
 	if s.live != nil {
 		base = s.live.Base()
-		set := s.live.Overrides().Set()
-		for _, name := range settings.Fields {
-			if set[name] {
-				overridden = append(overridden, name)
-			}
-		}
+		overridden = s.live.Overrides().Names()
 		editable = true
 	}
 
@@ -334,14 +329,7 @@ func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 	// A shoutrrr URL carries the credential for the service it points at, and
 	// the ingest token is a credential outright. Neither is readable anywhere
 	// else in the API and neither becomes readable by being called an export.
-	if out.Settings.NotifyURLs != nil {
-		out.Omitted = append(out.Omitted, "notify_urls")
-		out.Settings.NotifyURLs = nil
-	}
-	if out.Settings.IngestToken != nil {
-		out.Omitted = append(out.Omitted, "ingest_token")
-		out.Settings.IngestToken = nil
-	}
+	out.Settings, out.Omitted = out.Settings.WithoutSecrets()
 
 	// Downloaded rather than rendered: this is a file someone keeps.
 	w.Header().Set("Content-Disposition",
@@ -349,12 +337,10 @@ func (s *Server) exportSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// settingsUpdateRequest is a sparse patch. An absent field is left alone; a
-// field named in reset drops its override and falls back to the environment.
-type settingsUpdateRequest struct {
-	settings.Overrides
-	Reset []string `json:"reset,omitempty"`
-}
+// reset names the settings a patch is giving back to the environment. It
+// travels in the same object as the values, so it is lifted out before the rest
+// is read as a set of overrides.
+const resetKey = "reset"
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if s.live == nil {
@@ -362,33 +348,44 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req settingsUpdateRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "malformed request body")
+		return
+	}
+	var reset []string
+	if raw, ok := body[resetKey]; ok {
+		if err := json.Unmarshal(raw, &reset); err != nil {
+			writeError(w, http.StatusBadRequest, "reset must be a list of setting names")
+			return
+		}
+		delete(body, resetKey)
+	}
+	// An unknown name is refused here. It used to decode into a struct, and
+	// encoding/json drops what it does not recognise, so a patch naming
+	// retention_dayz answered 200 and changed nothing.
+	next, err := settings.NewOverrides(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// The notification filter is validated here rather than in config, which
 	// has no business knowing what a change kind is. Rejecting it before the
-	// write means a typo'd severity never reaches the collector.
-	next := req.Overrides
-	if next.NotifyOn != nil || next.NotifyMinSeverity != nil {
-		current := s.conf()
-		kinds := current.NotifyOn
-		if next.NotifyOn != nil {
-			kinds = *next.NotifyOn
-		}
-		severity := current.NotifyMinSeverity
-		if next.NotifyMinSeverity != nil {
-			severity = *next.NotifyMinSeverity
-		}
-		if _, err := notify.ParseFilter(kinds, severity); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	// write means a typo'd severity never reaches the collector. Checked
+	// against what the patch would produce rather than against the patch, so
+	// changing one half of the pair is validated with the half already stored.
+	prospective, err := s.live.Preview(next, reset)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := notify.ParseFilter(prospective.NotifyOn, prospective.NotifyMinSeverity); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	if _, err := s.live.Update(r.Context(), next, req.Reset); err != nil {
+	if _, err := s.live.Update(r.Context(), next, reset); err != nil {
 		if errors.Is(err, settings.ErrReadOnly) {
 			writeError(w, http.StatusServiceUnavailable, err.Error())
 			return
@@ -397,12 +394,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fields := changedFields(next)
-	s.log.Info("settings updated", "fields", fields, "reset", req.Reset)
+	fields := next.Names()
+	s.log.Info("settings updated", "fields", fields, "reset", reset)
 	// Field names, never values. This table holds an ingest token and
 	// notification URLs; recording what they became would put credentials in
 	// a table built to be read.
-	s.audit(r, store.AuditSettingsChanged, map[string]any{"fields": fields, "reset": req.Reset})
+	s.audit(r, store.AuditSettingsChanged, map[string]any{"fields": fields, "reset": reset})
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
 }
 
@@ -418,20 +415,6 @@ func (s *Server) deleteSettings(w http.ResponseWriter, r *http.Request) {
 	s.log.Info("settings reset to the environment")
 	s.audit(r, store.AuditSettingsReset, nil)
 	writeJSON(w, http.StatusOK, s.settingsPayload(r))
-}
-
-// changedFields names what a patch touched, for the audit line. The values
-// themselves are deliberately absent: one of them can be a notification URL or
-// the ingest token.
-func changedFields(o settings.Overrides) []string {
-	set := o.Set()
-	out := make([]string, 0, len(set))
-	for _, name := range settings.Fields {
-		if set[name] {
-			out = append(out, name)
-		}
-	}
-	return out
 }
 
 type pruneResponse struct {

@@ -36,7 +36,7 @@ type Config struct {
 	// ListenAddr is the address the HTTP server binds to.
 	ListenAddr string `env:"SILT_LISTEN_ADDR" envDefault:":8375"`
 	// LogLevel is one of debug, info, warn, error.
-	LogLevel string `env:"SILT_LOG_LEVEL" envDefault:"info"`
+	LogLevel string `env:"SILT_LOG_LEVEL" envDefault:"info" editable:"log_level"`
 	// DockerHost is the Docker API endpoint. The documented default is a
 	// read-only socket proxy, never the socket itself: mounting
 	// /var/run/docker.sock:ro is not a security boundary, because read-only
@@ -47,44 +47,44 @@ type Config struct {
 	DBPath string `env:"SILT_DB_PATH" envDefault:"/data/silt.db"`
 	// SnapshotInterval is the reconcile cadence that catches anything the
 	// event stream missed.
-	SnapshotInterval time.Duration `env:"SILT_SNAPSHOT_INTERVAL" envDefault:"5m"`
+	SnapshotInterval time.Duration `env:"SILT_SNAPSHOT_INTERVAL" envDefault:"5m" editable:"snapshot_interval_ms"`
 
 	// RetentionDays covers snapshots whose configuration changed.
-	RetentionDays int `env:"SILT_RETENTION_DAYS" envDefault:"365"`
+	RetentionDays int `env:"SILT_RETENTION_DAYS" envDefault:"365" editable:"retention_days"`
 	// UnchangedRetentionDays covers proof-of-liveness snapshots.
-	UnchangedRetentionDays int `env:"SILT_UNCHANGED_RETENTION_DAYS" envDefault:"7"`
+	UnchangedRetentionDays int `env:"SILT_UNCHANGED_RETENTION_DAYS" envDefault:"7" editable:"unchanged_retention_days"`
 	// EventRetentionDays is separate because event volume exceeds snapshot
 	// volume by orders of magnitude.
-	EventRetentionDays int `env:"SILT_EVENT_RETENTION_DAYS" envDefault:"90"`
+	EventRetentionDays int `env:"SILT_EVENT_RETENTION_DAYS" envDefault:"90" editable:"event_retention_days"`
 	// AuditRetentionDays covers the administrative trail: who changed Silt's
 	// own settings, who signed in, who ran a prune. Kept far longer than
 	// events because the table is tiny — a row per administrative action, not
 	// per observation — and its entire value is how far back it reaches.
-	AuditRetentionDays int `env:"SILT_AUDIT_RETENTION_DAYS" envDefault:"730"`
+	AuditRetentionDays int `env:"SILT_AUDIT_RETENTION_DAYS" envDefault:"730" editable:"audit_retention_days"`
 	// VacuumInterval of 0 disables vacuuming.
-	VacuumInterval time.Duration `env:"SILT_VACUUM_INTERVAL" envDefault:"0"`
+	VacuumInterval time.Duration `env:"SILT_VACUUM_INTERVAL" envDefault:"0" editable:"vacuum_interval_ms"`
 	// RetentionInterval is how often the retention pass runs.
-	RetentionInterval time.Duration `env:"SILT_RETENTION_INTERVAL" envDefault:"1h"`
+	RetentionInterval time.Duration `env:"SILT_RETENTION_INTERVAL" envDefault:"1h" editable:"retention_interval_ms"`
 
 	// KeepKeys extends the built-in list of environment keys kept in
 	// cleartext. There is no redact-list: everything else is redacted.
-	KeepKeys []string `env:"SILT_KEEP_KEYS" envSeparator:","`
+	KeepKeys []string `env:"SILT_KEEP_KEYS" envSeparator:"," editable:"keep_keys"`
 
 	// HostName labels this Docker host in the database.
 	HostName string `env:"SILT_HOST_NAME" envDefault:"local"`
 
 	// IngestToken guards POST /api/ingest. Empty means the endpoint is not
 	// configured and returns 503 — unset must never mean open.
-	IngestToken string `env:"SILT_INGEST_TOKEN"`
+	IngestToken string `env:"SILT_INGEST_TOKEN" editable:"ingest_token,secret"`
 
 	// NotifyURLs are shoutrrr targets. Empty disables notifications.
-	NotifyURLs []string `env:"SILT_NOTIFY_URLS" envSeparator:","`
+	NotifyURLs []string `env:"SILT_NOTIFY_URLS" envSeparator:"," editable:"notify_urls,secret"`
 	// NotifyOn lists the change kinds worth interrupting someone for.
-	NotifyOn []string `env:"SILT_NOTIFY_ON" envSeparator:"," envDefault:"image_id,image_digest,volumes,service_removed"`
+	NotifyOn []string `env:"SILT_NOTIFY_ON" envSeparator:"," envDefault:"image_id,image_digest,volumes,service_removed" editable:"notify_on"`
 	// NotifyMinSeverity is ANDed with NotifyOn.
-	NotifyMinSeverity string `env:"SILT_NOTIFY_MIN_SEVERITY" envDefault:"medium"`
+	NotifyMinSeverity string `env:"SILT_NOTIFY_MIN_SEVERITY" envDefault:"medium" editable:"notify_min_severity"`
 	// BaseURL is used to build links in notifications. Empty omits the link.
-	BaseURL string `env:"SILT_BASE_URL"`
+	BaseURL string `env:"SILT_BASE_URL" editable:"base_url"`
 
 	// TrustProxyAuth accepts an identity asserted by a reverse proxy.
 	TrustProxyAuth bool `env:"SILT_TRUST_PROXY_AUTH" envDefault:"false"`
