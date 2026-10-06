@@ -4,6 +4,14 @@
   // A dialog built on <dialog> rather than a portal-and-focus-trap component.
   // The element already does the modal work — focus containment, Escape, the
   // top layer — and Silt needs two of these, not a dialog system.
+  //
+  // `open` must be bound, not passed. This component writes false to it when the
+  // element closes, by any of the three routes out — the control below, Escape,
+  // a click on the backdrop. Handed a one-way prop that write lands on this
+  // copy, the caller never learns the dialog shut, and because its value never
+  // changes the effect below never sees another edge: the dialog opens once per
+  // page load and then silently refuses. A getter/setter pair is fine where the
+  // caller's state is something other than a boolean.
   let {
     open = $bindable(false),
     title,

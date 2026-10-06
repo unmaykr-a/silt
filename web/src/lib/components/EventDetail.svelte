@@ -29,7 +29,6 @@
   let error = $state<string | null>(null);
   let copied = $state(false);
 
-  const open = $derived(eventId !== null);
 
   $effect(() => {
     const id = eventId;
@@ -119,8 +118,23 @@
   }
 </script>
 
+<!--
+  Bound both ways, through a getter and a setter, because eventId is the only
+  state here and the dialog has to be able to give it back.
+
+  Passing `open` one-way looked right and broke on the second open: Dialog takes
+  `open` as $bindable and sets it false when the element closes, so without a
+  binding that write landed on its own copy. eventId stayed set, this side kept
+  computing open as true, the prop never changed value — and the effect that
+  calls showModal never saw an edge again. One event opened per page load.
+-->
 <Dialog
-  open={open}
+  bind:open={
+    () => eventId !== null,
+    (next) => {
+      if (!next) eventId = null;
+    }
+  }
   title={detail ? detail.event.type : "Event"}
   class="max-w-3xl"
 >
