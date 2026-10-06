@@ -11,6 +11,7 @@ export type Project = components["schemas"]["Project"];
 export type Snapshot = components["schemas"]["Snapshot"];
 export type SnapshotDetail = components["schemas"]["SnapshotDetail"];
 export type Event = components["schemas"]["Event"];
+export type EventDetail = components["schemas"]["EventDetail"];
 export type Diff = components["schemas"]["Diff"];
 export type Change = components["schemas"]["Change"];
 export type Timeline = components["schemas"]["Timeline"];
@@ -98,6 +99,7 @@ export const api = {
   diff: (from: number, to: number, signal?: AbortSignal) =>
     get<Diff>(`/api/diff?from=${from}&to=${to}`, signal),
   events: (limit = 100, signal?: AbortSignal) => get<Event[]>(`/api/events?limit=${limit}`, signal),
+  event: (id: number, signal?: AbortSignal) => get<EventDetail>(`/api/events/${id}`, signal),
   search: (query: string, signal?: AbortSignal) =>
     get<SearchResults>(`/api/search?q=${encodeURIComponent(query)}`, signal),
   overview: (signal?: AbortSignal) => get<Overview>("/api/overview", signal),

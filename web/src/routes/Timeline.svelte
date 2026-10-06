@@ -6,6 +6,7 @@
   import { clockTime, datetime, dateOnly, relative } from "$lib/format";
   import { clock } from "$lib/clock.svelte";
   import Segmented from "$lib/components/Segmented.svelte";
+  import EventDetail from "$lib/components/EventDetail.svelte";
 
   let { reloadKey, projects: knownProjects }: { reloadKey: number; projects: Project[] } = $props();
 
@@ -25,6 +26,9 @@
   // is cleared, which is what makes "drag across the spike, read the feed"
   // work: the strip and the list below it share one window.
   let zoom = $state<{ from: number; to: number } | null>(null);
+  // Which event is open, or null. Held here rather than in the row so the
+  // panel can hand it the id of a neighbour and walk the window.
+  let openEvent = $state<number | null>(null);
   let projectFilter = $state(0);
   let severityFilter = $state("");
   let error = $state<string | null>(null);
@@ -334,7 +338,15 @@
           </div>
         {:else}
           {@const row = entry.row}
-          <div class="flex items-baseline gap-3 border-b border-border/60 py-2 text-sm">
+          <!-- A button rather than a div. This row used to be the end of the
+               line: it said container.die and there was nothing to click, at
+               the one moment someone is looking for more. -->
+          <button
+            type="button"
+            class="flex w-full items-baseline gap-3 border-b border-border/60 py-2 text-left text-sm
+                   transition-colors hover:bg-secondary/30"
+            onclick={() => (openEvent = row.item.id)}
+          >
             <span class="w-1 shrink-0 self-stretch rounded-sm {accent(row.item.severity)}"></span>
             <span
               class="w-14 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
@@ -352,9 +364,11 @@
               </span>
             {/if}
             <span class="ml-auto shrink-0 text-xs text-muted-foreground/50">{relative(row.ts, now)}</span>
-          </div>
+          </button>
         {/if}
       {/each}
     </div>
   {/if}
 </div>
+
+<EventDetail bind:eventId={openEvent} />

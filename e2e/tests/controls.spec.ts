@@ -423,3 +423,53 @@ test("authentication is editable and warns before it locks you out", async ({ pa
 
   expect(errors).toEqual([]);
 });
+
+test("an event opens and says what changed before it", async ({ page }) => {
+  // The complaint this answers: a feed row read `03:00 container.die` and there
+  // was nothing to click. So the row has to open, the panel has to carry the
+  // detail the row had no space for — the exit code above all, which the
+  // capture path used to discard — and it has to link to the change before it,
+  // which is the question Silt exists to answer.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  await page.getByRole("button", { name: /container\.die/ }).first().click();
+  const panel = page.locator("dialog[open]");
+  await expect(panel).toBeVisible();
+
+  // What it was, including the number the row could never show.
+  await expect(panel).toContainText("exit code");
+  await expect(panel).toContainText("137");
+  await expect(panel).toContainText("immich");
+
+  // That the engine said more than this, rather than implying it did not.
+  await expect(panel).toContainText(/more attributes/);
+
+  // What changed before it, and a way into it.
+  await expect(panel).toContainText(/before this/i);
+  await expect(panel.getByText("open the diff")).toBeVisible();
+
+  // What else was happening, with real times rather than a bare meridiem —
+  // the first version split a formatted datetime on spaces and rendered "PM".
+  await expect(panel).toContainText(/around it/i);
+  await expect(panel).toContainText(/\d{1,2}:\d{2}/);
+
+  // A neighbour is itself openable, so the window can be walked. The subject
+  // changes; the event walked away from correctly reappears in the new one's
+  // neighbours, which is why this checks the heading rather than the body.
+  await expect(panel.locator("h2")).toContainText("container.die");
+  await panel.getByRole("button", { name: /monitor\.down|container\.start/ }).first().click();
+  await page.waitForTimeout(800);
+  await expect(panel.locator("h2")).not.toContainText("container.die");
+
+  // The dialog's own close control, which is the only one: a second button
+  // named Close in the footer was two controls doing one job, and an ambiguous
+  // accessible name for anyone not looking at the layout.
+  await panel.getByLabel("Close").click();
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});

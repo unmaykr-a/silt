@@ -397,7 +397,7 @@ func Seed(ctx context.Context, db *store.Store) error {
 
 	for _, stack := range Stacks() {
 		dir := "/srv/" + stack.Name
-		_, projectID, err := db.UpsertHostAndProject(ctx, "local",
+		hostID, projectID, err := db.UpsertHostAndProject(ctx, "local",
 			"tcp://docker-socket-proxy:2375", "28.0", identity{stack.Name, dir})
 		if err != nil {
 			return fmt.Errorf("upsert %s: %w", stack.Name, err)
@@ -453,41 +453,76 @@ func Seed(ctx context.Context, db *store.Store) error {
 			}
 		}
 
-		if err := seedEvents(ctx, db, projectID, stack, now, hour); err != nil {
+		if err := seedEvents(ctx, db, hostID, projectID, stack, now, hour); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func seedEvents(ctx context.Context, db *store.Store, projectID int64, stack Stack, now, hour int64) error {
-	type ev struct{ service, typ, severity, message string }
+// seedEvents writes each stack's handful of events.
+//
+// Spacing matters as much as content. An event opened on its own says what
+// happened; the panel's value is the sequence around it, so immich's events sit
+// minutes apart rather than hours: the probe notices it is down, something
+// restarts it, and four minutes later it exits 137 again. That reads as a crash
+// loop, which is what it is, and it is the shape the detail screen exists to
+// show. The rest stay an hour apart, because a timeline where everything
+// clusters is not a timeline.
+func seedEvents(ctx context.Context, db *store.Store, hostID, projectID int64, stack Stack, now, hour int64) error {
+	minute := hour / 60
+	type ev struct {
+		service, typ, severity, message string
+		// back is how long before now, so a sequence can be minutes apart
+		// while separate incidents stay hours apart.
+		back int64
+		// details are the engine's own attributes, under the keys the capture
+		// path stores them with.
+		details map[string]any
+	}
 	var events []ev
 
 	switch stack.Name {
 	case "immich":
+		// One incident, three events, four minutes.
 		events = []ev{
-			{"server", "container.die", store.SeverityError, "container died with code 137"},
-			{"server", "monitor.down", store.SeverityError, "immich probe failed"},
+			{service: "server", typ: "container.die", severity: store.SeverityError,
+				message: "die", back: 0,
+				details: map[string]any{"exit_code": "137", "name": "immich-server-1", "withheld_attributes": 11}},
+			{service: "server", typ: "container.start", severity: store.SeverityInfo,
+				message: "start", back: 2 * minute,
+				details: map[string]any{"name": "immich-server-1", "withheld_attributes": 11}},
+			{service: "server", typ: "monitor.down", severity: store.SeverityError,
+				message: "immich probe failed", back: 4 * minute},
 		}
 	case "homeassistant":
-		events = []ev{{"homeassistant", "container.restart", store.SeverityWarn, "restarting"}}
+		events = []ev{{service: "homeassistant", typ: "container.restart", severity: store.SeverityWarn,
+			message: "restart", back: 0,
+			details: map[string]any{"name": "homeassistant", "restart_count": "3", "withheld_attributes": 7}}}
 	case "nextcloud":
-		events = []ev{{"app", "container.oom", store.SeverityError, "out of memory"}}
+		events = []ev{{service: "app", typ: "container.oom", severity: store.SeverityError,
+			message: "oom", back: 0,
+			details: map[string]any{"name": "nextcloud-app-1", "withheld_attributes": 9}}}
 	case "media":
-		events = []ev{{"radarr", "image.pull", store.SeverityInfo, "pulled a new image"}}
+		events = []ev{{service: "radarr", typ: "image.pull", severity: store.SeverityInfo,
+			message: "pull", back: 0, details: map[string]any{"name": "lscr.io/linuxserver/radarr:latest"}}}
 	case "gitea":
-		events = []ev{{"", "config.drift", store.SeverityWarn, "compose file changed but the running stack has not"}}
+		events = []ev{{typ: "config.drift", severity: store.SeverityWarn,
+			message: "compose file changed but the running stack has not", back: 0}}
 	default:
 		return nil
 	}
 
-	for i, e := range events {
-		id := projectID
+	for _, e := range events {
+		host, project := hostID, projectID
+		payload := map[string]any{"project": stack.Name}
+		for k, v := range e.details {
+			payload[k] = v
+		}
 		if _, err := db.RecordEvent(ctx, store.EventRecord{
-			ProjectID: &id, Service: e.service, TS: now - int64(i)*hour,
+			HostID: &host, ProjectID: &project, Service: e.service, TS: now - e.back,
 			Source: store.SourceDocker, Type: e.typ, Severity: e.severity, Message: e.message,
-			Payload: map[string]any{"project": stack.Name},
+			Payload: payload,
 		}); err != nil {
 			return fmt.Errorf("record event: %w", err)
 		}
