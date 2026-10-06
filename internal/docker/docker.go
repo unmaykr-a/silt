@@ -239,4 +239,11 @@ type Event struct {
 	ActorID string
 	Image   string
 	At      time.Time
+	// Details are the engine's own attributes for this event: the exit status
+	// on a die, the signal on a kill, the container's name. They are what makes
+	// "container.die at 03:00" answerable rather than merely true.
+	Details map[string]string
+	// Withheld counts the attributes that were not kept, so a reader is told
+	// there were some rather than left to assume this is everything.
+	Withheld int
 }

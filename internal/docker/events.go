@@ -240,9 +240,45 @@ func eventTime(msg events.Message) time.Time {
 	return time.Now()
 }
 
+// engineAttributes are the event attributes the Docker engine generates
+// itself, as opposed to the container's labels — which the engine also puts in
+// the same map.
+//
+// An allowlist, and for the reason the keep-list exists everywhere else in
+// Silt: the attribute map is mostly labels, labels are set by whoever wrote the
+// image or the compose file, and secrets do live there. Keeping the map and
+// redacting what is not recognised would be the other option, and it was
+// rejected twice over — it would put a column of [redacted:…] placeholders in
+// the highest-volume table in the database for no reading value, and the labels
+// are already captured, redacted, in each snapshot's own label set, which is
+// where a change to one is worth seeing.
+//
+// So these are kept verbatim and everything else is dropped and counted. Each
+// one is a fact the engine states about the event, and none can carry a secret.
+var engineAttributes = map[string]string{
+	// Containers.
+	"exitCode":         "the process's exit status — the whole answer to a die nobody expected",
+	"signal":           "the signal that stopped it",
+	"name":             "the container's name, which is not always its service's",
+	"restartCount":     "how many times the engine has restarted it",
+	"execID":           "which exec session, for the exec_* actions",
+	"execDuration":     "how long that exec ran",
+	"oom-kill-disable": "whether the kernel was allowed to OOM-kill it",
+	// Networks and volumes name their counterpart rather than carrying it in
+	// the actor id.
+	"container":   "the container at the other end",
+	"network":     "the network involved",
+	"driver":      "the driver behind it",
+	"destination": "the mount point inside the container",
+	"propagation": "the mount's propagation mode",
+	"read/write":  "whether the mount is writable",
+	// Images and the generic shape.
+	"type": "the engine's own sub-type for this event",
+}
+
 func toEvent(msg events.Message, at time.Time) Event {
 	attrs := msg.Actor.Attributes
-	return Event{
+	e := Event{
 		Type:    string(msg.Type),
 		Action:  string(msg.Action),
 		Project: attrs[LabelProject],
@@ -251,4 +287,24 @@ func toEvent(msg events.Message, at time.Time) Event {
 		Image:   attrs["image"],
 		At:      at,
 	}
+	for k, v := range attrs {
+		switch k {
+		// Already carried as their own fields, so keeping them here too would
+		// show every event's project twice.
+		case "image", LabelProject, LabelService:
+			continue
+		}
+		if _, ok := engineAttributes[k]; !ok {
+			e.Withheld++
+			continue
+		}
+		if v == "" {
+			continue
+		}
+		if e.Details == nil {
+			e.Details = make(map[string]string, 4)
+		}
+		e.Details[k] = v
+	}
+	return e
 }

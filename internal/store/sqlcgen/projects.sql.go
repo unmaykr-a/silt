@@ -30,24 +30,41 @@ func (q *Queries) GetProject(ctx context.Context, id int64) (Project, error) {
 }
 
 const getProjectIDByName = `-- name: GetProjectIDByName :one
-SELECT p.id FROM projects p
+SELECT p.id, p.host_id FROM projects p
 JOIN hosts h ON h.id = p.host_id
 WHERE p.name = ?
 ORDER BY p.id
 LIMIT 1
 `
 
-// Resolves a compose project name to its id, for the event path.
+type GetProjectIDByNameRow struct {
+	ID     int64
+	HostID int64
+}
+
+// Resolves a compose project name to its id and its host's, for the event path.
 //
 // Names are unique per host and Silt records one host, so the first match is
 // the answer. Served by the UNIQUE (host_id, name) index; the alternative was
 // listing every host and every project on every Docker event, which on a
 // forty-project host during a `compose up` is a table scan per event.
-func (q *Queries) GetProjectIDByName(ctx context.Context, name string) (int64, error) {
+//
+// The host comes back too because the join was already here. Nothing had ever
+// set events.host_id: the column, the EventRecord field and the write path all
+// existed and no caller filled any of them, so every event in every Silt
+// database had a null host. One more column on a query that was already
+// joining the table is what it cost to make it true.
+//
+// No em dashes in this file, and no other non-ASCII either. sqlc truncates the
+// end of a query by one byte for every multi-byte character in its comment, so
+// this comment with its original dash in it generated "LIMIT" with the 1 gone
+// and every event silently stopped finding its project. See
+// TestQueryFilesAreASCII.
+func (q *Queries) GetProjectIDByName(ctx context.Context, name string) (GetProjectIDByNameRow, error) {
 	row := q.db.QueryRowContext(ctx, getProjectIDByName, name)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i GetProjectIDByNameRow
+	err := row.Scan(&i.ID, &i.HostID)
+	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many

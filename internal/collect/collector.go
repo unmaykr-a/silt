@@ -179,10 +179,11 @@ func (c *Collector) recordDockerEvent(ctx context.Context, e docker.Event) {
 		Severity: dockerEventSeverity(e.Action),
 		Actor:    e.ActorID,
 		Message:  e.Action,
-		Payload:  map[string]any{"project": e.Project, "image": e.Image, "action": e.Action},
+		Payload:  dockerEventPayload(e),
 	}
-	if id, ok := c.projectID(ctx, e.Project); ok {
-		rec.ProjectID = &id
+	if projectID, hostID, ok := c.projectID(ctx, e.Project); ok {
+		rec.ProjectID = &projectID
+		rec.HostID = &hostID
 	}
 
 	row, err := c.Snapshotter.Store.RecordEvent(ctx, rec)
@@ -202,28 +203,75 @@ func (c *Collector) recordDockerEvent(ctx context.Context, e docker.Event) {
 			"service":  row.Service,
 			"message":  row.Message,
 			"project":  e.Project,
+			// So a row that arrived live is as openable as one that came from a
+			// reload, rather than being the one event with nothing behind it.
+			"payload": dockerEventPayload(e),
 		})
 	}
 }
 
-// projectID resolves a compose project name to its database id. Events can
-// arrive before the project has ever been snapshotted, in which case they are
-// still recorded, just without the link.
+// dockerEventPayload is everything about an event that is not a column.
+//
+// The engine's own attributes go in under their own keys rather than nested, so
+// an exit code reads as exit_code on the event rather than as
+// payload.details.exitCode — the point of capturing it was that someone looking
+// at a 03:00 die should not have to dig.
+//
+// withheld says how many attributes were dropped, which is nearly always the
+// container's labels. Recorded rather than silently omitted so the screen can
+// say "and 14 labels, not shown" instead of implying this is everything the
+// engine said.
+func dockerEventPayload(e docker.Event) map[string]any {
+	out := map[string]any{"project": e.Project, "image": e.Image, "action": e.Action}
+	for k, v := range e.Details {
+		out[snakeAttribute(k)] = v
+	}
+	if e.Withheld > 0 {
+		out["withheld_attributes"] = e.Withheld
+	}
+	return out
+}
+
+// snakeAttribute renames the engine's camelCase attributes to match every other
+// key Silt stores. exitCode beside withheld_attributes in one object would be
+// two conventions in a payload people read.
+func snakeAttribute(k string) string {
+	switch k {
+	case "exitCode":
+		return "exit_code"
+	case "execID":
+		return "exec_id"
+	case "execDuration":
+		return "exec_duration"
+	case "restartCount":
+		return "restart_count"
+	case "read/write":
+		return "writable"
+	case "oom-kill-disable":
+		return "oom_kill_disable"
+	default:
+		return k
+	}
+}
+
+// projectID resolves a compose project name to its database id and its host's.
+// Events can arrive before the project has ever been snapshotted, in which case
+// they are still recorded, just without the links.
 //
 // One indexed lookup rather than listing every host and every project. This
 // runs on every Docker event, and a `compose up` across a forty-project host
 // produces a burst of them — on the hardware Silt is built for, that was a
 // table scan per event to answer a question the UNIQUE (host_id, name) index
 // already answers.
-func (c *Collector) projectID(ctx context.Context, name string) (int64, bool) {
+func (c *Collector) projectID(ctx context.Context, name string) (projectID, hostID int64, ok bool) {
 	if name == "" {
-		return 0, false
+		return 0, 0, false
 	}
-	id, err := c.Snapshotter.Store.RQ.GetProjectIDByName(ctx, name)
+	row, err := c.Snapshotter.Store.RQ.GetProjectIDByName(ctx, name)
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
-	return id, true
+	return row.ID, row.HostID, true
 }
 
 // snapshotProject snapshots one project by name, looking it up from the

@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -93,6 +94,7 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 	spec := loadSpec(t)
 	f := newFixture(t)
 	auth := map[string]string{"Authorization": "Bearer " + f.ingestTok}
+	eventID := strconv.FormatInt(f.eventID, 10)
 
 	cases := map[string]contractCase{
 		"listHosts":    {method: "GET", url: "/api/hosts", wantStatus: 200, schema: "Host", element: true},
@@ -107,6 +109,7 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"getCompose":   {method: "GET", url: "/api/snapshots/1/compose", wantStatus: 200, schema: "ProjectModel"},
 		"getDiff":      {method: "GET", url: "/api/diff?from=1&to=2", wantStatus: 200, schema: "Diff"},
 		"listEvents":   {method: "GET", url: "/api/events", wantStatus: 200, schema: "Event", element: true},
+		"getEvent":     {method: "GET", url: "/api/events/" + eventID, wantStatus: 200, schema: "EventDetail"},
 		"listProjectServices": {
 			method: "GET", url: "/api/projects/1/services", wantStatus: 200,
 		},

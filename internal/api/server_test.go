@@ -52,6 +52,7 @@ type fixture struct {
 	ingestTok string
 	// Small on purpose: the rate-limit tests send the whole allowance.
 	ingestLimit int
+	eventID     int64
 }
 
 // baselineConfig is a configuration a real install could boot with: every
@@ -112,7 +113,7 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 	key, _ := db.RedactionKey(ctx)
 	r := redact.New(key, nil)
 
-	_, projectID, err := db.UpsertHostAndProject(ctx, "local", "tcp://proxy:2375", "28.0", proj{"media"})
+	hostID, projectID, err := db.UpsertHostAndProject(ctx, "local", "tcp://proxy:2375", "28.0", proj{"media"})
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -148,10 +149,17 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 		t.Fatalf("snapshot b: %v", err)
 	}
 
-	if _, err := db.RecordEvent(ctx, store.EventRecord{
-		ProjectID: &projectID, Service: "radarr", Source: store.SourceDocker,
+	// The detail its own capture path now records, so the fixture's event is
+	// the shape a real one is rather than an emptier one.
+	die, err := db.RecordEvent(ctx, store.EventRecord{
+		HostID: &hostID, ProjectID: &projectID, Service: "radarr", Source: store.SourceDocker,
 		Type: "container.die", Severity: store.SeverityError, Message: "die",
-	}); err != nil {
+		Payload: map[string]any{
+			"project": "media", "image": "lscr.io/linuxserver/radarr:latest",
+			"action": "die", "exit_code": "137", "withheld_attributes": 12,
+		},
+	})
+	if err != nil {
 		t.Fatalf("record event: %v", err)
 	}
 
@@ -199,7 +207,7 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 
 	return &fixture{
 		srv: ts, api: server, store: db, hub: hub, snapshots: snaps,
-		projectID: projectID, snapshotA: a.ID, snapshotB: b.ID, ingestTok: "test-token",
+		projectID: projectID, snapshotA: a.ID, snapshotB: b.ID, eventID: die.ID, ingestTok: "test-token",
 		ingestLimit: testIngestLimit,
 	}
 }
