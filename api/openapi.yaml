@@ -458,6 +458,53 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Event" }
 
+  /api/events/export:
+    get:
+      tags: [events]
+      summary: Everything in a window, as a file
+      description: |
+        Markdown by default, JSON with `format=json`. Both carry the same thing:
+        a summary first — what the window was, how many events, which severities,
+        types and projects — then the errors and warnings on their own, then
+        everything in order, oldest first.
+
+        The summary is what makes it diagnosable rather than merely complete.
+        The first thing anyone does with a list of events is count them, and
+        anything asked to find a cause in one does the same.
+
+        Capped at 5000 events; the file says so when it is truncated.
+      operationId: exportEvents
+      parameters:
+        - name: from
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: project
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: service
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, warn, error] }
+        - name: format
+          in: query
+          schema: { type: string, enum: [md, json], default: md }
+      responses:
+        "200":
+          description: A downloadable report of the window
+          content:
+            text/markdown:
+              schema: { type: string }
+            application/json:
+              schema: { type: object }
+
   /api/events/{id}:
     get:
       tags: [events]

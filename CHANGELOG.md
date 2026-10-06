@@ -5,6 +5,30 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 1.3.0 — 2026-10-06
+
+Events open, export, and can be read from a project's own timeline.
+
+### Added
+
+- Every event row opens. The panel carries the detail the row had no space for, the last configuration change in that project before it with the gap in human units and a link to the diff, and the ten minutes either side with each neighbour openable. The change link is the point: a crash at 03:10 and an image pulled at 03:00 are the same story, and from a single event that story was two screens and a manual timestamp comparison away.
+- An Export button on the timeline takes the window on screen, with its filters, and hands it back as a file. Markdown by default — a summary first, then the errors and warnings on their own, then everything in order oldest first — and JSON for anything that is parsing it. The summary is what makes it diagnosable rather than merely complete.
+- A project's own page shows its events. Drag across its chart to select a window and read what happened in it, with the same panel and its own export. The strip always supported the drag; this page passed no handler, so the gesture did nothing and there was nowhere to put the answer.
+
+### Changed
+
+- The demo's events tell a story rather than filling a list: immich's three sit minutes apart as a crash loop, with the engine attributes a real one would carry.
+
+### Fixed
+
+- Docker's own event attributes are recorded. The engine sends an exit code on a die, a signal on a kill and the container's name on everything; Silt read that map and kept three keys from it, so a die with no exit status was not a display gap — the number had never been stored. Events recorded before this release cannot gain one retrospectively.
+- events.host_id is set. The column, the EventRecord field and the write path all existed and no caller filled any of them, so every event in every Silt database carried a null host.
+- Two guards on the generated query layer. sqlc cuts the end of a query by one byte for every multi-byte character in the comment above it, so an em dash in a new comment turned LIMIT 1 into LIMIT — a runtime syntax error with no compile failure, which silently stopped every Docker event finding its project. The query files must now be ASCII, and no generated query may end on a bare keyword.
+
+### Security
+
+- The container's labels arrive in that same map and are deliberately not recorded: secrets live in labels, and a Traefik basicauth middleware keeps password hashes in one. An allowlist of the engine's own attributes is kept and everything else is dropped and counted, so a screen can say how many were withheld rather than implying it is showing everything. Guarded by an event sentinel that plants a secret-shaped string in three shapes of label and byte-scans the database and its write-ahead log.
+
 ## 1.2.0 — 2026-09-15
 
 Authentication is editable from the settings screen, with a key that encrypts what is stored and a way back in when a save goes wrong.

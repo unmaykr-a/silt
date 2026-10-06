@@ -2320,7 +2320,37 @@ Changed:
     administrator from themselves. `SILT_SETTINGS_RESET` is the honest version of
     the same intent, and it is four lines.
 
-116. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
+116. **A row with nothing behind it (1.3.0)** — the complaint was that a feed row
+    read `03:00 container.die` and there was no information and nothing to click.
+    Two of those were display problems and one was not: the exit code had never
+    been stored. `toEvent` read the engine's whole attribute map and kept three
+    keys, so every die since the first release lost the one number that explains
+    it. The lesson is the one in 114 from a different angle — nobody could see
+    the detail, so nobody had noticed it was not being kept. A screen that cannot
+    be opened is a screen whose data nobody checks.
+
+    Keeping the rest of that map was not an option: the container's labels arrive
+    in it, and secrets live in labels. Redacting them was considered and rejected
+    twice over — a column of placeholders in the highest-volume table reads as
+    nothing, and the labels are already captured, redacted, in each snapshot's
+    own label set, which is where a change to one is worth seeing. So an
+    allowlist, with the dropped count stored, because a panel showing four
+    attributes without saying there were sixteen implies it is showing
+    everything.
+
+    Two things fell out on the way. `events.host_id` had never been set by
+    anything, and the detail endpoint would have reported an empty host forever:
+    a column, a struct field and a write path all existing and all unreachable,
+    which is 111's failure in schema form. And the one-column query change that
+    fixed it silently broke the query — sqlc truncates a statement by one byte
+    per multi-byte character in its preceding comment, so the em dash this
+    project writes everywhere turned `LIMIT 1` into `LIMIT`. No compile error, a
+    runtime syntax error, and every Docker event quietly ceasing to find its
+    project. It had never happened because nothing in queries/ had ever been
+    non-ASCII. A habit that is correct in Go and wrong one directory over, with
+    no feedback either way, is exactly what a test is for.
+
+117. **Smaller** — ASCII redaction placeholder instead of guillemets; `bucket` param on
     `/api/timeline` with a server-side clamp; `SILT_NOTIFY_MIN_SEVERITY` semantics
     specified as AND; M3's done-criterion is a Go test rather than an endpoint that
     doesn't exist until M4; fsnotify watches the parent directory so atomic saves don't

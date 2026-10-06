@@ -110,6 +110,9 @@ func TestSpecOperationsMatchHandlers(t *testing.T) {
 		"getDiff":      {method: "GET", url: "/api/diff?from=1&to=2", wantStatus: 200, schema: "Diff"},
 		"listEvents":   {method: "GET", url: "/api/events", wantStatus: 200, schema: "Event", element: true},
 		"getEvent":     {method: "GET", url: "/api/events/" + eventID, wantStatus: 200, schema: "EventDetail"},
+		// Markdown rather than JSON, so there is no schema to check here; the
+		// shape of the document is asserted in eventexport_test.go.
+		"exportEvents": {method: "GET", url: "/api/events/export", wantStatus: 200},
 		"listProjectServices": {
 			method: "GET", url: "/api/projects/1/services", wantStatus: 200,
 		},

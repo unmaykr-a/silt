@@ -35,6 +35,8 @@ call is refused whether or not authentication is configured.
 | `GET /api/diff` | Structural diff between two snapshots. |
 | `GET /api/timeline` | Changes and events on one axis. `bucket` for the density strip. |
 | `GET /api/events` | Events. |
+| `GET /api/events/{id}` | One event, plus the names behind its ids, the last configuration change in its project before it, and the events either side within ten minutes. |
+| `GET /api/events/export` | A window as a downloadable file. `format=md` (default) or `json`; takes the same filters as `/api/events`. Capped at 5000 events, and says so when truncated. |
 | `GET /api/overview` | The Projects screen's fleet summary. |
 | `GET /api/search` | Projects, services, env key **names**, file paths, event text. Never values. |
 | `GET /api/audit` | The administrative trail. |

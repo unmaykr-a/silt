@@ -14,6 +14,8 @@
   import { Button } from "$lib/components/ui/button";
   import DensityStrip from "$lib/components/DensityStrip.svelte";
   import Segmented from "$lib/components/Segmented.svelte";
+  import EventDetail from "$lib/components/EventDetail.svelte";
+  import { clockTime, datetime, relative, severityAccent } from "$lib/format";
 
   let { projectId, reloadKey }: { projectId: number; reloadKey: number } = $props();
 
@@ -24,6 +26,25 @@
   let projectTimeline = $state<Timeline | null>(null);
   let rangeLabel = $state("604800000");
   const rangeMs = $derived(Number(rangeLabel));
+
+  // Pinned when the strip is fetched rather than read per render, so the
+  // selected window does not drift under the selection while it is open.
+  let nowish = $state(Date.now());
+
+  // A window dragged out on the strip. The strip has always supported the drag
+  // — the fleet timeline uses it — but this page passed no handler, so the
+  // gesture did nothing here and there was nowhere for it to put the answer.
+  let zoom = $state<{ from: number; to: number } | null>(null);
+  let openEvent = $state<number | null>(null);
+
+  // What happened in the selected window, this project only. Standing on a
+  // project, seeing a spike, and having to go to the fleet timeline and filter
+  // back down to the stack already in front of you was the gap.
+  const windowFrom = $derived(zoom ? zoom.from : nowish - rangeMs);
+  const windowTo = $derived(zoom ? zoom.to : nowish);
+  const windowEvents = $derived(
+    (projectTimeline?.events ?? []).filter((e) => e.ts >= windowFrom && e.ts <= windowTo),
+  );
 
   const RANGES = [
     { value: "86400000", label: "24h" },
@@ -68,12 +89,31 @@
     void key;
     const controller = new AbortController();
     const to = Date.now();
+    nowish = to;
     api
       .timeline({ project: projectId, from: to - rangeMs, to }, controller.signal)
       .then((t) => (projectTimeline = t))
       .catch(() => {});
     return () => controller.abort();
   });
+
+  // Changing the range is a new question, so a selection made against the old
+  // one is not an answer to it.
+  $effect(() => {
+    void rangeMs;
+    zoom = null;
+  });
+
+  const exportHref = $derived(
+    `/api/events/export?project=${projectId}&from=${Math.round(windowFrom)}&to=${Math.round(windowTo)}`,
+  );
+
+  function windowLabel(from: number, to: number): string {
+    const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
+    return sameDay
+      ? `${datetime(from)} to ${clockTime(to)}`
+      : `${datetime(from)} to ${datetime(to)}`;
+  }
 
   // The two most recent snapshots where the configuration actually changed.
   // Comparing the last two observations would usually diff a thing against
@@ -142,8 +182,83 @@
         <Segmented label="Range" size="xs" bind:value={rangeLabel} options={RANGES} />
       </div>
       <div class="mt-3">
-        <DensityStrip timeline={projectTimeline} />
+        <DensityStrip
+          timeline={projectTimeline}
+          zoomed={zoom !== null}
+          onZoom={(from, to) => (zoom = { from, to })}
+          onReset={() => (zoom = null)}
+        />
       </div>
+
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        {#if zoom}
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs
+                   text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground"
+            onclick={() => (zoom = null)}
+          >
+            <span class="font-mono">{windowLabel(zoom.from, zoom.to)}</span>
+            <span aria-hidden="true">×</span>
+            <span class="sr-only">Clear the selected window</span>
+          </button>
+        {:else}
+          <span class="text-xs text-muted-foreground/60">Drag across the chart to select a window.</span>
+        {/if}
+
+        {#if windowEvents.length > 0}
+          <a
+            href={exportHref}
+            download
+            class="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1
+                   text-xs text-muted-foreground no-underline transition-colors hover:bg-secondary/60 hover:text-foreground"
+            title="This project's events in this window, as a file"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+            </svg>
+            Export
+          </a>
+        {/if}
+      </div>
+
+      <!-- The events themselves, which this page never showed. A strip with a
+           spike on it and no way to read the spike is a chart of something
+           rather than an answer about it. -->
+      {#if windowEvents.length === 0}
+        <p class="mt-3 text-xs text-muted-foreground/70">
+          {zoom ? "Nothing happened in the selected window." : "No events recorded in this range."}
+        </p>
+      {:else}
+        <div class="mt-3">
+          {#each windowEvents as e (e.id)}
+            <button
+              type="button"
+              class="flex w-full items-baseline gap-3 border-b border-border/60 py-2 text-left text-sm
+                     transition-colors hover:bg-secondary/30"
+              onclick={() => (openEvent = e.id)}
+            >
+              <span class="w-1 shrink-0 self-stretch rounded-sm {severityAccent(e.severity)}"></span>
+              <span
+                class="w-16 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+                title={datetime(e.ts, { seconds: true })}
+              >
+                {clockTime(e.ts)}
+              </span>
+              <span class="shrink-0 font-mono text-xs">{e.type}</span>
+              {#if e.service}
+                <span class="shrink-0 text-muted-foreground">{e.service}</span>
+              {/if}
+              {#if e.message}
+                <span class="min-w-0 flex-1 truncate text-xs text-muted-foreground/70" title={e.message}>
+                  {e.message}
+                </span>
+              {/if}
+              <span class="ml-auto shrink-0 text-xs text-muted-foreground/50">{relative(e.ts)}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
     </section>
 
     <section>
@@ -272,3 +387,5 @@
     </section>
   </div>
 {/if}
+
+<EventDetail bind:eventId={openEvent} />

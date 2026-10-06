@@ -117,6 +117,26 @@ export function severityClass(severity: string): string {
   }
 }
 
+/**
+ * A severity's accent, for the 2px bar down the side of an event row.
+ *
+ * Beside the other two rather than in a screen, because the Timeline and a
+ * project's own feed draw the same row and a second copy of this map is a
+ * colour that disagrees with itself by the next release.
+ */
+export function severityAccent(severity: string): string {
+  switch (severity) {
+    case "high":
+    case "error":
+      return "bg-red-500";
+    case "medium":
+    case "warn":
+      return "bg-amber-500";
+    default:
+      return "bg-zinc-400/50 dark:bg-zinc-600";
+  }
+}
+
 export function severityDot(severity: string): string {
   switch (severity) {
     case "high":

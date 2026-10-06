@@ -473,3 +473,53 @@ test("an event opens and says what changed before it", async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+test("a project's own events can be selected and read", async ({ page }) => {
+  // Standing on a project, seeing a spike on its chart, and having to go to the
+  // fleet timeline and filter back down to the stack already in front of you
+  // was the gap. The strip always supported the drag; this page passed no
+  // handler, so the gesture did nothing and there was nowhere to put the answer.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/projects/4", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1200);
+
+  const activity = page.locator("section").filter({ hasText: "Activity" }).first();
+
+  // The events are on the page at all, which they were not before.
+  await expect(activity).toContainText("container.die");
+  await expect(activity).toContainText("monitor.down");
+
+  // A time rather than a bare meridiem, and not wrapped onto two lines: the
+  // column was w-14, which is narrower than "08:03 PM" renders.
+  await expect(activity).toContainText(/\d{1,2}:\d{2}/);
+
+  // Each one opens the same panel the timeline opens.
+  await activity.getByRole("button", { name: /container\.die/ }).first().click();
+  const panel = page.locator("dialog[open]");
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("exit code");
+  await panel.getByLabel("Close").click();
+
+  // Dragging across the chart selects a window, which the page then says it is
+  // showing — and offers as a file.
+  const chart = activity.locator("canvas").first();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("no chart to drag across");
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
+  await page.mouse.down();
+  // To the right-hand edge, because the events are at the newest end of the
+  // range and a selection that stops short of them is an empty window — which
+  // is a legitimate state the page reports, and not the one under test.
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+
+  await expect(activity.getByText("Clear the selected window")).toBeAttached();
+  await expect(activity).toContainText("container.die");
+  const exportLink = activity.getByRole("link", { name: "Export" });
+  await expect(exportLink).toHaveAttribute("href", /\/api\/events\/export\?project=4&from=\d+&to=\d+/);
+
+  expect(errors).toEqual([]);
+});
