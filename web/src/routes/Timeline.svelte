@@ -327,7 +327,24 @@
           </div>
         {:else if entry.row.kind === "change"}
           {@const row = entry.row}
-          <div class="flex items-baseline gap-3 border-b border-border/60 py-2 text-sm">
+          <!-- The whole row, not the two words in the middle of it. This row
+               sits among event rows that open on a click anywhere, looked
+               exactly like them, and answered only to a click on "configuration
+               changed" or on the project name - so clicking it the way you
+               click its neighbours did nothing at all.
+
+               A link rather than a button, like the rows on the search screen:
+               it is a navigation, and it should open in a new tab the way any
+               other does. The project name is plain text now; the diff this
+               leads to links to the project in its own heading, and a row with
+               one destination beats a row with two targets too small to
+               hit. -->
+          <a
+            use:link
+            href="/diff?to={row.item.id}&project={row.item.project_id}"
+            class="group flex items-baseline gap-3 border-b border-border/60 py-2 text-sm
+                   transition-colors hover:bg-secondary/30"
+          >
             <span class="w-1 shrink-0 self-stretch rounded-sm bg-emerald-500"></span>
             <span
               class="w-16 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
@@ -335,24 +352,20 @@
             >
               {clockTime(row.ts)}
             </span>
-            <a
-              use:link
-              href="/diff?to={row.item.id}&project={row.item.project_id}"
-              class="shrink-0 font-medium underline-offset-4 hover:underline"
-            >
+            <span class="shrink-0 font-medium underline-offset-4 group-hover:underline">
               configuration changed
-            </a>
-            <a
-              use:link
-              href="/projects/{row.item.project_id}"
-              class="min-w-0 truncate text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              {projectName(row.item.project_id)}
-            </a>
-            <span class="ml-auto shrink-0 text-xs text-muted-foreground/50">
-              via {row.item.trigger} · {relative(row.ts, now)}
             </span>
-          </div>
+            <span class="min-w-0 truncate text-muted-foreground">
+              {projectName(row.item.project_id)}
+            </span>
+            <!-- The trigger goes at phone width so the project name has room:
+                 it is fixed-width and the name truncates against it, which left
+                 the row reading "configuration changed" with no way to tell
+                 which of 47 projects it meant. -->
+            <span class="ml-auto shrink-0 text-xs text-muted-foreground/50">
+              <span class="hidden sm:inline">via {row.item.trigger} · </span>{relative(row.ts, now)}
+            </span>
+          </a>
         {:else}
           {@const row = entry.row}
           <!-- A button rather than a div. This row used to be the end of the

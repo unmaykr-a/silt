@@ -5,6 +5,19 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 1.3.2 — 2026-10-06
+
+A configuration change opens from anywhere on its row.
+
+### Added
+
+- An end-to-end test that clicks the far right of the row, where there was nothing to click, rather than the label that already worked. Clicking the label would have passed throughout.
+
+### Fixed
+
+- A configuration change on the timeline opens from anywhere on its row. It sat among event rows that have opened on a click anywhere since 1.3.0 and looked exactly like them, but answered only to a click on the words "configuration changed" or on the project name — so clicking it the way you click its neighbours did nothing. The whole row is now the link to the diff, with the hover highlight those neighbours have. The project name is plain text rather than its own link; the diff it leads to names the project and links to it.
+- At phone width that row said "configuration changed" without saying which project. The trigger and the elapsed time were fixed-width on the right and the project name truncated against them, down to nothing on a narrow screen. The trigger now goes below that width and the name stays.
+
 ## 1.3.1 — 2026-10-06
 
 The event panel opens more than once.
