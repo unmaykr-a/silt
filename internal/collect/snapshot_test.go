@@ -58,6 +58,10 @@ type harness struct {
 	db     *store.Store
 	snap   *collect.Snapshotter
 	pub    *recorder
+	// dbPath is on the harness so a test can byte-scan the file rather than
+	// query it. Querying proves a value is absent from the column it was meant
+	// to be in; scanning proves it is absent from what leaves the host.
+	dbPath string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -73,7 +77,8 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { _ = client.Close() })
 
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "silt.db"))
+	dbPath := filepath.Join(t.TempDir(), "silt.db")
+	db, err := store.Open(ctx, dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -89,6 +94,7 @@ func newHarness(t *testing.T) *harness {
 		engine: engine,
 		client: client,
 		db:     db,
+		dbPath: dbPath,
 		pub:    pub,
 		snap: &collect.Snapshotter{
 			Client:    client,

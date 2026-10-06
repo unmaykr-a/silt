@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -267,4 +268,81 @@ func TestWatcherRetriesUnreachableEngine(t *testing.T) {
 		_, c, _ := rec.snapshot()
 		return len(c) >= 1
 	})
+}
+
+// The engine puts its own attributes and the container's labels in one map.
+// These are about keeping the first and dropping the second, which is the
+// difference between "container.die at 03:00" being answerable and being
+// merely true.
+
+func TestEngineAttributesAreKept(t *testing.T) {
+	msg := containerEvent("die", "media", "sonarr", time.Unix(0, 0))
+	msg.Actor.Attributes["exitCode"] = "137"
+	msg.Actor.Attributes["name"] = "media-sonarr-1"
+
+	e := toEvent(msg, time.Unix(0, 0))
+	if got := e.Details["exitCode"]; got != "137" {
+		t.Errorf("exitCode = %q, want 137: a die with no exit status is the event this exists for", got)
+	}
+	if got := e.Details["name"]; got != "media-sonarr-1" {
+		t.Errorf("name = %q, want the container name", got)
+	}
+	if e.Withheld != 0 {
+		t.Errorf("withheld = %d, want 0: nothing here is a label", e.Withheld)
+	}
+}
+
+// A container's labels are in the same map, and secrets live in labels — a
+// Traefik basicauth middleware keeps password hashes in one. They are dropped
+// rather than kept or redacted: a column of placeholders in the
+// highest-volume table reads as nothing, and the labels are already captured,
+// redacted, in each snapshot's own label set.
+func TestContainerLabelsAreDroppedAndCounted(t *testing.T) {
+	msg := containerEvent("die", "media", "sonarr", time.Unix(0, 0))
+	msg.Actor.Attributes["exitCode"] = "1"
+	msg.Actor.Attributes["traefik.http.middlewares.auth.basicauth.users"] = "admin:$2y$05$hunter2hashhash"
+	msg.Actor.Attributes["org.opencontainers.image.revision"] = "deadbeef"
+	msg.Actor.Attributes["MY_TOKEN"] = "s3cret-token-value"
+
+	e := toEvent(msg, time.Unix(0, 0))
+	if e.Withheld != 3 {
+		t.Errorf("withheld = %d, want 3", e.Withheld)
+	}
+	for k, v := range e.Details {
+		if strings.Contains(v, "hunter2") || strings.Contains(v, "s3cret") {
+			t.Errorf("a label's value survived as %s=%q", k, v)
+		}
+	}
+	if _, ok := e.Details["MY_TOKEN"]; ok {
+		t.Error("an unrecognised attribute was kept")
+	}
+	// And the one thing worth keeping still is.
+	if got := e.Details["exitCode"]; got != "1" {
+		t.Errorf("exitCode = %q, want 1", got)
+	}
+}
+
+// Project, service and image are their own fields, so keeping them in the
+// detail map as well would show every event's project twice.
+func TestTheFieldsThatAreAlreadyColumnsAreNotRepeated(t *testing.T) {
+	e := toEvent(containerEvent("start", "media", "sonarr", time.Unix(0, 0)), time.Unix(0, 0))
+	for _, k := range []string{"image", LabelProject, LabelService} {
+		if _, ok := e.Details[k]; ok {
+			t.Errorf("%s is both a field and a detail", k)
+		}
+	}
+	if e.Withheld != 0 {
+		t.Errorf("withheld = %d, want 0: a field of its own is not a withheld attribute", e.Withheld)
+	}
+}
+
+// An attribute the engine sends empty is not a fact, and a detail panel listing
+// "signal:" with nothing after it reads as a bug.
+func TestEmptyAttributesAreNotKept(t *testing.T) {
+	msg := containerEvent("kill", "media", "sonarr", time.Unix(0, 0))
+	msg.Actor.Attributes["signal"] = ""
+
+	if e := toEvent(msg, time.Unix(0, 0)); len(e.Details) != 0 {
+		t.Errorf("details = %v, want nothing", e.Details)
+	}
 }

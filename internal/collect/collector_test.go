@@ -154,6 +154,12 @@ func TestAnEventForAnUnknownProjectIsStillRecorded(t *testing.T) {
 			if row.ProjectID.Valid {
 				t.Error("an event for an unknown project claims a project id")
 			}
+			// The host comes from the project row, so an unknown project means
+			// an unknown host too. Unattributed is the honest answer; inventing
+			// the one host Silt happens to have would make the column a guess.
+			if row.HostID.Valid {
+				t.Error("an event for an unknown project claims a host id")
+			}
 			return
 		}
 	}
@@ -311,4 +317,40 @@ func snapshotsFor(t *testing.T, db *store.Store, projectID int64) []sqlcgen.Snap
 		t.Fatalf("list snapshots: %v", err)
 	}
 	return rows
+}
+
+// events.host_id had never been set by anything. The column, the EventRecord
+// field and the write path all existed, and no caller filled any of them — so
+// every event in every Silt database carried a null host, and the detail screen
+// that went to render one would have reported an empty string forever.
+//
+// It is free to fix: the project lookup this path already does was joining the
+// hosts table, so the host came back with one more column on the same query.
+func TestARecordedEventKnowsItsHostAndProject(t *testing.T) {
+	h := newHarness(t)
+	h.serve("media", "radarr", "radarr:5.4.0", "sha256:aaa", nil, nil)
+
+	runFor(t, collector(h), func() {
+		waitFor(t, "the watcher to subscribe", func() bool { return h.engine.Subscriptions() > 0 })
+		h.engine.Emit(containerEvent("die", "media", "radarr"))
+		waitFor(t, "the die event to be stored", func() bool {
+			return hasEvent(t, h.db, "container.die")
+		})
+	})
+
+	var die sqlcgen.Event
+	for _, row := range storedEvents(t, h.db) {
+		if row.Type == "container.die" {
+			die = row
+		}
+	}
+	if die.Type == "" {
+		t.Fatal("no container.die event")
+	}
+	if !die.ProjectID.Valid {
+		t.Error("the event has no project")
+	}
+	if !die.HostID.Valid {
+		t.Error("the event has no host; nothing has ever set events.host_id")
+	}
 }

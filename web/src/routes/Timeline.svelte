@@ -3,9 +3,10 @@
   import { link } from "$lib/router.svelte";
   import DensityStrip from "$lib/components/DensityStrip.svelte";
   import Empty from "$lib/components/Empty.svelte";
-  import { clockTime, datetime, dateOnly, relative } from "$lib/format";
+  import { clockTime, datetime, dateOnly, relative, severityAccent } from "$lib/format";
   import { clock } from "$lib/clock.svelte";
   import Segmented from "$lib/components/Segmented.svelte";
+  import EventDetail from "$lib/components/EventDetail.svelte";
 
   let { reloadKey, projects: knownProjects }: { reloadKey: number; projects: Project[] } = $props();
 
@@ -25,6 +26,9 @@
   // is cleared, which is what makes "drag across the spike, read the feed"
   // work: the strip and the list below it share one window.
   let zoom = $state<{ from: number; to: number } | null>(null);
+  // Which event is open, or null. Held here rather than in the row so the
+  // panel can hand it the id of a neighbour and walk the window.
+  let openEvent = $state<number | null>(null);
   let projectFilter = $state(0);
   let severityFilter = $state("");
   let error = $state<string | null>(null);
@@ -162,26 +166,27 @@
     (timeline?.events ?? []).filter((e) => ROUTINE_TYPES.has(e.type)).length,
   );
 
+  // The export carries exactly what is on screen: the same window the feed was
+  // loaded with, and the same filters. An export that quietly meant something
+  // else than the thing you were looking at would be worse than no export.
+  //
+  // severityFilter is applied client-side on the feed, so it travels too —
+  // otherwise exporting while filtered to errors would hand back everything.
+  const exportHref = $derived.by(() => {
+    const to = zoom ? zoom.to : now;
+    const from = zoom ? zoom.from : to - rangeMs;
+    const params = new URLSearchParams({ from: String(Math.round(from)), to: String(Math.round(to)) });
+    if (projectFilter) params.set("project", String(projectFilter));
+    if (severityFilter) params.set("severity", severityFilter);
+    return `/api/events/export?${params}`;
+  });
+
   // The zoomed window, rendered short: same day means one date, otherwise two.
   function windowLabel(from: number, to: number): string {
     const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
     return sameDay ? `${datetime(from)} → ${clockTime(to)}` : `${datetime(from)} → ${datetime(to)}`;
   }
 
-  // A severity's accent, used as a 2px bar rather than a dot: at a glance you
-  // read the colour of the column, not three separate circles.
-  function accent(severity: string): string {
-    switch (severity) {
-      case "high":
-      case "error":
-        return "bg-red-500";
-      case "medium":
-      case "warn":
-        return "bg-amber-500";
-      default:
-        return "bg-zinc-400/50 dark:bg-zinc-600";
-    }
-  }
 
   const control =
     "rounded-md border border-border bg-background px-2.5 py-1.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring";
@@ -233,6 +238,22 @@
         Container activity{#if !showRoutine && hiddenRoutine > 0}&nbsp;({hiddenRoutine}){/if}
       </label>
     {/if}
+
+    <!-- The window on screen, as a file. A plain link rather than a fetch and
+         a blob: the server already sets the filename and the content type, and
+         the browser's own download is the thing that survives a tab closing
+         mid-transfer. -->
+    <a
+      href={exportHref}
+      download
+      class="{control} ml-auto inline-flex items-center gap-1.5 no-underline hover:bg-secondary/60"
+      title="Everything in this window, as a file you can read or hand to someone who can"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+      </svg>
+      Export
+    </a>
   </div>
 
   {#if error}
@@ -277,7 +298,7 @@
               onclick={() => (expanded = { ...expanded, [row.id]: !expanded[row.id] })}
             >
               <span class="w-1 shrink-0 self-stretch rounded-sm bg-emerald-500"></span>
-              <span class="w-14 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+              <span class="w-16 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
                 {clockTime(row.ts)}
               </span>
               <span class="font-medium">{row.projects.length} projects changed</span>
@@ -309,7 +330,7 @@
           <div class="flex items-baseline gap-3 border-b border-border/60 py-2 text-sm">
             <span class="w-1 shrink-0 self-stretch rounded-sm bg-emerald-500"></span>
             <span
-              class="w-14 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+              class="w-16 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
               title={datetime(row.ts, { seconds: true })}
             >
               {clockTime(row.ts)}
@@ -334,10 +355,18 @@
           </div>
         {:else}
           {@const row = entry.row}
-          <div class="flex items-baseline gap-3 border-b border-border/60 py-2 text-sm">
-            <span class="w-1 shrink-0 self-stretch rounded-sm {accent(row.item.severity)}"></span>
+          <!-- A button rather than a div. This row used to be the end of the
+               line: it said container.die and there was nothing to click, at
+               the one moment someone is looking for more. -->
+          <button
+            type="button"
+            class="flex w-full items-baseline gap-3 border-b border-border/60 py-2 text-left text-sm
+                   transition-colors hover:bg-secondary/30"
+            onclick={() => (openEvent = row.item.id)}
+          >
+            <span class="w-1 shrink-0 self-stretch rounded-sm {severityAccent(row.item.severity)}"></span>
             <span
-              class="w-14 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
+              class="w-16 shrink-0 font-mono text-xs tabular-nums text-muted-foreground"
               title={datetime(row.ts, { seconds: true })}
             >
               {clockTime(row.ts)}
@@ -352,9 +381,11 @@
               </span>
             {/if}
             <span class="ml-auto shrink-0 text-xs text-muted-foreground/50">{relative(row.ts, now)}</span>
-          </div>
+          </button>
         {/if}
       {/each}
     </div>
   {/if}
 </div>
+
+<EventDetail bind:eventId={openEvent} />

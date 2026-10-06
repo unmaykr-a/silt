@@ -458,6 +458,82 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Event" }
 
+  /api/events/export:
+    get:
+      tags: [events]
+      summary: Everything in a window, as a file
+      description: |
+        Markdown by default, JSON with `format=json`. Both carry the same thing:
+        a summary first — what the window was, how many events, which severities,
+        types and projects — then the errors and warnings on their own, then
+        everything in order, oldest first.
+
+        The summary is what makes it diagnosable rather than merely complete.
+        The first thing anyone does with a list of events is count them, and
+        anything asked to find a cause in one does the same.
+
+        Capped at 5000 events; the file says so when it is truncated.
+      operationId: exportEvents
+      parameters:
+        - name: from
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: to
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: project
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: service
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: severity
+          in: query
+          schema: { type: string, enum: [info, warn, error] }
+        - name: format
+          in: query
+          schema: { type: string, enum: [md, json], default: md }
+      responses:
+        "200":
+          description: A downloadable report of the window
+          content:
+            text/markdown:
+              schema: { type: string }
+            application/json:
+              schema: { type: object }
+
+  /api/events/{id}:
+    get:
+      tags: [events]
+      summary: One event, with enough around it to act on
+      description: |
+        The row, plus the names behind its ids, the last configuration change in
+        its project before it, and the events either side within ten minutes.
+
+        The change is the point. "The image that got pulled at 03:00, beside the
+        thing that died at 03:10" is what Silt is for, and from a single event
+        it was unreachable.
+      operationId: getEvent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: The event and its context
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventDetail" }
+        "404":
+          description: No such event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/timeline:
     get:
       tags: [events]
@@ -1733,6 +1809,46 @@ components:
         total:
           type: integer
           description: Across every category, so the UI can say "nothing" without inspecting five lists.
+
+    EventDetail:
+      type: object
+      required: [event, nearby, window_from, window_to]
+      properties:
+        event: { $ref: "#/components/schemas/Event" }
+        project:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: integer, format: int64 }
+            name: { type: string }
+        host: { type: string }
+        previous_change:
+          type: object
+          description: |
+            The last configuration change in this project before the event.
+            Absent when the event has no project, or when nothing changed before
+            it in the retained history.
+          required: [snapshot_id, project_id, taken_at, before_ms]
+          properties:
+            snapshot_id: { type: integer, format: int64 }
+            project_id: { type: integer, format: int64 }
+            taken_at: { type: integer, format: int64 }
+            before_ms:
+              type: integer
+              format: int64
+              description: |
+                How long before the event it landed. Three minutes is a lead;
+                three days is a coincidence, and the reader wants to know which.
+        nearby:
+          type: array
+          description: |
+            What else happened in the window, oldest first so it reads as a
+            sequence. Scoped to the same project when the event has one, because
+            on a host running forty of them everything in the same ten minutes
+            is mostly other stacks.
+          items: { $ref: "#/components/schemas/Event" }
+        window_from: { type: integer, format: int64 }
+        window_to: { type: integer, format: int64 }
 
     SettingsValues:
       type: object

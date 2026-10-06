@@ -32,6 +32,93 @@ func (q *Queries) CountEvents(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const eventsAround = `-- name: EventsAround :many
+SELECT id, host_id, project_id, service, ts, source, type, severity, actor, message, payload FROM events
+WHERE id != ?1
+  AND ts >= ?2
+  AND ts <= ?3
+  AND (CAST(?4 AS INTEGER) = 0 OR project_id = ?4)
+ORDER BY ts ASC
+LIMIT ?5
+`
+
+type EventsAroundParams struct {
+	ID        int64
+	FromTs    int64
+	ToTs      int64
+	ProjectID int64
+	MaxRows   int64
+}
+
+// The events either side of one, within a window, so a reader can see what
+// else was happening. Scoped to the same project when there is one, because on
+// a forty-project host "everything in the same minute" is mostly noise from
+// stacks that have nothing to do with it.
+func (q *Queries) EventsAround(ctx context.Context, arg EventsAroundParams) ([]Event, error) {
+	rows, err := q.db.QueryContext(ctx, eventsAround,
+		arg.ID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.ProjectID,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Event{}
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.HostID,
+			&i.ProjectID,
+			&i.Service,
+			&i.Ts,
+			&i.Source,
+			&i.Type,
+			&i.Severity,
+			&i.Actor,
+			&i.Message,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getEvent = `-- name: GetEvent :one
+SELECT id, host_id, project_id, service, ts, source, type, severity, actor, message, payload FROM events WHERE id = ?
+`
+
+// One event, for the screen that shows everything about it.
+func (q *Queries) GetEvent(ctx context.Context, id int64) (Event, error) {
+	row := q.db.QueryRowContext(ctx, getEvent, id)
+	var i Event
+	err := row.Scan(
+		&i.ID,
+		&i.HostID,
+		&i.ProjectID,
+		&i.Service,
+		&i.Ts,
+		&i.Source,
+		&i.Type,
+		&i.Severity,
+		&i.Actor,
+		&i.Message,
+		&i.Payload,
+	)
+	return i, err
+}
+
 const insertAudit = `-- name: InsertAudit :exec
 INSERT INTO audit_log (ts, actor, method, action, ok, detail, remote)
 VALUES (?, ?, ?, ?, ?, ?, ?)

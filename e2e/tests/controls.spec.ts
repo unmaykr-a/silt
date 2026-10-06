@@ -423,3 +423,103 @@ test("authentication is editable and warns before it locks you out", async ({ pa
 
   expect(errors).toEqual([]);
 });
+
+test("an event opens and says what changed before it", async ({ page }) => {
+  // The complaint this answers: a feed row read `03:00 container.die` and there
+  // was nothing to click. So the row has to open, the panel has to carry the
+  // detail the row had no space for — the exit code above all, which the
+  // capture path used to discard — and it has to link to the change before it,
+  // which is the question Silt exists to answer.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  await page.getByRole("button", { name: /container\.die/ }).first().click();
+  const panel = page.locator("dialog[open]");
+  await expect(panel).toBeVisible();
+
+  // What it was, including the number the row could never show.
+  await expect(panel).toContainText("exit code");
+  await expect(panel).toContainText("137");
+  await expect(panel).toContainText("immich");
+
+  // That the engine said more than this, rather than implying it did not.
+  await expect(panel).toContainText(/more attributes/);
+
+  // What changed before it, and a way into it.
+  await expect(panel).toContainText(/before this/i);
+  await expect(panel.getByText("open the diff")).toBeVisible();
+
+  // What else was happening, with real times rather than a bare meridiem —
+  // the first version split a formatted datetime on spaces and rendered "PM".
+  await expect(panel).toContainText(/around it/i);
+  await expect(panel).toContainText(/\d{1,2}:\d{2}/);
+
+  // A neighbour is itself openable, so the window can be walked. The subject
+  // changes; the event walked away from correctly reappears in the new one's
+  // neighbours, which is why this checks the heading rather than the body.
+  await expect(panel.locator("h2")).toContainText("container.die");
+  await panel.getByRole("button", { name: /monitor\.down|container\.start/ }).first().click();
+  await page.waitForTimeout(800);
+  await expect(panel.locator("h2")).not.toContainText("container.die");
+
+  // The dialog's own close control, which is the only one: a second button
+  // named Close in the footer was two controls doing one job, and an ambiguous
+  // accessible name for anyone not looking at the layout.
+  await panel.getByLabel("Close").click();
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+
+  expect(errors).toEqual([]);
+});
+
+test("a project's own events can be selected and read", async ({ page }) => {
+  // Standing on a project, seeing a spike on its chart, and having to go to the
+  // fleet timeline and filter back down to the stack already in front of you
+  // was the gap. The strip always supported the drag; this page passed no
+  // handler, so the gesture did nothing and there was nowhere to put the answer.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto("/projects/4", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1200);
+
+  const activity = page.locator("section").filter({ hasText: "Activity" }).first();
+
+  // The events are on the page at all, which they were not before.
+  await expect(activity).toContainText("container.die");
+  await expect(activity).toContainText("monitor.down");
+
+  // A time rather than a bare meridiem, and not wrapped onto two lines: the
+  // column was w-14, which is narrower than "08:03 PM" renders.
+  await expect(activity).toContainText(/\d{1,2}:\d{2}/);
+
+  // Each one opens the same panel the timeline opens.
+  await activity.getByRole("button", { name: /container\.die/ }).first().click();
+  const panel = page.locator("dialog[open]");
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText("exit code");
+  await panel.getByLabel("Close").click();
+
+  // Dragging across the chart selects a window, which the page then says it is
+  // showing — and offers as a file.
+  const chart = activity.locator("canvas").first();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error("no chart to drag across");
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
+  await page.mouse.down();
+  // To the right-hand edge, because the events are at the newest end of the
+  // range and a selection that stops short of them is an empty window — which
+  // is a legitimate state the page reports, and not the one under test.
+  await page.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 12 });
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+
+  await expect(activity.getByText("Clear the selected window")).toBeAttached();
+  await expect(activity).toContainText("container.die");
+  const exportLink = activity.getByRole("link", { name: "Export" });
+  await expect(exportLink).toHaveAttribute("href", /\/api\/events\/export\?project=4&from=\d+&to=\d+/);
+
+  expect(errors).toEqual([]);
+});
