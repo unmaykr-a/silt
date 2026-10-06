@@ -523,3 +523,63 @@ test("a project's own events can be selected and read", async ({ page }) => {
 
   expect(errors).toEqual([]);
 });
+
+// Opening an event more than once per page load.
+//
+// The first version of the panel passed `open` to Dialog one-way, into a prop
+// Dialog declares $bindable and writes false to when the element closes. That
+// write landed on Dialog's own copy, eventId never cleared, this side kept
+// computing open as true, and the prop never changed value again — so the
+// effect that calls showModal never saw another edge. One event opened, ever.
+//
+// It survived review and a passing e2e test because that test closed the dialog
+// as its last action and never tried to open anything afterwards. Hence the
+// shape of this one: every way the dialog can close, each followed by opening
+// something again.
+for (const screen of [
+  { path: "/", name: "the timeline" },
+  { path: "/projects/4", name: "a project" },
+]) {
+  test(`events keep opening on ${screen.name}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+
+    await page.goto(screen.path, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(900);
+
+    const anEvent = () => page.getByRole("button", { name: /container\.die/ }).first();
+    const another = () => page.getByRole("button", { name: /monitor\.down|container\.start/ }).first();
+    const dialog = page.locator("dialog[open]");
+
+    // Closed with the dialog's own control.
+    await anEvent().click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Close").click();
+    await expect(dialog).toHaveCount(0);
+
+    await anEvent().click();
+    await expect(dialog).toBeVisible();
+
+    // Closed with Escape, which goes through the element rather than our markup.
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+
+    await another().click();
+    await expect(dialog).toBeVisible();
+
+    // Closed by clicking the backdrop.
+    await page.mouse.click(8, 8);
+    await expect(dialog).toHaveCount(0);
+
+    // And the same event again, not just a different one: reopening the one you
+    // just closed is the case where nothing about the state has changed.
+    await anEvent().click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("exit code");
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+}

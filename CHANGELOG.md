@@ -5,6 +5,18 @@ All notable changes to Silt are recorded here.
 This file is generated from internal/changelog/changelog.go — edit that and run
 `make changelog`.
 
+## 1.3.1 — 2026-10-06
+
+The event panel opens more than once.
+
+### Added
+
+- An end-to-end test that opens an event after each of those three ways of closing one, and reopens the same event rather than only a different one. The original test closed the panel as its last action and never tried again, which is why a release went out with the panel opening once per page load.
+
+### Fixed
+
+- Closing an event left the panel unable to open again until the page was reloaded. The dialog takes its open state as a two-way binding and writes false to it when the element closes; the panel passed it one-way, so that write landed on the dialog's own copy, the panel's state never cleared, and the value it passed down never changed again — leaving nothing for the dialog to react to. Every route out was affected: the close control, Escape and a click on the backdrop, on both the timeline and a project's page.
+
 ## 1.3.0 — 2026-10-06
 
 Events open, export, and can be read from a project's own timeline.
