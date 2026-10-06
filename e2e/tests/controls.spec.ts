@@ -583,3 +583,30 @@ for (const screen of [
     expect(errors).toEqual([]);
   });
 }
+
+test("a configuration change opens from anywhere on its row", async ({ page }) => {
+  const errors = watchForErrors(page);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(900);
+
+  // The far right of a configuration-changed row, deliberately. Only that row
+  // kind carries "via <trigger>", and it is the widest part of the row that was
+  // not a link: the row answered only to a click on the two words in its middle
+  // or on the project name, so clicking it the way its neighbouring event rows
+  // are clicked did nothing. That is how this was reported.
+  //
+  // This element exists either way, so without the fix the click lands and the
+  // route simply does not change - which is the failure worth seeing. A click on
+  // the label itself would have passed before the fix.
+  const deadSpace = page.getByText(/via \w+ \u00b7/).first();
+  await deadSpace.waitFor();
+  await deadSpace.click();
+
+  await expect(page).toHaveURL(/\/diff\?/);
+  // The diff actually loaded with something in it, rather than the route merely
+  // changing: the view toggle renders only when there is a diff to show.
+  await expect(page.getByRole("heading", { name: "Diff" })).toBeVisible();
+  await expect(page.locator('button:has-text("Structured")')).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
