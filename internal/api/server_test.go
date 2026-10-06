@@ -140,11 +140,24 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 		return obs
 	}
 
-	a, err := db.WriteSnapshot(ctx, projectID, store.Now(), "manual", build("sha256:aaaa", "old", "running"))
+	// Spaced explicitly rather than three calls to store.Now(). Its unit is the
+	// millisecond, and these three writes take well under one on a fast machine:
+	// measured over forty fixtures, the newest snapshot and the event landed in
+	// the same millisecond sixteen times.
+	//
+	// That matters because "the configuration change before this event" is a
+	// strict comparison — taken_at < event.ts — so a collision means the event
+	// has nothing before it. With all three in one millisecond the detail
+	// endpoint reports no previous change, and the test asserting it finds one
+	// fails. It passed three CI runs and failed the fourth, on main.
+	//
+	// Ordering a before b was incidental too, for the same reason.
+	base := store.Now()
+	a, err := db.WriteSnapshot(ctx, projectID, base-2000, "manual", build("sha256:aaaa", "old", "running"))
 	if err != nil {
 		t.Fatalf("snapshot a: %v", err)
 	}
-	b, err := db.WriteSnapshot(ctx, projectID, store.Now(), "manual", build("sha256:bbbb", "new", "restarting"))
+	b, err := db.WriteSnapshot(ctx, projectID, base-1000, "manual", build("sha256:bbbb", "new", "restarting"))
 	if err != nil {
 		t.Fatalf("snapshot b: %v", err)
 	}
@@ -152,6 +165,8 @@ func newFixtureWith(t *testing.T, roots []string, hostName string) *fixture {
 	// The detail its own capture path now records, so the fixture's event is
 	// the shape a real one is rather than an emptier one.
 	die, err := db.RecordEvent(ctx, store.EventRecord{
+		// After both snapshots, by a margin a clock cannot close.
+		TS:     base,
 		HostID: &hostID, ProjectID: &projectID, Service: "radarr", Source: store.SourceDocker,
 		Type: "container.die", Severity: store.SeverityError, Message: "die",
 		Payload: map[string]any{
