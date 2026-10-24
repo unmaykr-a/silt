@@ -259,7 +259,25 @@ func (s *Server) clearCookie(w http.ResponseWriter, r *http.Request, name string
 }
 
 // clientKey identifies a login attempt's source for throttling.
-func clientKey(r *http.Request) string {
+//
+// The socket address, unless a trusted proxy named a client behind it. Behind
+// a reverse proxy every request shares the proxy's address, so one key covered
+// everyone: a stranger failing a password locked the owner out, because the
+// throttle refuses a correct password while a penalty is running. Setting
+// SILT_TRUSTED_PROXIES now gives each client its own key. See
+// auth.Proxy.ForwardedFor for why nothing is believed without that list, and
+// why the chain is read from the right.
+func (s *Server) clientKey(r *http.Request) string {
+	if g := s.auth(); g != nil {
+		if client, ok := g.Proxy.ForwardedFor(r); ok {
+			return client
+		}
+	}
+	return remoteHost(r)
+}
+
+// remoteHost is the socket address with its port removed.
+func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -353,7 +371,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := clientKey(r)
+	client := s.clientKey(r)
 	if blocked, wait := g.throttled(client); blocked {
 		// Told plainly rather than silently rejected: the owner who typed it
 		// wrong needs to know to wait, and an attacker learns nothing they
@@ -459,8 +477,14 @@ func (s *Server) writeFlowCookie(w http.ResponseWriter, r *http.Request, flow au
 		Path:     "/api/auth",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   auth.SecureRequest(r),
-		MaxAge:   int(flowMaxAge.Seconds()),
+		// s.cookieSecure rather than auth.SecureRequest: this cookie carries the
+		// login's state and PKCE verifier, and it was the one cookie that did
+		// not honour SILT_COOKIE_SECURE=always -- so on exactly the deployment
+		// that setting exists for, a proxy terminating TLS without setting
+		// X-Forwarded-Proto, the session cookie was marked Secure and the login
+		// state was not.
+		Secure: s.cookieSecure(r),
+		MaxAge: int(flowMaxAge.Seconds()),
 	})
 	return true
 }
@@ -594,6 +618,16 @@ func (s *Server) getSessions(w http.ResponseWriter, r *http.Request) {
 // This is the button for "I think a token leaked". It is deliberately
 // all-or-nothing rather than a list with individual revoke buttons: Silt has
 // nothing to tell one session from another that would help someone choose.
+//
+// Every session, not only the caller's. It revoked one subject's before now,
+// while the screen above it counted every session on the install and said the
+// button revoked all of them -- so on anything but a lone built-in account it
+// did less than it claimed, and the count it left on screen was the proof
+// nobody read. A leaked token is the reason this button exists, and on an
+// install with a provider the leaked one usually belongs to somebody else.
+//
+// Unsafe method, so the write guard has already required an administrator:
+// signing out every reader is not a reader's decision.
 func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
 	// Bound once: a save landing mid-request must not answer two
 	// questions from two configurations.
@@ -607,14 +641,14 @@ func (s *Server) deleteSessions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	removed, err := g.Sessions.RevokeSubject(r.Context(), id.Subject)
+	removed, err := g.Sessions.RevokeAll(r.Context())
 	if err != nil {
 		s.log.Error("revoke sessions", "error", err)
 		writeError(w, http.StatusInternalServerError, "could not revoke sessions")
 		return
 	}
 	s.clearCookie(w, r, sessionCookie)
-	s.log.Info("all sessions revoked", "subject", id.Subject, "count", removed)
+	s.log.Info("all sessions revoked", "by", id.Subject, "count", removed)
 	s.audit(r, store.AuditSessionsRevoked, map[string]any{"count": removed})
 	writeJSON(w, http.StatusOK, map[string]int64{"revoked": removed})
 }
@@ -715,7 +749,7 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSessionCookie(w, r, token, g.Sessions.TTL)
-	s.log.Info("built-in account claimed", "remote", clientKey(r))
+	s.log.Info("built-in account claimed", "remote", s.clientKey(r))
 	s.audit(r, store.AuditAccountClaimed, nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
 }
@@ -735,7 +769,7 @@ func (s *Server) putPassword(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := g.Account.ChangePassword(r.Context(), clientKey(r), req.Current, req.Password); err != nil {
+	if err := g.Account.ChangePassword(r.Context(), s.clientKey(r), req.Current, req.Password); err != nil {
 		var weak *auth.ErrWeakPassword
 		if errors.As(err, &weak) {
 			writeError(w, http.StatusBadRequest, weak.Reason)

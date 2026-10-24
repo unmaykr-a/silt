@@ -135,9 +135,9 @@
     </Button>
     <p class="mt-1.5 max-w-xl text-xs text-muted-foreground/70">
       {#if authState?.required}
-        Ends every session, including this one. Use it if you think a session token has leaked — a
-        cookie the browser throws away is still a working credential to anyone who copied it, but a
-        deleted row is not.
+        Ends every session on this install — everyone signed in, not only you, and including this
+        browser. Use it if you think a session token has leaked: a cookie the browser throws away is
+        still a working credential to anyone who copied it, but a deleted row is not.
       {:else}
         There is nothing to revoke while no authentication is configured.
       {/if}

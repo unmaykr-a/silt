@@ -93,6 +93,24 @@ The status menu in the header says how long ago Silt was last heard from. If it 
 Settings → Authentication shows what Silt thinks it was told, which is the first question when
 this is not working, and used to be answerable only by reading the compose file on the host.
 
+## "Too many failed attempts" and it is not me
+
+The login throttle keys on the address the request came from. Behind a reverse proxy that is
+the proxy's address for every visitor, so one person failing a password penalises everybody --
+and while a penalty is running the throttle refuses a correct password too. Anyone who can
+reach your login page can keep you out by failing one every few minutes.
+
+Set `SILT_TRUSTED_PROXIES` to your proxy's address or range. Silt then keys the throttle on the
+address the proxy forwarded, so each visitor has their own. This is worth doing behind any
+reverse proxy, whether or not you use forward auth.
+
+Nothing is believed without that list: with no list there is nothing to tell a proxy from a
+client, and a client naming its own throttle key is no throttle at all. The forwarded chain is
+read from the right, because the left-hand end of it is whatever the client sent.
+
+The penalty tops out at five minutes and a quiet client is forgotten after fifteen, so if the
+attempts have stopped, waiting is enough.
+
 ## Forward auth lets everyone in
 
 You did not set `SILT_TRUSTED_PROXIES`. The identity header is settable by anything that can

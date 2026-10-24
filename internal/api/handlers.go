@@ -322,7 +322,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 		to = store.Now()
 	}
 
-	rows, err := s.store.RQ.ListEvents(r.Context(), sqlcgen.ListEventsParams{
+	rows, err := s.store.EventsInRange(r.Context(), sqlcgen.ListEventsParams{
 		FromTs:    from,
 		ToTs:      to,
 		ProjectID: queryInt(r, "project", 0),
@@ -372,7 +372,7 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 	projectID := queryInt(r, "project", 0)
 	bucket := resolveBucket(r, from, to)
 
-	snaps, err := s.store.RQ.SnapshotsInRange(r.Context(), sqlcgen.SnapshotsInRangeParams{
+	snaps, err := s.store.SnapshotsInWindow(r.Context(), sqlcgen.SnapshotsInRangeParams{
 		FromTs:    from,
 		ToTs:      to,
 		ProjectID: projectID,
@@ -382,7 +382,7 @@ func (s *Server) getTimeline(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "read snapshots")
 		return
 	}
-	events, err := s.store.RQ.ListEvents(r.Context(), sqlcgen.ListEventsParams{
+	events, err := s.store.EventsInRange(r.Context(), sqlcgen.ListEventsParams{
 		FromTs:    from,
 		ToTs:      to,
 		ProjectID: projectID,
@@ -505,7 +505,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	// After the token, not before: an unauthenticated caller must not be able
 	// to use up a real source's window, which would turn the limiter into a
 	// way to silence someone's monitoring.
-	if ok, wait := s.ingestRate.allow(clientKey(r), s.conf().IngestRatePerMinute); !ok {
+	if ok, wait := s.ingestRate.allow(s.clientKey(r), s.conf().IngestRatePerMinute); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeError(w, http.StatusTooManyRequests,
 			"too many events from this address; the limit is SILT_INGEST_RATE_PER_MINUTE per minute")

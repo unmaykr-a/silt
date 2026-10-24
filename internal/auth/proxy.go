@@ -146,10 +146,61 @@ func (p *Proxy) trusted(remoteAddr string) bool {
 	if p.trustAny {
 		return true
 	}
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err != nil {
-		host = remoteAddr
+	return p.inNets(hostOf(remoteAddr))
+}
+
+// ForwardedFor returns the address a trusted proxy says a request came from.
+//
+// This exists for the login throttle and the ingest rate limiter, which key on
+// "who is asking" and had nothing to go on but the socket address. Behind a
+// reverse proxy that address is the proxy's, the same for everybody, so one
+// client failing a password put every client behind that proxy into the same
+// penalty -- and the throttle refuses a correct password while it is serving
+// one. Anyone who could reach the login page could keep the owner out of their
+// own install by failing a password every few minutes.
+//
+// Two rules make believing a header here safe, and both are necessary:
+//
+// The trust list must be set. An empty list means "believe the identity header
+// from any source", which is a decision an operator can reasonably make about
+// their own network, but it is not a basis for believing a forwarded address:
+// with no list there is nothing to tell a proxy from a client, so a client
+// would be naming its own throttle key and the throttle would be decoration.
+//
+// The list is walked from the right. A proxy appends the peer it received the
+// request from, so the right-most entry is the one Silt's own peer added and
+// the left-most is whatever the original client sent -- which is to say, a
+// value an attacker chooses. Skipping trusted addresses from the right and
+// taking the first that is not one yields the address the outermost trusted
+// proxy actually saw. Taking the left-most instead, which is the usual way
+// this is written, would hand the key straight back to the client.
+func (p *Proxy) ForwardedFor(r *http.Request) (string, bool) {
+	if p == nil || len(p.nets) == 0 || r == nil {
+		return "", false
 	}
+	if !p.inNets(hostOf(r.RemoteAddr)) {
+		return "", false
+	}
+	var chain []string
+	for _, header := range r.Header.Values("X-Forwarded-For") {
+		for _, part := range strings.Split(header, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				chain = append(chain, part)
+			}
+		}
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if ip := net.ParseIP(chain[i]); ip != nil && !p.inNets(chain[i]) {
+			return ip.String(), true
+		}
+	}
+	// Every hop is a trusted proxy, or none parsed. There is no client address
+	// to be had, so say so rather than returning a proxy's.
+	return "", false
+}
+
+// inNets reports whether an address literal is on the trust list.
+func (p *Proxy) inNets(host string) bool {
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return false
@@ -160,4 +211,12 @@ func (p *Proxy) trusted(remoteAddr string) bool {
 		}
 	}
 	return false
+}
+
+func hostOf(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }

@@ -33,7 +33,7 @@ func (s *Server) auditAs(r *http.Request, action string, failed bool, detail map
 		Action: action,
 		Failed: failed,
 		Detail: detail,
-		Remote: clientKey(r),
+		Remote: s.clientKey(r),
 	})
 	if err != nil {
 		s.log.Error("record audit entry", "action", action, "error", err)

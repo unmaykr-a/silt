@@ -90,6 +90,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, fmt.Errorf("open read pool: %w", err)
 	}
 	read.SetMaxOpenConns(4)
+	// Matched to the open limit, because database/sql closes anything above the
+	// idle limit the moment a query finishes. The default idle limit is two, so
+	// two of the four connections were torn down and rebuilt on every burst of
+	// concurrent reads -- and rebuilding one means opening the file again and
+	// replaying four pragmas, on an SD card.
+	read.SetMaxIdleConns(4)
 
 	return &Store{
 		write: write,

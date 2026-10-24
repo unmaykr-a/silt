@@ -191,8 +191,16 @@ func (s *Server) previewFile(w http.ResponseWriter, r *http.Request) {
 			"no compose roots are configured; mount them and set SILT_COMPOSE_ROOTS")
 		return
 	}
-	if _, err := s.store.RQ.GetProject(r.Context(), id); errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "project not found")
+	if _, err := s.store.RQ.GetProject(r.Context(), id); err != nil {
+		// Both outcomes, rather than only the missing row: a database that
+		// cannot answer was carrying on to read a path list it would also fail
+		// to read, and reporting that as "no file at that path" -- which reads
+		// as an answer about the file rather than a failure to look.
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "read project")
 		return
 	}
 
