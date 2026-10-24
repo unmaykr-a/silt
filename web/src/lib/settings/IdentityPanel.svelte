@@ -123,7 +123,7 @@
       name="trusted_proxies"
       label="Trusted proxies"
       envVar="SILT_TRUSTED_PROXIES"
-      hint="Addresses or CIDR ranges whose identity header is believed. Set this whenever forward auth is on: anyone who can open a socket can set a header, so without it “authenticated” means “reached the port” — which on a shared Docker network is every other container on it."
+      hint="Addresses or CIDR ranges whose forwarded headers are believed. Set this whenever forward auth is on: anyone who can open a socket can set a header, so without it “authenticated” means “reached the port” — which on a shared Docker network is every other container on it. Worth setting behind any reverse proxy even without forward auth: it is also what gives each visitor their own login-throttle key, instead of everyone sharing the proxy’s."
     >
       <input
         id="trusted_proxies"

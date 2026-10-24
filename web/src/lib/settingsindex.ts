@@ -103,7 +103,7 @@ export const SETTINGS: SettingEntry[] = [
   { name: "roles", section: "identity", label: "Roles", keywords: "admin administrator viewer read only readonly permissions who can change" },
   { name: "local_account", section: "identity", label: "Built-in account", env: "SILT_LOCAL_ACCOUNT", keywords: "password login single admin" },
   { name: "trust_proxy_auth", section: "identity", label: "Forward auth", env: "SILT_TRUST_PROXY_AUTH", keywords: "authelia authentik tinyauth reverse proxy header" },
-  { name: "trusted_proxies", section: "identity", label: "Trusted proxies", env: "SILT_TRUSTED_PROXIES", keywords: "cidr subnet forward auth" },
+  { name: "trusted_proxies", section: "identity", label: "Trusted proxies", env: "SILT_TRUSTED_PROXIES", keywords: "cidr subnet forward auth throttle locked out too many attempts rate limit client address" },
   { name: "auth_header", section: "identity", label: "Identity header", env: "SILT_AUTH_HEADER", keywords: "x-remote-user forward auth" },
   { name: "auth_groups_header", section: "identity", label: "Groups header", env: "SILT_AUTH_GROUPS_HEADER", keywords: "x-remote-groups forward auth admin" },
   { name: "admin_groups", section: "identity", label: "Administrator groups (forward auth)", env: "SILT_ADMIN_GROUPS", keywords: "admin role viewer read only proxy" },

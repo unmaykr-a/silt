@@ -47,7 +47,7 @@ func (s *Server) exportEvents(w http.ResponseWriter, r *http.Request) {
 		from, to = to, from
 	}
 
-	rows, err := s.store.RQ.ListEvents(r.Context(), sqlcgen.ListEventsParams{
+	rows, err := s.store.EventsInRange(r.Context(), sqlcgen.ListEventsParams{
 		FromTs:    from,
 		ToTs:      to,
 		ProjectID: queryInt(r, "project", 0),

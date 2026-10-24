@@ -16,6 +16,12 @@ DELETE FROM sessions WHERE token_hash = ?;
 -- name: DeleteSessionsForSubject :execrows
 DELETE FROM sessions WHERE subject = ?;
 
+-- Every session, for the "a token has leaked" button. Deliberately not scoped
+-- to a subject: that button is pressed because a credential is loose, and on an
+-- install with a provider the loose one usually belongs to somebody else.
+-- name: DeleteAllSessions :execrows
+DELETE FROM sessions;
+
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= ? OR last_seen_at <= ?;
 

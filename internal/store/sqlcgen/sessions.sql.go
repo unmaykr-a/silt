@@ -50,6 +50,21 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 	return err
 }
 
+const deleteAllSessions = `-- name: DeleteAllSessions :execrows
+DELETE FROM sessions
+`
+
+// Every session, for the "a token has leaked" button. Deliberately not scoped
+// to a subject: that button is pressed because a credential is loose, and on an
+// install with a provider the loose one usually belongs to somebody else.
+func (q *Queries) DeleteAllSessions(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteAllSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= ? OR last_seen_at <= ?
 `

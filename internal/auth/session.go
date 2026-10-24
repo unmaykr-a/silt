@@ -234,6 +234,16 @@ func (s *Sessions) RevokeSubject(ctx context.Context, subject string) (int64, er
 	return s.db.Q.DeleteSessionsForSubject(ctx, subject)
 }
 
+// RevokeAll ends every session on the install.
+//
+// Separate from RevokeSubject because the two answer different questions. A
+// changed password invalidates one identity's sessions; "a token has leaked"
+// invalidates all of them, and on an install with a provider the loose token
+// usually belongs to somebody other than whoever noticed.
+func (s *Sessions) RevokeAll(ctx context.Context) (int64, error) {
+	return s.db.Q.DeleteAllSessions(ctx)
+}
+
 // Sweep removes expired and idle sessions. Called from the retention pass.
 func (s *Sessions) Sweep(ctx context.Context) (int64, error) {
 	now := s.now()

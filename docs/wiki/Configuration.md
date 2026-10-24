@@ -85,7 +85,7 @@ the container.
 | `SILT_AUTH_HEADER` | `X-Remote-User` | The identity header. |
 | `SILT_AUTH_GROUPS_HEADER` | `X-Remote-Groups` | The group header. Only read when `SILT_ADMIN_GROUPS` is set. |
 | `SILT_ADMIN_GROUPS` | *(empty)* | Groups in that header that mean administrator. Unset ⇒ every forward-auth identity is one. |
-| `SILT_TRUSTED_PROXIES` | *(empty)* | Addresses or CIDRs whose auth header is believed. **Set this if you use forward auth** — see the warning in [Authentication](Authentication). |
+| `SILT_TRUSTED_PROXIES` | *(empty)* | Addresses or CIDRs whose forwarded headers are believed. **Set this if you use forward auth** — see the warning in [Authentication](Authentication). Also gives each visitor their own login-throttle key instead of everyone sharing your proxy's, which is worth setting behind any reverse proxy. |
 | `SILT_SESSION_TTL` | `720h` | Session lifetime regardless of activity. |
 | `SILT_SESSION_IDLE_TTL` | `168h` | Ends an unused session early. `0` disables. |
 | `SILT_COOKIE_SECURE` | `auto` | `Secure` on the session cookie. `auto` infers it from the request; `always` never guesses; `never` is for plain HTTP on a trusted network. |

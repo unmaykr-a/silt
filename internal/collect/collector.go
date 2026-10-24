@@ -30,6 +30,9 @@ type Collector struct {
 	// The reconcile cadence is editable from the settings screen, and a ticker
 	// built once at startup would keep the old one until a restart.
 	IntervalFn func() time.Duration
+	// IdlePoll is how often a disabled cadence looks to see whether it has been
+	// turned back on. Zero means the default, which is a minute.
+	IdlePoll time.Duration
 	// Files, when set and enabled, is watched for compose file edits — the
 	// third trigger in PROJECT.md Section 5. Without it an edit is noticed on
 	// the next Docker event or interval reconcile.
@@ -94,12 +97,32 @@ func (c *Collector) Run(ctx context.Context) error {
 	intervalDone := make(chan struct{})
 	go func() {
 		defer close(intervalDone)
-		current := c.interval()
-		if current <= 0 || c.Snapshotter == nil {
+		if c.Snapshotter == nil {
 			<-ctx.Done()
 			return
 		}
-		ticker := time.NewTicker(current)
+		// Zero is a state to come back from, not a reason to stop looking.
+		//
+		// This read the interval once and parked on ctx.Done() when it was
+		// zero, and ignored a later change to zero because it only accepted a
+		// positive one. The reconcile cadence is editable from the settings
+		// screen, so both directions were a setting that reported itself saved
+		// and did nothing: turning it on never started the ticker until a
+		// restart, and turning it off left it running at the old cadence.
+		//
+		// A disabled cadence therefore polls for its own return. The poll is
+		// slow because nothing depends on reacting quickly -- the next pass is
+		// minutes away on any sane interval -- and it costs one wakeup a minute
+		// against a setting nobody is changing. Turning the cadence on from the
+		// settings screen takes effect within that minute rather than instantly,
+		// which is the trade for not wiring a settings observer into the
+		// collector for one field.
+		idlePoll := c.IdlePoll
+		if idlePoll <= 0 {
+			idlePoll = time.Minute
+		}
+		current := c.interval()
+		ticker := time.NewTicker(tickEvery(current, idlePoll))
 		defer ticker.Stop()
 		for {
 			select {
@@ -107,15 +130,24 @@ func (c *Collector) Run(ctx context.Context) error {
 				return
 			case <-ticker.C:
 			}
-			if err := c.Snapshotter.SnapshotAll(ctx, TriggerInterval); err != nil && ctx.Err() == nil {
-				log.Error("interval reconcile failed", "error", err)
+			if current > 0 {
+				if err := c.Snapshotter.SnapshotAll(ctx, TriggerInterval); err != nil && ctx.Err() == nil {
+					log.Error("interval reconcile failed", "error", err)
+				}
 			}
 			// Picked up after the pass rather than before, so an edit that
 			// shortens the interval does not also fire an extra reconcile.
-			if next := c.interval(); next > 0 && next != current {
-				log.Info("snapshot interval changed", "from", current, "to", next)
+			if next := c.interval(); next != current {
+				switch {
+				case next <= 0:
+					log.Info("periodic reconcile turned off; the event stream still drives snapshots")
+				case current <= 0:
+					log.Info("periodic reconcile turned on", "interval", next)
+				default:
+					log.Info("snapshot interval changed", "from", current, "to", next)
+				}
 				current = next
-				ticker.Reset(current)
+				ticker.Reset(tickEvery(current, idlePoll))
 			}
 		}
 	}()
@@ -324,6 +356,15 @@ func (c *Collector) reconcile(ctx context.Context, log *slog.Logger) {
 		)
 	}
 	log.Info("reconciled", "projects", len(projects), "services", services)
+}
+
+// tickEvery is how often the reconcile loop should wake: at the configured
+// cadence, or at the idle poll when there is no cadence to keep.
+func tickEvery(interval, idle time.Duration) time.Duration {
+	if interval > 0 {
+		return interval
+	}
+	return idle
 }
 
 // interval is the reconcile cadence in force right now.

@@ -155,6 +155,11 @@ type Config struct {
 	// who can open a socket can set a header, "authenticated" would mean
 	// "reached the port" — which on a shared Docker network is every other
 	// container on it.
+	//
+	// It also decides the login throttle's key, whether or not forward auth is
+	// on. Behind a proxy every request arrives from the proxy's address, so one
+	// visitor failing a password penalised everyone; with this set, the address
+	// the proxy forwarded is the key instead. See auth.Proxy.ForwardedFor.
 	TrustedProxies []string `env:"SILT_TRUSTED_PROXIES" envSeparator:"," editable:"trusted_proxies,gate"`
 	// PasswordHash is a bcrypt hash for the built-in account. Setting it
 	// claims the account before Silt ever starts and takes the password out
